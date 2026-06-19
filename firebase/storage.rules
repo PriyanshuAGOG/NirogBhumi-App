@@ -1,0 +1,17 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() { return request.auth != null; }
+    function owner(uid) { return signedIn() && request.auth.uid == uid; }
+    function admin() { return signedIn() && (request.auth.token.role == 'admin' || request.auth.token.role == 'super_admin'); }
+    function smallEnough() { return request.resource == null || request.resource.size < 15 * 1024 * 1024; }
+    function safeType() { return request.resource == null || request.resource.contentType.matches('(image/.*|application/pdf)'); }
+    match /users/{uid}/{allPaths=**} { allow read, write: if (owner(uid) || admin()) && smallEnough() && safeType(); }
+    match /meal-photos/{uid}/{allPaths=**} { allow read, write: if (owner(uid) || admin()) && smallEnough() && safeType(); }
+    match /lab-reports/{uid}/{allPaths=**} { allow read, write: if (owner(uid) || admin()) && smallEnough() && safeType(); }
+    match /consultation-attachments/{uid}/{allPaths=**} { allow read, write: if (owner(uid) || admin()) && smallEnough() && safeType(); }
+    match /reports/{uid}/{allPaths=**} { allow read: if owner(uid) || admin(); allow write: if admin(); }
+    match /content/{allPaths=**} { allow read: if true; allow write: if admin() && smallEnough() && safeType(); }
+    match /products/{allPaths=**} { allow read: if true; allow write: if admin() && smallEnough() && safeType(); }
+  }
+}

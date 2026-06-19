@@ -1,0 +1,10 @@
+{
+  "indexes": [
+    { "collectionGroup": "glucoseReadings", "queryScope": "COLLECTION", "fields": [{"fieldPath":"userId","order":"ASCENDING"},{"fieldPath":"measuredAt","order":"DESCENDING"}] },
+    { "collectionGroup": "consultations", "queryScope": "COLLECTION", "fields": [{"fieldPath":"expertId","order":"ASCENDING"},{"fieldPath":"scheduledAt","order":"ASCENDING"}] },
+    { "collectionGroup": "notifications", "queryScope": "COLLECTION", "fields": [{"fieldPath":"status","order":"ASCENDING"},{"fieldPath":"scheduledFor","order":"ASCENDING"}] },
+    { "collectionGroup": "notifications", "queryScope": "COLLECTION", "fields": [{"fieldPath":"userId","order":"ASCENDING"},{"fieldPath":"status","order":"ASCENDING"},{"fieldPath":"sentAt","order":"ASCENDING"}] },
+    { "collectionGroup": "orders", "queryScope": "COLLECTION", "fields": [{"fieldPath":"userId","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}] }
+  ],
+  "fieldOverrides": []
+}

@@ -1,0 +1,38 @@
+name: Deploy Firebase
+
+on:
+  workflow_dispatch:
+    inputs:
+      project_id:
+        description: Firebase project ID
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: firebase-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: firebase/functions/package-lock.json
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+      - name: Build functions
+        working-directory: firebase/functions
+        run: npm ci && npm test
+      - name: Deploy rules, indexes, storage, and functions
+        run: npx --yes firebase-tools@latest deploy --project "${{ inputs.project_id }}" --only firestore,storage,functions --non-interactive

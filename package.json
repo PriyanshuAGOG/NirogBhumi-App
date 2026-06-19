@@ -1,0 +1,14 @@
+{
+  "name": "nirog-bhumi-apk-server",
+  "version": "1.0.0",
+  "description": "Nirog Bhumi APK Delivery and Landing Server",
+  "main": "server.ts",
+  "type": "module",
+  "scripts": {
+    "build": "echo 'No build required'",
+    "start": "node server.ts"
+  },
+  "dependencies": {
+    "tsx": "^4.19.0"
+  }
+}
