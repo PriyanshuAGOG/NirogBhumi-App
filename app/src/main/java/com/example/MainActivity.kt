@@ -1,4 +1,4 @@
-package in.nirogbhumi.app
+package com.nirogbhumi.app
 
 import android.os.Bundle
 import android.content.Intent
@@ -23,9 +23,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
-import in.nirogbhumi.app.ui.NirogState
-import in.nirogbhumi.app.ui.screens.*
-import in.nirogbhumi.app.ui.theme.MyApplicationTheme
+import com.nirogbhumi.app.ui.NirogState
+import com.nirogbhumi.app.ui.screens.*
+import com.nirogbhumi.app.ui.theme.MyApplicationTheme
 
 private const val IS_PRODUCTION_APK = true
 
@@ -381,7 +381,7 @@ fun QuickLogFastingOverlay(state: NirogState) {
                         state.fastingSugarValue = state.quickLogFastingValue
                         state.sugarLogs.add(
                             0,
-                            in.nirogbhumi.app.ui.SugarLog(
+                            com.nirogbhumi.app.ui.SugarLog(
                                 state.sugarLogs.size + 1,
                                 state.quickLogFastingValue,
                                 "Fasting",
@@ -400,8 +400,8 @@ fun QuickLogFastingOverlay(state: NirogState) {
                             )
                         ) { result ->
                             state.cloudMessage = when (result) {
-                                is in.nirogbhumi.app.data.CloudResult.Success -> "Synced securely"
-                                is in.nirogbhumi.app.data.CloudResult.Failure -> result.message
+                                is com.nirogbhumi.app.data.CloudResult.Success -> "Synced securely"
+                                is com.nirogbhumi.app.data.CloudResult.Failure -> result.message
                             }
                         }
                         state.isQuickLogFastingOpen = false

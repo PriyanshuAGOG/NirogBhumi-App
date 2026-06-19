@@ -1,4 +1,4 @@
-package in.nirogbhumi.app.ui.screens
+package com.nirogbhumi.app.ui.screens
 
 import android.app.Activity
 import androidx.compose.animation.*
@@ -24,8 +24,8 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import in.nirogbhumi.app.ui.NirogState
-import in.nirogbhumi.app.data.FirebaseAuthGateway
+import com.nirogbhumi.app.ui.NirogState
+import com.nirogbhumi.app.data.FirebaseAuthGateway
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 
@@ -1291,8 +1291,8 @@ fun ConsentScreen(state: NirogState) {
                     state.consentExpertReview = check2
                     state.consentMedicalDisclaimer = check3
                     state.repository.saveProfile(mapOf("consent" to mapOf("healthData" to check1, "expertReview" to check2, "medicalDisclaimer" to check3, "version" to "1.0"))) { result ->
-                        if (result is in.nirogbhumi.app.data.CloudResult.Success) state.currentScreen = "setup_profile"
-                        else state.authError = (result as in.nirogbhumi.app.data.CloudResult.Failure).message
+                        if (result is com.nirogbhumi.app.data.CloudResult.Success) state.currentScreen = "setup_profile"
+                        else state.authError = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
                     }
                 },
                 enabled = check1 && check2 && check3,
@@ -1451,8 +1451,8 @@ fun SetupProfileScreen(state: NirogState) {
                     state.profileCity = cityTemp
                     state.profileLanguage = languageTemp
                     state.repository.saveProfile(mapOf("fullName" to nameTemp, "age" to ageTemp.toIntOrNull(), "weightKg" to weightTemp.toDoubleOrNull(), "heightCm" to heightTemp.toDoubleOrNull(), "city" to cityTemp, "preferredLanguage" to languageTemp)) { result ->
-                        if (result is in.nirogbhumi.app.data.CloudResult.Success) state.currentScreen = "selection_caregiver"
-                        else state.authError = (result as in.nirogbhumi.app.data.CloudResult.Failure).message
+                        if (result is com.nirogbhumi.app.data.CloudResult.Success) state.currentScreen = "selection_caregiver"
+                        else state.authError = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
                     }
                 },
                 modifier = Modifier
@@ -1956,8 +1956,8 @@ fun ProgramCodeOptionalScreen(state: NirogState) {
                     state.repository.redeemProgramCode(codeText) { result ->
                         verifying = false
                         when (result) {
-                            is in.nirogbhumi.app.data.CloudResult.Success -> { state.isProgramActive = true; state.programCodeInput = codeText; state.currentScreen = "onboarding_complete" }
-                            is in.nirogbhumi.app.data.CloudResult.Failure -> errorMessage = result.message
+                            is com.nirogbhumi.app.data.CloudResult.Success -> { state.isProgramActive = true; state.programCodeInput = codeText; state.currentScreen = "onboarding_complete" }
+                            is com.nirogbhumi.app.data.CloudResult.Failure -> errorMessage = result.message
                         }
                     }
                 },
@@ -2074,8 +2074,8 @@ fun OnboardingCompleteScreen(state: NirogState) {
                         "goals" to state.selectedGoals.toList(),
                         "programActive" to state.isProgramActive
                     )) { result ->
-                        if (result is in.nirogbhumi.app.data.CloudResult.Success) state.currentScreen = "dashboard"
-                        else state.authError = (result as in.nirogbhumi.app.data.CloudResult.Failure).message
+                        if (result is com.nirogbhumi.app.data.CloudResult.Success) state.currentScreen = "dashboard"
+                        else state.authError = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
                     }
                 },
                 modifier = Modifier

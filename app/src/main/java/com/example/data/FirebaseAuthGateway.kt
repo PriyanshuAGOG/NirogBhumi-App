@@ -1,4 +1,4 @@
-package in.nirogbhumi.app.data
+package com.nirogbhumi.app.data
 
 import android.app.Activity
 import com.google.firebase.FirebaseApp

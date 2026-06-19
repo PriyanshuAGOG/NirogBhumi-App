@@ -1,4 +1,4 @@
-package in.nirogbhumi.app.payments
+package com.nirogbhumi.app.payments
 
 import android.app.Activity
 import com.razorpay.Checkout

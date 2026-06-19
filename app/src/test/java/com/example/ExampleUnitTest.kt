@@ -1,4 +1,4 @@
-package in.nirogbhumi.app
+package com.nirogbhumi.app
 
 import org.junit.Assert.*
 import org.junit.Test

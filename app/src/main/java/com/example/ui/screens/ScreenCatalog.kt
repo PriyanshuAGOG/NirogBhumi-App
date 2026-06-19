@@ -1,4 +1,4 @@
-package in.nirogbhumi.app.ui.screens
+package com.nirogbhumi.app.ui.screens
 
 import android.Manifest
 import android.app.Activity
@@ -36,13 +36,13 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.app.ActivityCompat
 import androidx.health.connect.client.PermissionController
-import in.nirogbhumi.app.health.HealthConnectManager
+import com.nirogbhumi.app.health.HealthConnectManager
 import kotlinx.coroutines.launch
-import in.nirogbhumi.app.ui.NirogState
-import in.nirogbhumi.app.data.CloudResult
+import com.nirogbhumi.app.ui.NirogState
+import com.nirogbhumi.app.data.CloudResult
 import com.google.firebase.firestore.FieldValue
-import in.nirogbhumi.app.payments.RazorpayPaymentLauncher
-import in.nirogbhumi.app.reports.ReportShare
+import com.nirogbhumi.app.payments.RazorpayPaymentLauncher
+import com.nirogbhumi.app.reports.ReportShare
 
 data class ScreenSpec(
     val id: Int,
@@ -614,7 +614,7 @@ private fun itemSupportingCopy(route: String, item: String): String = when {
 }
 
 @Composable
-private fun TrendPanel(route: String, records: List<in.nirogbhumi.app.data.CloudDocument>) {
+private fun TrendPanel(route: String, records: List<com.nirogbhumi.app.data.CloudDocument>) {
     val defaults = when (route) {
         "bp_overview" -> listOf(126f, 122f, 125f, 121f, 120f, 124f, 118f)
         "sleep_overview" -> listOf(6.2f, 6.8f, 7.1f, 6.4f, 7.3f, 6.9f, 7.2f)

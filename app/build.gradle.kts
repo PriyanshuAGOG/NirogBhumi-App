@@ -7,8 +7,14 @@ if (file("google-services.json").exists()) {
   apply(plugin = "com.google.gms.google-services")
 }
 
+// Razorpay checkout 1.6.41 declares standard-core as LATEST. Versions 1.7+
+// also pull a legacy core AAR with the same namespace, which AGP 9 rejects.
+configurations.configureEach {
+  resolutionStrategy.force("com.razorpay:standard-core:1.6.56")
+}
+
 android {
-  namespace = "in.nirogbhumi.app"
+  namespace = "com.nirogbhumi.app"
   compileSdk { version = release(36) { minorApiLevel = 1 } }
   buildToolsVersion = "36.1.0"
 

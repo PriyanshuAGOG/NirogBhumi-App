@@ -1,4 +1,4 @@
-package in.nirogbhumi.app.ui.screens
+package com.nirogbhumi.app.ui.screens
 
 import androidx.compose.animation.*
 import androidx.compose.foundation.*
@@ -19,7 +19,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import in.nirogbhumi.app.ui.NirogState
+import com.nirogbhumi.app.ui.NirogState
 
 // Re-map tokens inside dashboards
 private val DashDeepGreen = Color(0xFF314936)

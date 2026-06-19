@@ -1,4 +1,4 @@
-package in.nirogbhumi.app.health
+package com.nirogbhumi.app.health
 
 import android.content.Context
 import androidx.health.connect.client.HealthConnectClient
@@ -7,7 +7,7 @@ import androidx.health.connect.client.records.*
 import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.time.TimeRangeFilter
 import com.google.firebase.firestore.FieldValue
-import in.nirogbhumi.app.data.HealthRepository
+import com.nirogbhumi.app.data.HealthRepository
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 import java.util.Date

@@ -1,4 +1,4 @@
-package in.nirogbhumi.app.health
+package com.nirogbhumi.app.health
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -9,7 +9,7 @@ import androidx.compose.material3.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
-import in.nirogbhumi.app.ui.theme.MyApplicationTheme
+import com.nirogbhumi.app.ui.theme.MyApplicationTheme
 
 class PermissionsRationaleActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {

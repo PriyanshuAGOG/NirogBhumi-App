@@ -1,4 +1,4 @@
-package in.nirogbhumi.app.ui.screens
+package com.nirogbhumi.app.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -18,7 +18,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import in.nirogbhumi.app.ui.NirogState
+import com.nirogbhumi.app.ui.NirogState
 
 private val legalSections = listOf(
     "Medical Disclaimer" to "Nirog Bhumi is for education, lifestyle tracking, and wellness support only. It is not a substitute for medical advice, diagnosis, or treatment. Consult a doctor or qualified healthcare professional before changing medication, diet, exercise, or treatment. Seek emergency care when symptoms or readings indicate urgent risk.",

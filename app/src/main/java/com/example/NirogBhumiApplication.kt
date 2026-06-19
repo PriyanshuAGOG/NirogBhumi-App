@@ -1,4 +1,4 @@
-package in.nirogbhumi.app
+package com.nirogbhumi.app
 
 import android.app.Application
 import android.app.NotificationChannel

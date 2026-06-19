@@ -1,4 +1,4 @@
-package in.nirogbhumi.app.notifications
+package com.nirogbhumi.app.notifications
 
 import android.app.PendingIntent
 import android.content.Intent
@@ -9,8 +9,8 @@ import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
-import in.nirogbhumi.app.MainActivity
-import in.nirogbhumi.app.R
+import com.nirogbhumi.app.MainActivity
+import com.nirogbhumi.app.R
 
 class NirogMessagingService : FirebaseMessagingService() {
     override fun onNewToken(token: String) {

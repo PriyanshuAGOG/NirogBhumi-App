@@ -1,8 +1,8 @@
-package in.nirogbhumi.app
+package com.nirogbhumi.app
 
-import in.nirogbhumi.app.ui.screens.NirogScreens
-import in.nirogbhumi.app.ui.screens.ScreenExperiences
-import in.nirogbhumi.app.ui.screens.declaredDestinationRoutes
+import com.nirogbhumi.app.ui.screens.NirogScreens
+import com.nirogbhumi.app.ui.screens.ScreenExperiences
+import com.nirogbhumi.app.ui.screens.declaredDestinationRoutes
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test

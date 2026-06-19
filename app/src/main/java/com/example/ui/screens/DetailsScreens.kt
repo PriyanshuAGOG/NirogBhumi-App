@@ -1,4 +1,4 @@
-package in.nirogbhumi.app.ui.screens
+package com.nirogbhumi.app.ui.screens
 
 import androidx.compose.animation.*
 import androidx.compose.foundation.*
@@ -20,8 +20,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import in.nirogbhumi.app.ui.NirogState
-import in.nirogbhumi.app.ui.SugarLog
+import com.nirogbhumi.app.ui.NirogState
+import com.nirogbhumi.app.ui.SugarLog
 
 // Screen 1: Sugar Metric detailed deepdive
 @Composable
@@ -478,8 +478,8 @@ fun FoodJournalScreen(state: NirogState) {
 fun BookConsultationStepper(state: NirogState) {
     DisposableEffect(Unit) {
         val subscription = state.repository.listenPublicCollection("consultationSlots", 60) { result ->
-            if (result is in.nirogbhumi.app.data.CloudResult.Success) state.cloudRecords["consultationSlots"] = result.value
-            else if (result is in.nirogbhumi.app.data.CloudResult.Failure) state.cloudMessage = result.message
+            if (result is com.nirogbhumi.app.data.CloudResult.Success) state.cloudRecords["consultationSlots"] = result.value
+            else if (result is com.nirogbhumi.app.data.CloudResult.Failure) state.cloudMessage = result.message
         }
         onDispose { subscription.cancel() }
     }
@@ -1336,8 +1336,8 @@ fun ProfileEditScreen(state: NirogState) {
                         "onMedication" to editMedication, "doctorSupervision" to editDoctor,
                         "primaryGoal" to editGoal
                     )) { result -> state.cloudMessage = when (result) {
-                        is in.nirogbhumi.app.data.CloudResult.Success -> "Profile synced securely"
-                        is in.nirogbhumi.app.data.CloudResult.Failure -> result.message
+                        is com.nirogbhumi.app.data.CloudResult.Success -> "Profile synced securely"
+                        is com.nirogbhumi.app.data.CloudResult.Failure -> result.message
                     } }
                     state.currentScreen = "dashboard"
                 },

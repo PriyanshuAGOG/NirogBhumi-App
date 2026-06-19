@@ -1,4 +1,4 @@
-package in.nirogbhumi.app.ui.theme
+package com.nirogbhumi.app.ui.theme
 
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme

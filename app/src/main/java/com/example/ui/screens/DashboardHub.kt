@@ -1,4 +1,4 @@
-package in.nirogbhumi.app.ui.screens
+package com.nirogbhumi.app.ui.screens
 
 import androidx.compose.animation.*
 import androidx.compose.foundation.*
@@ -23,9 +23,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
-import in.nirogbhumi.app.ui.NirogState
-import in.nirogbhumi.app.ui.StoreProduct
-import in.nirogbhumi.app.ui.SugarLog
+import com.nirogbhumi.app.ui.NirogState
+import com.nirogbhumi.app.ui.StoreProduct
+import com.nirogbhumi.app.ui.SugarLog
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -448,7 +448,7 @@ fun TodayTab(state: NirogState) {
                             "status" to if (isWalkTaskDone) "pending" else "done",
                             "date" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
                             "completedAt" to if (isWalkTaskDone) null else com.google.firebase.firestore.FieldValue.serverTimestamp()
-                        )) { result -> if (result is in.nirogbhumi.app.data.CloudResult.Failure) state.cloudMessage = result.message }
+                        )) { result -> if (result is com.nirogbhumi.app.data.CloudResult.Failure) state.cloudMessage = result.message }
                     },
                     modifier = Modifier.fillMaxWidth(),
                     colors = ButtonDefaults.buttonColors(containerColor = Color.White),

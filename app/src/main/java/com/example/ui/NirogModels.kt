@@ -1,13 +1,13 @@
-package in.nirogbhumi.app.ui
+package com.nirogbhumi.app.ui
 
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import in.nirogbhumi.app.data.FirebaseHealthRepository
-import in.nirogbhumi.app.data.HealthRepository
-import in.nirogbhumi.app.data.CloudDocument
+import com.nirogbhumi.app.data.FirebaseHealthRepository
+import com.nirogbhumi.app.data.HealthRepository
+import com.nirogbhumi.app.data.CloudDocument
 
 // Data Models
 data class SugarLog(

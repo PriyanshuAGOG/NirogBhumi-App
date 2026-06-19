@@ -1,4 +1,4 @@
-package in.nirogbhumi.app
+package com.nirogbhumi.app
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider

@@ -1,4 +1,4 @@
-package in.nirogbhumi.app.ui.screens
+package com.nirogbhumi.app.ui.screens
 
 enum class FieldType { TEXT, NUMBER, DECIMAL, TIME, DATE, MULTILINE }
 

@@ -1,4 +1,4 @@
-package in.nirogbhumi.app.reports
+package com.nirogbhumi.app.reports
 
 import android.content.Context
 import android.content.Intent
@@ -6,7 +6,7 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.pdf.PdfDocument
 import androidx.core.content.FileProvider
-import in.nirogbhumi.app.ui.NirogState
+import com.nirogbhumi.app.ui.NirogState
 import java.io.File
 import java.io.FileOutputStream
 
