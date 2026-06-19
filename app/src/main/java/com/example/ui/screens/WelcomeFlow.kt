@@ -1,6 +1,6 @@
 package com.nirogbhumi.app.ui.screens
 
-import android.app.Activity
+import androidx.activity.compose.LocalActivity
 import androidx.compose.animation.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
@@ -14,7 +14,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -507,7 +506,7 @@ fun ValueSlidesScreen(state: NirogState) {
 fun LoginMobileScreen(state: NirogState) {
     var phoneInput by remember { mutableStateOf("") }
     var isAgreedToTerms by remember { mutableStateOf(true) }
-    val activity = LocalContext.current as? Activity
+    val activity = LocalActivity.current
 
     Box(
         modifier = Modifier
@@ -691,7 +690,7 @@ fun LoginOtpScreen(state: NirogState) {
     val otpDigits = remember { mutableStateListOf("", "", "", "", "", "") }
     var isValidState by remember { mutableStateOf(true) }
     var resendTimer by remember { mutableStateOf(28) }
-    val activity = LocalContext.current as? Activity
+    val activity = LocalActivity.current
 
     LaunchedEffect(Unit) {
         while (resendTimer > 0) {
