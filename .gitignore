@@ -30,3 +30,4 @@ debug.keystore.base64
 my-upload-key.jks
 artifacts/
 *.apk
+.agents/

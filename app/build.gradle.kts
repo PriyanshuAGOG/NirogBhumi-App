@@ -98,6 +98,7 @@ dependencies {
   implementation(libs.firebase.analytics)
   implementation(libs.firebase.crashlytics)
   implementation(libs.firebase.appcheck.playintegrity)
+  implementation(libs.play.services.auth)
   implementation(libs.razorpay.checkout)
   implementation(libs.androidx.health.connect)
   implementation(libs.kotlinx.coroutines.android)

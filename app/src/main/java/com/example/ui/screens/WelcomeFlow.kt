@@ -1,6 +1,8 @@
 package com.nirogbhumi.app.ui.screens
 
 import androidx.activity.compose.LocalActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
@@ -855,6 +857,22 @@ fun EmailAuthScreen(state: NirogState) {
     var emailInput by remember { mutableStateOf("") }
     var passwordInput by remember { mutableStateOf("") }
     var isPasswordVisible by remember { mutableStateOf(false) }
+    val activity = LocalActivity.current
+    val googleLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        state.authBusy = true
+        state.authError = ""
+        FirebaseAuthGateway.google(
+            result.data,
+            onSuccess = {
+                state.authBusy = false
+                state.currentScreen = "consent"
+            },
+            onError = {
+                state.authBusy = false
+                state.authError = it
+            }
+        )
+    }
 
     Box(
         modifier = Modifier
@@ -946,6 +964,38 @@ fun EmailAuthScreen(state: NirogState) {
                     modifier = Modifier.padding(20.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
+                    OutlinedButton(
+                        onClick = {
+                            val host = activity ?: return@OutlinedButton
+                            state.authBusy = true
+                            state.authError = ""
+                            val intent = FirebaseAuthGateway.googleSignInIntent(
+                                host,
+                                onError = {
+                                    state.authBusy = false
+                                    state.authError = it
+                                }
+                            )
+                            if (intent != null) googleLauncher.launch(intent)
+                        },
+                        enabled = !state.authBusy,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp),
+                        shape = RoundedCornerShape(26.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = DeepGreen)
+                    ) {
+                        Icon(imageVector = Icons.Outlined.AccountCircle, contentDescription = "Google Sign-in", tint = DeepGreen)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Continue with Google", fontWeight = FontWeight.Bold)
+                    }
+
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Divider(modifier = Modifier.weight(1f), color = Line)
+                        Text("or", modifier = Modifier.padding(horizontal = 12.dp), color = Ink.copy(alpha = 0.55f), fontSize = 12.sp)
+                        Divider(modifier = Modifier.weight(1f), color = Line)
+                    }
+
                     // Email
                     OutlinedTextField(
                         value = emailInput,

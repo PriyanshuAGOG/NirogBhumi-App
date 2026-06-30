@@ -1,0 +1,6 @@
+{
+  "projects": {
+    "default": "nirog-bhumi-app",
+    "production": "nirog-bhumi-app"
+  }
+}
