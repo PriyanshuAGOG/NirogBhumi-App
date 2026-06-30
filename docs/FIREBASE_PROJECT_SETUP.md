@@ -5,17 +5,31 @@ Target Firebase project:
 - Project ID: `nirog-bhumi-app`
 - Project number: `126409331898`
 - Android package name: `in.nirogbhumi.app`
+- Registered Android app ID: `1:126409331898:android:b4e478566dcbeeb7009e83`
 
 ## Android app registration
 
-Register the Android app in the existing Firebase project and fetch `google-services.json` with the Firebase CLI:
+The Android app has already been registered in Firebase:
+
+- Display name: `Nirog Bhumi Android`
+- Package name: `in.nirogbhumi.app`
+- App ID: `1:126409331898:android:b4e478566dcbeeb7009e83`
+
+Fetch `google-services.json` with the Firebase CLI:
 
 ```bash
-npx -y firebase-tools@latest apps:create ANDROID "Nirog Bhumi Android" --package-name "in.nirogbhumi.app" --project nirog-bhumi-app
-npx -y firebase-tools@latest apps:sdkconfig ANDROID <ANDROID_APP_ID> --project nirog-bhumi-app > app/google-services.json
+npx -y firebase-tools@latest apps:sdkconfig ANDROID 1:126409331898:android:b4e478566dcbeeb7009e83 --project nirog-bhumi-app > app/google-services.json
 ```
 
 `app/google-services.json` is intentionally ignored by Git. For GitHub Actions, base64 encode the file and store it as `GOOGLE_SERVICES_JSON_BASE64`.
+
+If you are using Google Cloud Shell from `~`, clone the repository first so Firebase CLI can find `firebase.json`:
+
+```bash
+git clone https://github.com/PriyanshuAGOG/NirogBhumi-App.git
+cd NirogBhumi-App
+git checkout codex/production-app
+```
 
 If local Firebase CLI setup is unreliable, use the manual GitHub Actions workflow instead:
 
@@ -38,6 +52,8 @@ Deploy supported provider configuration with:
 ```bash
 npx -y firebase-tools@latest deploy --only auth --project nirog-bhumi-app
 ```
+
+Run that command from the repository checkout, not from `~`.
 
 Phone Authentication still needs to be enabled in the Firebase Console because Firebase CLI auth configuration does not enable the Phone provider. Add test phone numbers/codes in Firebase Console under Authentication > Sign-in method > Phone.
 
