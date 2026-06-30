@@ -31,3 +31,4 @@ my-upload-key.jks
 artifacts/
 *.apk
 .agents/
+.firebase-cli/

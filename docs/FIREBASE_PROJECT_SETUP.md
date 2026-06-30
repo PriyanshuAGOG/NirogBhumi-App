@@ -17,6 +17,15 @@ npx -y firebase-tools@latest apps:sdkconfig ANDROID <ANDROID_APP_ID> --project n
 
 `app/google-services.json` is intentionally ignored by Git. For GitHub Actions, base64 encode the file and store it as `GOOGLE_SERVICES_JSON_BASE64`.
 
+If local Firebase CLI setup is unreliable, use the manual GitHub Actions workflow instead:
+
+1. Add a GitHub Actions production secret named `FIREBASE_TOKEN` for Firebase CLI access.
+2. Run `.github/workflows/setup-firebase-project.yml`.
+3. Download the `google-services-json` artifact from the workflow run.
+4. Store its base64 value as `GOOGLE_SERVICES_JSON_BASE64` for release workflows.
+
+This workflow locates an existing Android app for `in.nirogbhumi.app`, creates it if missing, exports `google-services.json`, and can deploy the Auth provider config.
+
 ## Authentication providers
 
 The repository includes an `auth` block in `firebase.json` for deployable provider configuration:

@@ -1,0 +1,88 @@
+name: Configure Firebase project
+
+on:
+  workflow_dispatch:
+    inputs:
+      project_id:
+        description: "Firebase project ID"
+        required: true
+        default: nirog-bhumi-app
+        type: string
+      android_package_name:
+        description: "Android application ID/package"
+        required: true
+        default: in.nirogbhumi.app
+        type: string
+      android_display_name:
+        description: "Firebase Android app display name"
+        required: true
+        default: "Nirog Bhumi Android"
+        type: string
+      deploy_auth_config:
+        description: "Deploy firebase.json Auth provider config"
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: firebase-project-setup-${{ inputs.project_id }}
+  cancel-in-progress: false
+
+jobs:
+  configure:
+    name: Register Android app and export Firebase config
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+      - name: Validate Firebase setup token
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+        run: test -n "$FIREBASE_TOKEN"
+      - name: Locate or create Firebase Android app
+        id: android_app
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+          PROJECT_ID: ${{ inputs.project_id }}
+          PACKAGE_NAME: ${{ inputs.android_package_name }}
+          DISPLAY_NAME: ${{ inputs.android_display_name }}
+        run: |
+          set -euo pipefail
+          npm exec --yes --package firebase-tools@15.22.3 -- firebase apps:list ANDROID --project "$PROJECT_ID" --json > "$RUNNER_TEMP/apps.json"
+          APP_ID="$(node -e "const fs=require('fs'); const data=JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); const apps=(data.result||data.apps||[]); const match=apps.find(app => app.packageName===process.argv[2] || app.appId===process.argv[2]); process.stdout.write(match?.appId || '')" "$RUNNER_TEMP/apps.json" "$PACKAGE_NAME")"
+          if [ -z "$APP_ID" ]; then
+            npm exec --yes --package firebase-tools@15.22.3 -- firebase apps:create ANDROID "$DISPLAY_NAME" --package-name "$PACKAGE_NAME" --project "$PROJECT_ID" --json > "$RUNNER_TEMP/create-app.json"
+            APP_ID="$(node -e "const fs=require('fs'); const data=JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); process.stdout.write(data.result?.appId || data.appId || '')" "$RUNNER_TEMP/create-app.json")"
+          fi
+          if [ -z "$APP_ID" ]; then
+            echo "Could not resolve Firebase Android app ID." >&2
+            exit 1
+          fi
+          echo "app_id=$APP_ID" >> "$GITHUB_OUTPUT"
+      - name: Export google-services.json
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+          PROJECT_ID: ${{ inputs.project_id }}
+          APP_ID: ${{ steps.android_app.outputs.app_id }}
+        run: |
+          npm exec --yes --package firebase-tools@15.22.3 -- firebase apps:sdkconfig ANDROID "$APP_ID" --project "$PROJECT_ID" > app/google-services.json
+          test -s app/google-services.json
+      - name: Deploy Firebase Auth provider config
+        if: ${{ inputs.deploy_auth_config }}
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+          PROJECT_ID: ${{ inputs.project_id }}
+        run: npm exec --yes --package firebase-tools@15.22.3 -- firebase deploy --only auth --project "$PROJECT_ID"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: google-services-json
+          if-no-files-found: error
+          retention-days: 3
+          path: app/google-services.json
