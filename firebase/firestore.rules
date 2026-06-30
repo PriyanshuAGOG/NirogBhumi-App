@@ -9,6 +9,7 @@ service cloud.firestore {
     function assigned(uid) { return expert() && exists(/databases/$(database)/documents/expertAssignments/$(request.auth.uid + '_' + uid)); }
     function ownsResource() { return owner(resource.data.userId); }
     function ownsRequest() { return owner(request.resource.data.userId); }
+    function preservesUserId() { return request.resource.data.userId == resource.data.userId; }
     function validCreate() { return ownsRequest() && request.resource.data.createdAt == request.time; }
 
     match /users/{uid} {
@@ -17,19 +18,26 @@ service cloud.firestore {
       allow update: if admin() || (owner(uid) && (!('role' in resource.data) || request.resource.data.role == resource.data.role) && (!('status' in resource.data) || request.resource.data.status == resource.data.status));
       allow delete: if admin();
     }
-    match /profiles/{id} { allow create: if validCreate(); allow read, update: if ownsResource() || admin() || assigned(resource.data.userId); allow delete: if ownsResource() || admin(); }
+    match /profiles/{id} {
+      allow create: if validCreate();
+      allow read: if ownsResource() || admin() || assigned(resource.data.userId);
+      allow update: if admin() || (ownsResource() && ownsRequest() && preservesUserId()) || (assigned(resource.data.userId) && preservesUserId());
+      allow delete: if ownsResource() || admin();
+    }
     match /{collection}/{id} {
       allow create: if collection in ['glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','waterLogs','mealLogs','medications','medicationLogs','labReports','dailyCheckins','checklistLogs'] && validCreate();
-      allow read, update, delete: if collection in ['glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','waterLogs','mealLogs','medications','medicationLogs','labReports','dailyCheckins','checklistLogs'] && (ownsResource() || admin() || assigned(resource.data.userId));
+      allow read, delete: if collection in ['glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','waterLogs','mealLogs','medications','medicationLogs','labReports','dailyCheckins','checklistLogs'] && (ownsResource() || admin() || assigned(resource.data.userId));
+      allow update: if collection in ['glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','waterLogs','mealLogs','medications','medicationLogs','labReports','dailyCheckins','checklistLogs'] && (admin() || (ownsResource() && ownsRequest() && preservesUserId()) || (assigned(resource.data.userId) && preservesUserId()));
     }
     match /consultations/{id} {
       allow create: if validCreate() && request.resource.data.paymentStatus == 'pending' && request.resource.data.status in ['pending', 'payment_pending'];
       allow read: if ownsResource() || admin() || (expert() && resource.data.expertId == request.auth.uid);
-      allow update: if admin() || (expert() && resource.data.expertId == request.auth.uid) || (ownsResource() && request.resource.data.paymentStatus == resource.data.paymentStatus && request.resource.data.status == resource.data.status);
+      allow update: if admin() || (expert() && resource.data.expertId == request.auth.uid && preservesUserId()) || (ownsResource() && ownsRequest() && preservesUserId() && request.resource.data.paymentStatus == resource.data.paymentStatus && request.resource.data.status == resource.data.status);
     }
     match /{collection}/{id} {
       allow read: if collection in ['dailyActions','weeklyReports','sugarStories','userPrograms','programPlans','expertNotes','notifications','deviceConnections','orders','carts'] && (ownsResource() || admin() || assigned(resource.data.userId));
-      allow create, update: if collection in ['deviceConnections','carts'] && ownsRequest();
+      allow create: if collection in ['deviceConnections','carts'] && ownsRequest();
+      allow update: if collection in ['deviceConnections','carts'] && ownsResource() && ownsRequest() && preservesUserId();
       allow create: if collection == 'orders' && validCreate() && request.resource.data.paymentStatus == 'pending' && request.resource.data.orderStatus == 'pending';
     }
     match /contentItems/{id} { allow read: if resource.data.status == 'published' || admin(); allow write: if admin() || role('content_manager'); }

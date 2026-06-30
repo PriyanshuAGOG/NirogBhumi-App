@@ -145,7 +145,8 @@ class FirebaseHealthRepository : HealthRepository {
         val allowed = setOf("glucoseReadings", "bpReadings", "sleepLogs", "walkLogs", "weightLogs", "deviceConnections")
         if (collection !in allowed) return done(CloudResult.Failure("Unsupported synced record"))
         val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
-        val safeId = documentId.replace(Regex("[^A-Za-z0-9_-]"), "_").take(120)
+        val normalizedId = documentId.replace(Regex("[^A-Za-z0-9_-]"), "_").take(120)
+        val safeId = if (collection == "deviceConnections") "${uid}_$normalizedId" else normalizedId
         db?.collection(collection)?.document(safeId)?.set(values + mapOf("userId" to uid, "profileId" to (values["profileId"] ?: uid), "createdAt" to FieldValue.serverTimestamp(), "updatedAt" to FieldValue.serverTimestamp()), SetOptions.merge())
             ?.addOnSuccessListener { done(CloudResult.Success(Unit)) }
             ?.addOnFailureListener { done(CloudResult.Failure(it.message ?: "Synced record could not be saved", it)) }
