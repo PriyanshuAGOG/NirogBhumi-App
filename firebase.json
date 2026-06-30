@@ -1,4 +1,13 @@
 {
+  "auth": {
+    "providers": {
+      "emailPassword": true,
+      "googleSignIn": {
+        "oAuthBrandDisplayName": "Nirog Bhumi",
+        "supportEmail": "support@nirogbhumi.app"
+      }
+    }
+  },
   "functions": { "source": "firebase/functions", "runtime": "nodejs22" },
   "firestore": { "rules": "firebase/firestore.rules", "indexes": "firebase/firestore.indexes.json" },
   "storage": { "rules": "firebase/storage.rules" },

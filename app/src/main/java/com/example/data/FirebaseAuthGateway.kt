@@ -1,16 +1,51 @@
 package com.nirogbhumi.app.data
 
 import android.app.Activity
+import android.content.Intent
 import com.google.firebase.FirebaseApp
 import com.google.firebase.FirebaseException
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.auth.PhoneAuthCredential
 import com.google.firebase.auth.PhoneAuthOptions
 import com.google.firebase.auth.PhoneAuthProvider
+import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import java.util.concurrent.TimeUnit
 
 object FirebaseAuthGateway {
     private fun auth() = runCatching { FirebaseAuth.getInstance(FirebaseApp.getInstance()) }.getOrNull()
+
+    fun googleSignInIntent(activity: Activity, onError: (String) -> Unit): Intent? {
+        val clientIdRes = activity.resources.getIdentifier("default_web_client_id", "string", activity.packageName)
+        if (clientIdRes == 0) {
+            onError("Firebase Google Sign-in is not configured. Add google-services.json generated for this Android app.")
+            return null
+        }
+        val clientId = activity.getString(clientIdRes)
+        if (clientId.isBlank()) {
+            onError("Firebase Google Sign-in is not configured. Add google-services.json generated for this Android app.")
+            return null
+        }
+        val options = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+            .requestIdToken(clientId)
+            .requestEmail()
+            .build()
+        return GoogleSignIn.getClient(activity, options).signInIntent
+    }
+
+    fun google(data: Intent?, onSuccess: () -> Unit, onError: (String) -> Unit) {
+        val auth = auth() ?: return onError("Firebase is not configured")
+        GoogleSignIn.getSignedInAccountFromIntent(data)
+            .addOnSuccessListener { account ->
+                val token = account.idToken ?: return@addOnSuccessListener onError("Google Sign-in did not return an ID token")
+                val credential = GoogleAuthProvider.getCredential(token, null)
+                auth.signInWithCredential(credential)
+                    .addOnSuccessListener { onSuccess() }
+                    .addOnFailureListener { onError(it.message ?: "Google Sign-in failed") }
+            }
+            .addOnFailureListener { onError(it.message ?: "Google Sign-in cancelled") }
+    }
 
     fun sendOtp(activity: Activity, phone: String, onSent: (String) -> Unit, onError: (String) -> Unit) {
         val auth = auth() ?: return onError("Firebase is not configured. Add google-services.json for this app.")
