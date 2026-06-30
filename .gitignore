@@ -28,3 +28,5 @@ hs_err_pid*.log
 .android-build.pid
 debug.keystore.base64
 my-upload-key.jks
+artifacts/
+*.apk
