@@ -55,3 +55,19 @@ jobs:
           cache-dependency-path: firebase/functions/package-lock.json
       - run: npm ci
       - run: npm test
+
+  firebase-rules:
+    name: Firebase rules validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+      - name: Start emulators with Firestore and Storage rules
+        run: npx --yes firebase-tools@15.22.3 emulators:exec --only firestore,storage --project demo-nirog-bhumi "node -e \"console.log('Firebase rules syntax validated')\""
