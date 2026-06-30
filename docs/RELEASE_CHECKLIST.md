@@ -29,5 +29,9 @@
 ## Play Console
 
 - Use a private upload key and Play App Signing; build `bundleRelease` with release environment variables.
+- Create the Play Console app for `in.nirogbhumi.app`, enable the Google Play Developer API, and grant a least-privilege Play service account access to the app.
+- Add `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` as a GitHub Actions production secret containing the Play service-account JSON.
+- Use `.github/workflows/upload-google-play.yml` to build the signed AAB and upload it to the selected Play track after release secrets are configured.
+- For a brand-new draft app, upload the first build as `draft` or complete the first manual Play Console setup before promoting automated uploads.
 - Upload icon, feature graphic, phone/tablet screenshots, short/full descriptions, support email/site, privacy URL, and account deletion URL.
 - Run internal, closed, and staged production tracks; resolve pre-launch, accessibility, crash, ANR, and security findings.
