@@ -12,12 +12,12 @@ jobs:
     timeout-minutes: 45
     environment: production
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
       - name: Validate release secrets
         env:
           GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
@@ -47,7 +47,7 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew --no-daemon --max-workers=2 testReleaseUnitTest lintRelease bundleRelease
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: nirog-bhumi-release-aab
           if-no-files-found: error
