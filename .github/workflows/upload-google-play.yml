@@ -94,6 +94,7 @@ jobs:
           tracks: ${{ inputs.track }}
           status: ${{ inputs.release_status }}
           releaseName: ${{ inputs.release_name }}
+          whatsNewDirectory: play/whatsnew
           changesNotSentForReview: ${{ inputs.changes_not_sent_for_review }}
       - uses: actions/upload-artifact@v7
         if: always()
