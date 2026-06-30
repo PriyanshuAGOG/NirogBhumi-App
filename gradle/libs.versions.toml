@@ -38,6 +38,7 @@ robolectric = "4.16.1"
 roborazzi = "1.59.0"
 firebaseBom = "34.12.0"
 googleServices = "4.4.4"
+firebaseCrashlyticsGradle = "3.0.7"
 razorpayCheckout = "1.6.41"
 healthConnect = "1.1.0"
 
@@ -95,6 +96,7 @@ firebase-storage = { group = "com.google.firebase", name = "firebase-storage" }
 firebase-functions = { group = "com.google.firebase", name = "firebase-functions" }
 firebase-messaging = { group = "com.google.firebase", name = "firebase-messaging" }
 firebase-analytics = { group = "com.google.firebase", name = "firebase-analytics" }
+firebase-crashlytics = { group = "com.google.firebase", name = "firebase-crashlytics" }
 firebase-appcheck-playintegrity = { group = "com.google.firebase", name = "firebase-appcheck-playintegrity" }
 razorpay-checkout = { group = "com.razorpay", name = "checkout", version.ref = "razorpayCheckout" }
 androidx-health-connect = { group = "androidx.health.connect", name = "connect-client", version.ref = "healthConnect" }
@@ -105,3 +107,4 @@ kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "ko
 google-devtools-ksp = { id = "com.google.devtools.ksp", version.ref = "googleDevtoolsKsp" }
 roborazzi = { id = "io.github.takahirom.roborazzi", version.ref = "roborazzi" }
 google-services = { id = "com.google.gms.google-services", version.ref = "googleServices" }
+firebase-crashlytics = { id = "com.google.firebase.crashlytics", version.ref = "firebaseCrashlyticsGradle" }

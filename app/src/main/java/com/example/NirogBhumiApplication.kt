@@ -7,6 +7,7 @@ import android.os.Build
 import com.google.firebase.FirebaseApp
 import com.google.firebase.appcheck.FirebaseAppCheck
 import com.google.firebase.appcheck.playintegrity.PlayIntegrityAppCheckProviderFactory
+import com.google.firebase.crashlytics.FirebaseCrashlytics
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreSettings
 
@@ -27,9 +28,12 @@ class NirogBhumiApplication : Application() {
             )
             .build()
         if (!BuildConfig.DEBUG) {
+            FirebaseCrashlytics.getInstance().setCrashlyticsCollectionEnabled(true)
             FirebaseAppCheck.getInstance(app).installAppCheckProviderFactory(
                 PlayIntegrityAppCheckProviderFactory.getInstance()
             )
+        } else {
+            FirebaseCrashlytics.getInstance().setCrashlyticsCollectionEnabled(false)
         }
     }
 }

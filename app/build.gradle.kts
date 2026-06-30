@@ -5,6 +5,7 @@ plugins {
 
 if (file("google-services.json").exists()) {
   apply(plugin = "com.google.gms.google-services")
+  apply(plugin = "com.google.firebase.crashlytics")
 }
 
 // Razorpay checkout 1.6.41 declares standard-core as LATEST. Versions 1.7+
@@ -95,6 +96,7 @@ dependencies {
   implementation(libs.firebase.functions)
   implementation(libs.firebase.messaging)
   implementation(libs.firebase.analytics)
+  implementation(libs.firebase.crashlytics)
   implementation(libs.firebase.appcheck.playintegrity)
   implementation(libs.razorpay.checkout)
   implementation(libs.androidx.health.connect)
