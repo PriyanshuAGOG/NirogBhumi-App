@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -221,7 +222,7 @@ private fun CheckInStep(
     tint: Color,
     title: String,
     helper: String,
-    input: @Composable ColumnScope.() -> Unit
+    input: @Composable () -> Unit
 ) {
     Spacer(Modifier.height(8.dp))
     Box(

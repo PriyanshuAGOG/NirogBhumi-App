@@ -240,7 +240,7 @@ fun SleepOverviewScreen(state: NirogState) {
                     state.repository.addHealthLog("sleepLogs", mapOf("sleepTime" to sleepTime, "wakeTime" to wakeTime, "duration" to hours, "measuredAt" to FieldValue.serverTimestamp(), "source" to "manual")) { r ->
                         saving = false
                         if (r is CloudResult.Success) {
-                            state.sleepHours = (mins ?: 0) / 60; state.sleepMinutes = (mins ?: 0) % 60; showAdd = false
+                            state.sleepHours = ((mins ?: 0) / 60).toInt(); state.sleepMinutes = ((mins ?: 0) % 60).toInt(); showAdd = false
                         } else state.cloudMessage = (r as CloudResult.Failure).message
                     }
                 }) { Text(if (saving) "Saving..." else "Save", color = Color.White) }
