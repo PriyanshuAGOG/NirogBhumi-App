@@ -39,3 +39,19 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           path: app/build/outputs/apk/debug/*.apk
+      - name: Distribute to Firebase App Distribution testers
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+          APP_DISTRIBUTION_TESTERS: ${{ secrets.APP_DISTRIBUTION_TESTERS }}
+        run: |
+          if [ -z "$FIREBASE_TOKEN" ] || [ -z "$APP_DISTRIBUTION_TESTERS" ]; then
+            echo "FIREBASE_TOKEN and/or APP_DISTRIBUTION_TESTERS secret not set - skipping App Distribution upload."
+            echo "Set both (Settings > Environments > production) to have new builds pushed to testers automatically."
+            exit 0
+          fi
+          APK_PATH="$(find app/build/outputs/apk/debug -name '*.apk' | head -n1)"
+          npx --yes firebase-tools@15.22.3 appdistribution:distribute "$APK_PATH" \
+            --app 1:126409331898:android:b4e478566dcbeeb7009e83 \
+            --project nirog-bhumi-app \
+            --testers "$APP_DISTRIBUTION_TESTERS" \
+            --release-notes "Automated debug build - commit ${{ github.sha }}"
