@@ -19,25 +19,15 @@ jobs:
           distribution: temurin
           java-version: "21"
       - uses: gradle/actions/setup-gradle@v6
-      - uses: actions/setup-node@v6
-        if: ${{ !secrets.GOOGLE_SERVICES_JSON_BASE64 }}
-        with:
-          node-version: "22"
-      - name: Materialize app/google-services.json from base64 secret
-        if: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
+      - name: Validate Firebase config secret
+        env:
+          GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
+        run: test -n "$GOOGLE_SERVICES_JSON_BASE64"
+      - name: Materialize app/google-services.json
         env:
           GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
         run: |
           printf '%s' "$GOOGLE_SERVICES_JSON_BASE64" | base64 --decode > app/google-services.json
-          test -s app/google-services.json
-      - name: Fetch app/google-services.json with Firebase CLI token
-        if: ${{ !secrets.GOOGLE_SERVICES_JSON_BASE64 }}
-        env:
-          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
-        run: |
-          test -n "$FIREBASE_TOKEN" || { echo "::error::Set either GOOGLE_SERVICES_JSON_BASE64 or FIREBASE_TOKEN as a production environment secret." >&2; exit 1; }
-          npm exec --yes --package firebase-tools@15.22.3 -- firebase apps:sdkconfig ANDROID \
-            1:126409331898:android:b4e478566dcbeeb7009e83 --project nirog-bhumi-app > app/google-services.json
           test -s app/google-services.json
       - name: Build debug APK
         run: |
