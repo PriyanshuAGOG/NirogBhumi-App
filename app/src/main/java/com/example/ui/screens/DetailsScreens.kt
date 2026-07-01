@@ -1633,7 +1633,7 @@ fun ProfileEditScreen(state: NirogState) {
 }
 
 @Composable
-private fun DetailScreenHeader(title: String, onBack: () -> Unit, trailing: @Composable () -> Unit = {}) {
+fun DetailScreenHeader(title: String, onBack: () -> Unit, trailing: @Composable () -> Unit = {}) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -1647,7 +1647,7 @@ private fun DetailScreenHeader(title: String, onBack: () -> Unit, trailing: @Com
 }
 
 @Composable
-private fun EmptyStateCard(icon: androidx.compose.ui.graphics.vector.ImageVector, message: String) {
+fun EmptyStateCard(icon: androidx.compose.ui.graphics.vector.ImageVector, message: String) {
     Column(
         modifier = Modifier.fillMaxWidth().padding(vertical = 48.dp, horizontal = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally
@@ -1942,7 +1942,7 @@ fun NotificationInboxScreen(state: NirogState) {
     }
 }
 
-private fun relativeTimeLabel(date: java.util.Date): String {
+fun relativeTimeLabel(date: java.util.Date): String {
     val diffMs = System.currentTimeMillis() - date.time
     val minutes = diffMs / 60000
     return when {
