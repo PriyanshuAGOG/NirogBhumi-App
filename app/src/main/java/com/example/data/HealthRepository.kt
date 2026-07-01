@@ -40,6 +40,7 @@ interface HealthRepository {
     fun postAnnouncement(title: String, body: String, done: (CloudResult<Unit>) -> Unit)
     fun listenProgramChat(programId: String, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription
     fun sendProgramChatMessage(programId: String, text: String, senderName: String, done: (CloudResult<Unit>) -> Unit)
+    fun reportChatMessage(messageId: String, programId: String, reportedText: String, reportedUserId: String, done: (CloudResult<Unit>) -> Unit)
 }
 
 class FirebaseHealthRepository : HealthRepository {
@@ -224,6 +225,23 @@ class FirebaseHealthRepository : HealthRepository {
             )
         ).addOnSuccessListener { done(CloudResult.Success(Unit)) }
             .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Message could not be sent", it)) }
+    }
+
+    override fun reportChatMessage(messageId: String, programId: String, reportedText: String, reportedUserId: String, done: (CloudResult<Unit>) -> Unit) {
+        val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
+        val database = db ?: return done(CloudResult.Failure("Firebase is not configured"))
+        database.collection("reportedMessages").add(
+            mapOf(
+                "messageId" to messageId,
+                "programId" to programId,
+                "reportedText" to reportedText,
+                "reportedUserId" to reportedUserId,
+                "reporterId" to uid,
+                "status" to "open",
+                "createdAt" to FieldValue.serverTimestamp()
+            )
+        ).addOnSuccessListener { done(CloudResult.Success(Unit)) }
+            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Report could not be submitted", it)) }
     }
 
     override fun upsertUserRecord(collection: String, documentId: String, values: Map<String, Any?>, done: (CloudResult<Unit>) -> Unit) {

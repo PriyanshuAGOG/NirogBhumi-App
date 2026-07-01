@@ -2272,11 +2272,14 @@ fun AnnouncementsScreen(state: NirogState) {
 
 // Care+ community chat - one shared room per program, not one global room, so
 // conversation stays relevant to the program a member actually joined.
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun ProgramChatScreen(state: NirogState) {
     var records by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>?>(null) }
     var messageInput by remember { mutableStateOf("") }
     var sending by remember { mutableStateOf(false) }
+    var reportTarget by remember { mutableStateOf<com.nirogbhumi.app.data.CloudDocument?>(null) }
+    var reporting by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
 
@@ -2293,7 +2296,8 @@ fun ProgramChatScreen(state: NirogState) {
     Column(modifier = Modifier.fillMaxSize().background(Color(0xFFF8F6EF))) {
         DetailScreenHeader("Community Chat", onBack = { state.currentScreen = "dashboard" })
         Text(
-            state.activeProgramName.ifBlank { "Your program" }, fontSize = 12.sp, color = Color(0xFF697169),
+            "${state.activeProgramName.ifBlank { "Your program" }} · long-press a message to report it",
+            fontSize = 12.sp, color = Color(0xFF697169),
             modifier = Modifier.padding(horizontal = 20.dp)
         )
         Spacer(modifier = Modifier.height(8.dp))
@@ -2321,6 +2325,9 @@ fun ProgramChatScreen(state: NirogState) {
                                 .widthIn(max = 280.dp)
                                 .background(if (isMine) Color(0xFF314936) else Color.White, RoundedCornerShape(16.dp))
                                 .then(if (isMine) Modifier else Modifier.border(0.5.dp, Color(0xFFD8D0C0), RoundedCornerShape(16.dp)))
+                                // Long-press another member's message to report it. Own
+                                // messages aren't reportable (you can't report yourself).
+                                .then(if (isMine) Modifier else Modifier.combinedClickable(onClick = {}, onLongClick = { reportTarget = record }))
                                 .padding(horizontal = 14.dp, vertical = 10.dp)
                         ) {
                             if (!isMine) Text(senderName, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF426820))
@@ -2363,6 +2370,35 @@ fun ProgramChatScreen(state: NirogState) {
                 Icon(Icons.Filled.Send, contentDescription = "Send", tint = Color.White, modifier = Modifier.size(20.dp))
             }
         }
+    }
+
+    reportTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { if (!reporting) reportTarget = null },
+            icon = { Icon(Icons.Filled.Flag, contentDescription = null, tint = Color(0xFF8B3E36)) },
+            title = { Text("Report message?", fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221)) },
+            text = { Text("This message will be sent to the Nirog Bhumi team to review. Thanks for helping keep the community safe.", fontSize = 14.sp, color = Color(0xFF434842)) },
+            confirmButton = {
+                Button(
+                    enabled = !reporting,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8B3E36)),
+                    onClick = {
+                        reporting = true
+                        state.repository.reportChatMessage(
+                            messageId = target.id,
+                            programId = state.activeProgramId,
+                            reportedText = target.values["text"]?.toString().orEmpty(),
+                            reportedUserId = target.values["userId"]?.toString().orEmpty()
+                        ) { result ->
+                            reporting = false
+                            reportTarget = null
+                            state.cloudMessage = if (result is com.nirogbhumi.app.data.CloudResult.Success) "Thanks — this message has been reported." else (result as com.nirogbhumi.app.data.CloudResult.Failure).message
+                        }
+                    }
+                ) { Text(if (reporting) "Reporting..." else "Report", color = Color.White) }
+            },
+            dismissButton = { TextButton(onClick = { reportTarget = null }, enabled = !reporting) { Text("Cancel", color = Color(0xFF737972)) } }
+        )
     }
 }
 

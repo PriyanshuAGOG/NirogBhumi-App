@@ -58,6 +58,11 @@ service cloud.firestore {
       allow read: if programMember() && ownProgram(resource.data.programId);
       allow create: if programMember() && ownProgram(request.resource.data.programId) && request.resource.data.userId == request.auth.uid && request.resource.data.createdAt == request.time;
     }
+    match /reportedMessages/{id} {
+      // Any program member can report a message they can see; only admins review them.
+      allow create: if programMember() && request.resource.data.reporterId == request.auth.uid && request.resource.data.createdAt == request.time;
+      allow read, update: if admin();
+    }
     match /consultationSlots/{id} { allow read: if signedIn() && resource.data.active == true; allow write: if admin() || expert(); }
     match /expertAssignments/{id} { allow read: if admin() || (expert() && resource.data.expertId == request.auth.uid); allow write: if admin(); }
     match /{collection}/{id} {
