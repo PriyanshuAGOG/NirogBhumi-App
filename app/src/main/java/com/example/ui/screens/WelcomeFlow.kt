@@ -1197,6 +1197,7 @@ fun ConsentScreen(state: NirogState) {
     var check1 by remember { mutableStateOf(false) }
     var check2 by remember { mutableStateOf(false) }
     var check3 by remember { mutableStateOf(false) }
+    var isSaving by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -1293,17 +1294,17 @@ fun ConsentScreen(state: NirogState) {
             Button(
                 onClick = {
                     state.authError = ""
-                    state.authBusy = true
+                    isSaving = true
                     state.consentHealthData = check1
                     state.consentExpertReview = check2
                     state.consentMedicalDisclaimer = check3
                     state.repository.saveProfile(mapOf("consent" to mapOf("healthData" to check1, "expertReview" to check2, "medicalDisclaimer" to check3, "version" to "1.0"))) { result ->
-                        state.authBusy = false
+                        isSaving = false
                         if (result is com.nirogbhumi.app.data.CloudResult.Success) state.currentScreen = "setup_profile"
                         else state.authError = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
                     }
                 },
-                enabled = check1 && check2 && check3 && !state.authBusy,
+                enabled = check1 && check2 && check3 && !isSaving,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(54.dp),
@@ -1313,7 +1314,7 @@ fun ConsentScreen(state: NirogState) {
                 ),
                 shape = RoundedCornerShape(27.dp)
             ) {
-                if (state.authBusy) {
+                if (isSaving) {
                     CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
                 } else {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1375,6 +1376,7 @@ fun SetupProfileScreen(state: NirogState) {
     var heightTemp by remember { mutableStateOf(state.profileHeight) }
     var cityTemp by remember { mutableStateOf(state.profileCity) }
     var languageTemp by remember { mutableStateOf(state.profileLanguage) }
+    var isSaving by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -1461,7 +1463,7 @@ fun SetupProfileScreen(state: NirogState) {
                 Button(
                     onClick = {
                         state.authError = ""
-                        state.authBusy = true
+                        isSaving = true
                         state.profileName = nameTemp
                         state.profileAge = ageTemp
                         state.profileWeight = weightTemp
@@ -1469,19 +1471,19 @@ fun SetupProfileScreen(state: NirogState) {
                         state.profileCity = cityTemp
                         state.profileLanguage = languageTemp
                         state.repository.saveProfile(mapOf("fullName" to nameTemp, "age" to ageTemp.toIntOrNull(), "weightKg" to weightTemp.toDoubleOrNull(), "heightCm" to heightTemp.toDoubleOrNull(), "city" to cityTemp, "preferredLanguage" to languageTemp)) { result ->
-                            state.authBusy = false
+                            isSaving = false
                             if (result is com.nirogbhumi.app.data.CloudResult.Success) state.currentScreen = "selection_caregiver"
                             else state.authError = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
                         }
                     },
-                    enabled = !state.authBusy,
+                    enabled = !isSaving,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(54.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = DeepGreen),
                     shape = RoundedCornerShape(27.dp)
                 ) {
-                    if (state.authBusy) {
+                    if (isSaving) {
                         CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
                     } else {
                         Text("Continue", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
@@ -2017,6 +2019,7 @@ fun ProgramCodeOptionalScreen(state: NirogState) {
 // SCREEN 12: ONBOARDING COMPLETE GREETING CARD SCREEN
 @Composable
 fun OnboardingCompleteScreen(state: NirogState) {
+    var isSaving by remember { mutableStateOf(false) }
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -2094,7 +2097,7 @@ fun OnboardingCompleteScreen(state: NirogState) {
             Button(
                 onClick = {
                     state.authError = ""
-                    state.authBusy = true
+                    isSaving = true
                     state.repository.saveProfile(mapOf(
                         "onboardingComplete" to true,
                         "trackingFor" to if (state.isTrackingForSelf) "self" else "family",
@@ -2105,19 +2108,19 @@ fun OnboardingCompleteScreen(state: NirogState) {
                         "goals" to state.selectedGoals.toList(),
                         "programActive" to state.isProgramActive
                     )) { result ->
-                        state.authBusy = false
+                        isSaving = false
                         if (result is com.nirogbhumi.app.data.CloudResult.Success) state.currentScreen = "dashboard"
                         else state.authError = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
                     }
                 },
-                enabled = !state.authBusy,
+                enabled = !isSaving,
                 modifier = Modifier
                     .fillModifierOnboarding()
                     .height(54.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = DeepGreen),
                 shape = RoundedCornerShape(27.dp)
             ) {
-                if (state.authBusy) {
+                if (isSaving) {
                     CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
                 } else {
                     Text("Go to Today", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
