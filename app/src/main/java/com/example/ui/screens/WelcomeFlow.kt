@@ -330,6 +330,7 @@ fun ValueSlidesScreen(state: NirogState) {
         modifier = Modifier
             .fillMaxSize()
             .background(Paper)
+            .verticalScroll(rememberScrollState())
             .padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.SpaceBetween
@@ -363,7 +364,7 @@ fun ValueSlidesScreen(state: NirogState) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth(0.9f)
-                    .height(200.dp)
+                    .heightIn(min = 200.dp)
                     .background(SoftClay.copy(alpha = 0.5f), RoundedCornerShape(24.dp))
                     .border(1.dp, Line, RoundedCornerShape(24.dp))
                     .padding(16.dp),

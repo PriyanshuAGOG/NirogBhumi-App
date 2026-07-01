@@ -44,6 +44,16 @@ android {
         keyPassword = keyPasswordValue
       }
     }
+    // Committed so every machine/CI run signs debug builds with the same
+    // certificate. Its SHA-1/SHA-256 is registered on the Firebase Android
+    // app so Google Sign-In works on debug builds; a rotating debug key
+    // would break that on every fresh CI run.
+    getByName("debug") {
+      storeFile = file("ci-debug.keystore")
+      storePassword = "android"
+      keyAlias = "androiddebugkey"
+      keyPassword = "android"
+    }
   }
 
   buildTypes {
