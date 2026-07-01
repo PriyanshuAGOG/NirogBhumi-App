@@ -204,7 +204,7 @@ fun CatalogScreen(state: NirogState, route: String) {
                 Text(spec.title, fontFamily = FontFamily.Serif, fontSize = 30.sp, lineHeight = 36.sp, color = Color(0xFF182219))
                 Text(spec.subtitle, fontSize = 15.sp, lineHeight = 22.sp, color = Color(0xFF455148))
 
-                if (spec.route in setOf("bp_overview", "sleep_overview", "walking_overview", "trends_30", "weekly_report")) {
+                if (spec.route in setOf("trends_30", "weekly_report")) {
                     TrendPanel(spec.route, state.cloudRecords[spec.route].orEmpty())
                 }
 
@@ -598,28 +598,28 @@ private fun itemSupportingCopy(route: String, item: String): String = when {
 
 @Composable
 private fun TrendPanel(route: String, records: List<com.nirogbhumi.app.data.CloudDocument>) {
-    val defaults = when (route) {
-        "bp_overview" -> listOf(126f, 122f, 125f, 121f, 120f, 124f, 118f)
-        "sleep_overview" -> listOf(6.2f, 6.8f, 7.1f, 6.4f, 7.3f, 6.9f, 7.2f)
-        "walking_overview" -> listOf(12f, 18f, 25f, 14f, 30f, 22f, 28f)
-        else -> listOf(132f, 128f, 130f, 124f, 121f, 118f, 116f)
-    }
-    val key = when (route) { "bp_overview" -> "systolic"; "sleep_overview" -> "duration"; "walking_overview" -> "minutes"; else -> "glucoseAverage" }
-    val live = records.mapNotNull { (it.values[key] as? Number)?.toFloat() }.takeLast(14)
-    val points = if (live.size >= 2) live else defaults
+    // trends_30 and weekly_report are the only routes that still reach this panel
+    // (bp/sleep/walking now render their own custom overview screens).
+    val points = records.mapNotNull { (it.values["glucoseAverage"] as? Number)?.toFloat() }.takeLast(14)
     Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color.White), shape = RoundedCornerShape(20.dp), border = BorderStroke(1.dp, Color(0xFFD8D0C0))) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(if (live.size >= 2) "Your recent trend" else "Trend builds as you log", fontWeight = FontWeight.SemiBold, color = Color(0xFF182219))
-            Canvas(Modifier.fillMaxWidth().height(120.dp)) {
-                val min = points.minOrNull() ?: 0f; val range = ((points.maxOrNull() ?: 1f) - min).coerceAtLeast(1f)
-                repeat(4) { row -> val y = size.height * row / 3f; drawLine(Color(0xFFD8D0C0), Offset(0f, y), Offset(size.width, y), 1f) }
-                points.zipWithNext().forEachIndexed { index, pair ->
-                    val x1 = size.width * index / (points.size - 1).coerceAtLeast(1); val x2 = size.width * (index + 1) / (points.size - 1).coerceAtLeast(1)
-                    val y1 = size.height - ((pair.first - min) / range * size.height); val y2 = size.height - ((pair.second - min) / range * size.height)
-                    drawLine(Color(0xFF314936), Offset(x1, y1), Offset(x2, y2), 4f)
+            if (points.size < 2) {
+                // Honest empty state - never draw a fabricated trend line to fill space.
+                Text("Trend builds as you log", fontWeight = FontWeight.SemiBold, color = Color(0xFF182219))
+                Text("Log a couple of readings and your real trend will appear here.", fontSize = 13.sp, color = Color(0xFF697169))
+            } else {
+                Text("Your recent trend", fontWeight = FontWeight.SemiBold, color = Color(0xFF182219))
+                Canvas(Modifier.fillMaxWidth().height(120.dp)) {
+                    val min = points.min(); val range = (points.max() - min).coerceAtLeast(1f)
+                    repeat(4) { row -> val y = size.height * row / 3f; drawLine(Color(0xFFD8D0C0), Offset(0f, y), Offset(size.width, y), 1f) }
+                    points.zipWithNext().forEachIndexed { index, pair ->
+                        val x1 = size.width * index / (points.size - 1).coerceAtLeast(1); val x2 = size.width * (index + 1) / (points.size - 1).coerceAtLeast(1)
+                        val y1 = size.height - ((pair.first - min) / range * size.height); val y2 = size.height - ((pair.second - min) / range * size.height)
+                        drawLine(Color(0xFF314936), Offset(x1, y1), Offset(x2, y2), 4f)
+                    }
                 }
+                Text("Look for consistency over time; one reading does not define your health.", fontSize = 12.sp, color = Color(0xFF697169))
             }
-            Text("Look for consistency over time; one reading does not define your health.", fontSize = 12.sp, color = Color(0xFF697169))
         }
     }
 }
