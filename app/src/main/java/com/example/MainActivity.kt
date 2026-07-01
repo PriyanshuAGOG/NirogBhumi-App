@@ -274,6 +274,11 @@ fun ActiveScreenContent(state: NirogState) {
       "profile" -> ProfileScreen(state)
       "profile_edit" -> ProfileEditScreen(state)
       "device_hub" -> DeviceSyncScreen(state)
+      "notifications" -> NotificationInboxScreen(state)
+      "notification_settings" -> NotificationSettingsScreen(state)
+      "family_profiles" -> FamilyProfilesScreen(state)
+      "orders" -> OrdersScreen(state)
+      "articles" -> ArticlesScreen(state)
 
       // Metrics Detailed screens
       "sugar_detail" -> BloodSugarDetailScreen(state)

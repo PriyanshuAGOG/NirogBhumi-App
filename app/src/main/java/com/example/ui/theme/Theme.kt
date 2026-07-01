@@ -10,12 +10,21 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
 
+// Nirog Bhumi is deliberately a single, always-light "warm paper" theme that
+// ignores the system dark/light setting (see MyApplicationTheme below), so both
+// schemes here use identical light tokens. Newer Material3 surface-container
+// tokens (surfaceContainerHigh, etc.) must be overridden too, not just the
+// legacy surface/background ones - components like AlertDialog read their
+// container color from surfaceContainerHigh, which otherwise falls back to
+// darkColorScheme()'s near-black default and renders invisible dark-on-dark
+// against this app's hardcoded dark green/gray text.
 private val DarkColorScheme =
   darkColorScheme(
     primary = PrimaryDeepGreen,
     onPrimary = OnPrimaryWhite,
     primaryContainer = PrimaryContainerSoftGreen,
     onPrimaryContainer = OnPrimaryContainerLight,
+    inversePrimary = PrimaryFixed,
     secondary = SecondaryOliveGreen,
     onSecondary = OnSecondaryWhite,
     secondaryContainer = SecondaryContainerLime,
@@ -34,8 +43,18 @@ private val DarkColorScheme =
     onSurface = OnSurfaceInk,
     surfaceVariant = SurfaceVariantGrey,
     onSurfaceVariant = OnSurfaceVariantDark,
+    surfaceTint = PrimaryDeepGreen,
+    inverseSurface = InkText,
+    inverseOnSurface = SurfaceContainerLowestWhite,
     outline = OutlineGrey,
-    outlineVariant = OutlineVariantLight
+    outlineVariant = OutlineVariantLight,
+    surfaceBright = SurfaceContainerLowestWhite,
+    surfaceDim = SurfaceDimMuted,
+    surfaceContainer = SurfaceContainerNeutral,
+    surfaceContainerHigh = SurfaceContainerHighMedium,
+    surfaceContainerHighest = SurfaceContainerHighestDark,
+    surfaceContainerLow = SurfaceContainerLowLight,
+    surfaceContainerLowest = SurfaceContainerLowestWhite
   )
 
 private val LightColorScheme =
@@ -44,6 +63,7 @@ private val LightColorScheme =
     onPrimary = OnPrimaryWhite,
     primaryContainer = PrimaryContainerSoftGreen,
     onPrimaryContainer = OnPrimaryContainerLight,
+    inversePrimary = PrimaryFixed,
     secondary = SecondaryOliveGreen,
     onSecondary = OnSecondaryWhite,
     secondaryContainer = SecondaryContainerLime,
@@ -62,8 +82,18 @@ private val LightColorScheme =
     onSurface = OnSurfaceInk,
     surfaceVariant = SurfaceVariantGrey,
     onSurfaceVariant = OnSurfaceVariantDark,
+    surfaceTint = PrimaryDeepGreen,
+    inverseSurface = InkText,
+    inverseOnSurface = SurfaceContainerLowestWhite,
     outline = OutlineGrey,
-    outlineVariant = OutlineVariantLight
+    outlineVariant = OutlineVariantLight,
+    surfaceBright = SurfaceContainerLowestWhite,
+    surfaceDim = SurfaceDimMuted,
+    surfaceContainer = SurfaceContainerNeutral,
+    surfaceContainerHigh = SurfaceContainerHighMedium,
+    surfaceContainerHighest = SurfaceContainerHighestDark,
+    surfaceContainerLow = SurfaceContainerLowLight,
+    surfaceContainerLowest = SurfaceContainerLowestWhite
   )
 
 @Composable

@@ -42,7 +42,7 @@ fun MainHub(state: NirogState) {
                     state.currentScreen = "profile"
                 },
                 onNotificationClick = {
-                    state.currentScreen = "notification_settings"
+                    state.currentScreen = "notifications"
                 },
                 onCartClick = { state.currentScreen = "cart" }
             )
@@ -53,7 +53,12 @@ fun MainHub(state: NirogState) {
                 onTabSelect = { state.activeTab = it }
             )
         },
-        containerColor = Color(0xFFF8F6EF)
+        containerColor = Color(0xFFF8F6EF),
+        // Top/bottom bars already apply statusBarsPadding()/navigationBarsPadding()
+        // internally, so Scaffold must not reserve those insets a second time here -
+        // that double-reservation was the cause of the large empty gaps above the
+        // greeting and below the bottom nav bar.
+        contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { innerPadding ->
         Box(
             modifier = Modifier
@@ -78,6 +83,16 @@ fun MainHub(state: NirogState) {
 private fun markTourSeen(context: android.content.Context) {
     context.getSharedPreferences("nirog_prefs", android.content.Context.MODE_PRIVATE)
         .edit().putBoolean("onboarding_tour_seen", true).apply()
+}
+
+// Consultation booking now happens on nirogbhumi.com rather than the in-app
+// stepper, so entry points open the website instead of navigating further.
+private fun openNirogBhumiWebsite(context: android.content.Context) {
+    runCatching {
+        context.startActivity(
+            android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://nirogbhumi.com"))
+        )
+    }
 }
 
 @Composable
@@ -1515,6 +1530,7 @@ fun InsightsTab(state: NirogState) {
 // TAB 4: Care Team & Consultations
 @Composable
 fun CareTab(state: NirogState) {
+    val context = LocalContext.current
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1542,7 +1558,7 @@ fun CareTab(state: NirogState) {
         Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable { state.currentScreen = "consultation_types" }
+                .clickable { openNirogBhumiWebsite(context) }
                 .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.3f), shape = RoundedCornerShape(24.dp)),
             colors = CardDefaults.cardColors(containerColor = Color(0xFFEEE8DC)),
             shape = RoundedCornerShape(24.dp)
@@ -1561,7 +1577,7 @@ fun CareTab(state: NirogState) {
                 Spacer(modifier = Modifier.height(4.dp))
 
                 Text(
-                    text = "Schedule video consultations or follow-ups with qualified experts and metabolic coaches.",
+                    text = "Schedule video consultations or follow-ups with qualified experts and metabolic coaches on nirogbhumi.com.",
                     fontSize = 14.sp,
                     color = Color(0xFF434842),
                     lineHeight = 18.sp
@@ -1570,10 +1586,7 @@ fun CareTab(state: NirogState) {
                 Spacer(modifier = Modifier.height(18.dp))
 
                 Button(
-                    onClick = {
-                        state.consultStep = 1
-                        state.currentScreen = "consult_stepper"
-                    },
+                    onClick = { openNirogBhumiWebsite(context) },
                     modifier = Modifier.fillMaxWidth(),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF314936)),
                     shape = RoundedCornerShape(20.dp)
@@ -1581,7 +1594,7 @@ fun CareTab(state: NirogState) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Filled.CalendarMonth, "Book Class", modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Book Consultation", fontWeight = FontWeight.Bold)
+                        Text("Book Consultation on nirogbhumi.com", fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -1716,6 +1729,9 @@ fun CareTab(state: NirogState) {
 // TAB 5: Learn Section & Store
 @Composable
 fun LearnTab(state: NirogState) {
+    val context = LocalContext.current
+    var featuredArticle by remember { mutableStateOf<Result<List<com.nirogbhumi.app.content.NirogBhumiArticle>>?>(null) }
+    LaunchedEffect(Unit) { featuredArticle = com.nirogbhumi.app.content.NirogBhumiContentApi.fetchArticles(perPage = 1) }
     val storeProducts = listOf(
         StoreProduct(1, "Metabolic Health Kit", "Practical program support tools", "₹2,499", "https://lh3.googleusercontent.com/aida-public/AB6AXuAoO2CNikwTlslSE5tcf8ZZH0nlWC50VF5es0zN87-MW1SmCiM8KfOffKi_5IGARyQozjibn5VMupjhsi4f8A7bCsL80qJFP61a2xfmfFf9rWanenexPvohOBo0mjTEtrsp0xyHcgjBXP3DQzFeV6PoIUmCNMh9EFlPzhmecxaZ_PILJQJXEBYlOlQ3v7lOyQURl5JYoJBPPCRWRp38g1zXXdbNBUy4hpR6IChVg2kmjFpr3iMGkk6dJnfJEFo8rURhQZVc6iAceBw"),
         StoreProduct(2, "Jal Neti Pot", "Ceramic sinus cleansing tool", "₹450", "https://lh3.googleusercontent.com/aida-public/AB6AXuDvaGRrpKr1PZz5fErBo90b5adVv18mhAphPhJSxqUeVkICr8EtPy7ihi1jvmIAvQzxpovja0bZGharwGHm7qOogAid_rgqT1VgbZPWM1K_8vnqC6JRO9KuSbm1ug27dD5vvj7F8e2fUlLRVCUYKko7-vEt7oJg3lbfOs_d14K7DDcKj2hwTIZ2OmRs954u4Jpj4pn_qsDRRQgsrSYJ_cYv07YXfVmiplTUnxGD91TmG1QJ28kLXS8YhsU3cOPgUBnsJr_IKshREGU"),
@@ -1798,56 +1814,74 @@ fun LearnTab(state: NirogState) {
             color = Color(0xFF1B3221)
         )
 
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.35f), shape = RoundedCornerShape(24.dp))
-                .clickable { state.selectedArticleTitle = "Why walking after meals helps blood sugar"; state.currentScreen = "article_detail" },
-            colors = CardDefaults.cardColors(containerColor = Color.White),
-            shape = RoundedCornerShape(24.dp)
-        ) {
-            Column {
-                AsyncImage(
-                    model = "https://lh3.googleusercontent.com/aida-public/AB6AXuAiKstrL5Z2X50MVjICfXPYiCenL_XiAhjJ6m_rtONb9ESjHiQGFBNYN9JCxsLd-OcRQZ3DCjpkQoEg1NC7vuhkTzmgNLvb0eqimy5C--zUoclsNLq7jYsbYg-IZHevbRt2G0KAFh1X257Yx9v4knCQF8BdqheXPg4i7VuMw1gLXRVJkFh00V5Fe1tVJ_0NGqhtJRVf6SZDiQip52J0XeNwOglN_aJLfSODjG6oNmBKABF8jkZK3uQJaOj74CMZHiTa6S4ksNxqPWQ",
-                    contentDescription = "Walking path",
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(180.dp),
-                    contentScale = ContentScale.Crop
-                )
-
-                Column(
-                    modifier = Modifier.padding(16.dp)
-                ) {
-                    Text(
-                        text = "Why walking after meals helps blood sugar",
-                        fontSize = 18.sp,
-                        fontFamily = FontFamily.Serif,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF1B3221)
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "Discover the simple practice of Shatapavali (100 steps) and how it profoundly impacts your post-prandial glucose levels.",
-                        fontSize = 13.sp,
-                        color = Color(0xFF434842),
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("4 min read", fontSize = 11.sp, color = Color(0xFF737972))
-                        Box(
+        val featured = featuredArticle?.getOrNull()?.firstOrNull()
+        when {
+            featuredArticle == null -> Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 8.dp)) {
+                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Color(0xFF9CB79F))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Loading from nirogbhumi.com...", fontSize = 13.sp, color = Color(0xFF697169))
+            }
+            featured == null -> Text(
+                "Couldn't load the latest article from nirogbhumi.com right now.",
+                fontSize = 13.sp, color = Color(0xFF697169)
+            )
+            else -> Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.35f), shape = RoundedCornerShape(24.dp))
+                    .clickable {
+                        runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(featured.link))) }
+                    },
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                shape = RoundedCornerShape(24.dp)
+            ) {
+                Column {
+                    featured.imageUrl?.let { url ->
+                        AsyncImage(
+                            model = url,
+                            contentDescription = featured.title,
                             modifier = Modifier
-                                .size(32.dp)
-                                .background(Color(0xFF314936), CircleShape),
-                            contentAlignment = Alignment.Center
+                                .fillMaxWidth()
+                                .height(180.dp),
+                            contentScale = ContentScale.Crop
+                        )
+                    }
+
+                    Column(
+                        modifier = Modifier.padding(16.dp)
+                    ) {
+                        Text(
+                            text = featured.title,
+                            fontSize = 18.sp,
+                            fontFamily = FontFamily.Serif,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF1B3221)
+                        )
+                        if (featured.excerpt.isNotBlank()) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = featured.excerpt,
+                                fontSize = 13.sp,
+                                color = Color(0xFF434842),
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(Icons.Filled.ChevronRight, "Read", tint = Color.White)
+                            Text(featured.dateLabel, fontSize = 11.sp, color = Color(0xFF737972))
+                            Box(
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .background(Color(0xFF314936), CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Filled.ChevronRight, "Read", tint = Color.White)
+                            }
                         }
                     }
                 }

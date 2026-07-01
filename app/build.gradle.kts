@@ -122,6 +122,7 @@ dependencies {
   implementation(libs.play.services.auth)
   implementation(libs.razorpay.checkout)
   implementation(libs.androidx.health.connect)
+  implementation(libs.androidx.work.runtime.ktx)
   implementation(libs.kotlinx.coroutines.android)
   implementation(libs.kotlinx.coroutines.core)
   testImplementation(libs.androidx.compose.ui.test.junit4)

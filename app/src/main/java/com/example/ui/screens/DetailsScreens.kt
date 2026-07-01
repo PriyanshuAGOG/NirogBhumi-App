@@ -1756,3 +1756,613 @@ fun ProfileEditScreen(state: NirogState) {
         }
     }
 }
+
+@Composable
+private fun DetailScreenHeader(title: String, onBack: () -> Unit, trailing: @Composable () -> Unit = {}) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        IconButton(onClick = onBack) {
+            Icon(Icons.Outlined.ArrowBack, contentDescription = "Back", tint = Color(0xFF1B3221))
+        }
+        Text(title, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221), modifier = Modifier.weight(1f))
+        trailing()
+    }
+}
+
+@Composable
+private fun EmptyStateCard(icon: androidx.compose.ui.graphics.vector.ImageVector, message: String) {
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 48.dp, horizontal = 24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Icon(icon, contentDescription = null, tint = Color(0xFF9CB79F), modifier = Modifier.size(40.dp))
+        Spacer(modifier = Modifier.height(12.dp))
+        Text(message, fontSize = 14.sp, color = Color(0xFF697169), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+    }
+}
+
+// Family Profiles - custom list replacing the generic catalog rendering, with a
+// pinned "My profile" entry plus real family member cards from Firestore.
+@Composable
+fun FamilyProfilesScreen(state: NirogState) {
+    var records by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>?>(null) }
+    DisposableEffect(Unit) {
+        val subscription = state.repository.listenUserCollection("profiles", 30) { result ->
+            records = when (result) {
+                is com.nirogbhumi.app.data.CloudResult.Success -> result.value
+                is com.nirogbhumi.app.data.CloudResult.Failure -> emptyList()
+            }
+        }
+        onDispose { subscription.cancel() }
+    }
+
+    Column(
+        modifier = Modifier.fillMaxSize().background(Color(0xFFF8F6EF)).verticalScroll(rememberScrollState())
+    ) {
+        DetailScreenHeader("Family Profiles", onBack = { state.currentScreen = "profile" })
+
+        Text(
+            "Care for family without mixing health records.",
+            fontSize = 13.sp, color = Color(0xFF697169),
+            modifier = Modifier.padding(horizontal = 20.dp)
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Card(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            shape = RoundedCornerShape(16.dp),
+            border = BorderStroke(0.5.dp, Color(0xFFD8D0C0))
+        ) {
+            Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier.size(44.dp).clip(CircleShape).background(Color(0xFF314936)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(state.profileName.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+                Spacer(modifier = Modifier.width(14.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(state.profileName.ifBlank { "You" }, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+                    Text("My profile · this device", fontSize = 12.sp, color = Color(0xFF737972))
+                }
+                Surface(color = Color(0xFFE4EFDB), shape = RoundedCornerShape(10.dp)) {
+                    Text("Active", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF314936), modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+        Text(
+            "FAMILY MEMBERS", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF737972),
+            letterSpacing = 0.5.sp, modifier = Modifier.padding(horizontal = 20.dp)
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+
+        when {
+            records == null -> Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Color(0xFF9CB79F))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Loading...", fontSize = 13.sp, color = Color(0xFF697169))
+            }
+            records!!.isEmpty() -> EmptyStateCard(Icons.Filled.FamilyRestroom, "No family members added yet. Add one to track their health separately from your own.")
+            else -> Column(modifier = Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                records!!.forEach { record ->
+                    val name = record.values["name"]?.toString() ?: record.values["fullName"]?.toString() ?: "Family member"
+                    val relationship = record.values["relationship"]?.toString()?.ifBlank { null }
+                    val status = record.values["selection"]?.toString()?.ifBlank { null }
+                    Card(
+                        modifier = Modifier.fillMaxWidth().clickable {
+                            state.selectedDocumentId = record.id
+                            state.selectedDocumentValues = record.values
+                            state.currentScreen = "family_dashboard"
+                        },
+                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                        shape = RoundedCornerShape(16.dp),
+                        border = BorderStroke(0.5.dp, Color(0xFFD8D0C0))
+                    ) {
+                        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier.size(44.dp).clip(CircleShape).background(Color(0xFF9CB79F)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(name.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?", color = Color.White, fontWeight = FontWeight.Bold)
+                            }
+                            Spacer(modifier = Modifier.width(14.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(name, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+                                Text(relationship ?: "Family member", fontSize = 12.sp, color = Color(0xFF737972))
+                            }
+                            status?.let {
+                                Surface(color = Color(0xFFF5E7D1), shape = RoundedCornerShape(10.dp)) {
+                                    Text(it.replace('_', ' '), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF6E4D16), modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+                                }
+                            }
+                            Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Color(0xFFC3C8C0))
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+        Button(
+            onClick = { state.currentScreen = "add_family" },
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).height(52.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF314936)),
+            shape = RoundedCornerShape(26.dp)
+        ) {
+            Icon(Icons.Filled.Add, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Add family member", color = Color.White, fontWeight = FontWeight.Bold)
+        }
+        Spacer(modifier = Modifier.height(32.dp))
+    }
+}
+
+// Orders - custom list replacing the generic catalog rendering, with real status
+// badges instead of the one-size-fits-all form/list layout.
+@Composable
+fun OrdersScreen(state: NirogState) {
+    var records by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>?>(null) }
+    DisposableEffect(Unit) {
+        val subscription = state.repository.listenUserCollection("orders", 30) { result ->
+            records = when (result) {
+                is com.nirogbhumi.app.data.CloudResult.Success -> result.value
+                is com.nirogbhumi.app.data.CloudResult.Failure -> emptyList()
+            }
+        }
+        onDispose { subscription.cancel() }
+    }
+
+    Column(modifier = Modifier.fillMaxSize().background(Color(0xFFF8F6EF)).verticalScroll(rememberScrollState())) {
+        DetailScreenHeader("Orders", onBack = { state.currentScreen = "profile" })
+
+        when {
+            records == null -> Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 24.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Color(0xFF9CB79F))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Loading your orders...", fontSize = 13.sp, color = Color(0xFF697169))
+            }
+            records!!.isEmpty() -> Column {
+                EmptyStateCard(Icons.Filled.ShoppingBag, "No orders yet. Products you order from the store will show up here with live status.")
+                Button(
+                    onClick = { state.currentScreen = "store_home" },
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).height(48.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF314936)),
+                    shape = RoundedCornerShape(24.dp)
+                ) { Text("Browse the store", color = Color.White, fontWeight = FontWeight.Bold) }
+            }
+            else -> Column(modifier = Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                records!!.sortedByDescending { (it.values["createdAt"] as? com.google.firebase.Timestamp)?.seconds ?: 0 }.forEach { record ->
+                    val status = (record.values["orderStatus"] ?: record.values["status"])?.toString() ?: "pending"
+                    val itemCount = (record.values["items"] as? List<*>)?.size ?: 0
+                    val date = (record.values["createdAt"] as? com.google.firebase.Timestamp)?.toDate()?.let {
+                        java.text.SimpleDateFormat("MMM d, yyyy", java.util.Locale.getDefault()).format(it)
+                    } ?: "Recently placed"
+                    Card(
+                        modifier = Modifier.fillMaxWidth().clickable {
+                            state.selectedDocumentId = record.id
+                            state.selectedDocumentValues = record.values
+                            state.currentScreen = "order_detail"
+                        },
+                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                        shape = RoundedCornerShape(16.dp),
+                        border = BorderStroke(0.5.dp, Color(0xFFD8D0C0))
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                Text("Order …${record.id.takeLast(6)}", fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+                                OrderStatusBadge(status)
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                if (itemCount > 0) "$itemCount item${if (itemCount != 1) "s" else ""} · $date" else date,
+                                fontSize = 12.sp, color = Color(0xFF737972)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(32.dp))
+    }
+}
+
+@Composable
+private fun OrderStatusBadge(status: String) {
+    val normalized = status.lowercase()
+    val (bg, fg, label) = when {
+        normalized.contains("cancel") -> Triple(Color(0xFFF7E7E3), Color(0xFF8B3E36), "Cancelled")
+        normalized.contains("deliver") -> Triple(Color(0xFFE4EFDB), Color(0xFF314936), "Delivered")
+        normalized.contains("ship") -> Triple(Color(0xFFDDF3F3), Color(0xFF215C5C), "Shipped")
+        normalized.contains("confirm") -> Triple(Color(0xFFE4EFDB), Color(0xFF314936), "Confirmed")
+        else -> Triple(Color(0xFFF5E7D1), Color(0xFF6E4D16), "Processing")
+    }
+    Surface(color = bg, shape = RoundedCornerShape(10.dp)) {
+        Text(label, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = fg, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+    }
+}
+
+// Notification Inbox - what the top-bar bell icon opens: real notification history
+// (local reminders that fired, and server-driven updates received via FCM) instead
+// of jumping straight to a settings form with nothing to look at.
+@Composable
+fun NotificationInboxScreen(state: NirogState) {
+    var records by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>?>(null) }
+    DisposableEffect(Unit) {
+        val subscription = state.repository.listenUserCollection("notifications", 30) { result ->
+            records = when (result) {
+                is com.nirogbhumi.app.data.CloudResult.Success -> result.value
+                is com.nirogbhumi.app.data.CloudResult.Failure -> emptyList()
+            }
+        }
+        onDispose { subscription.cancel() }
+    }
+
+    Column(modifier = Modifier.fillMaxSize().background(Color(0xFFF8F6EF)).verticalScroll(rememberScrollState())) {
+        DetailScreenHeader(
+            "Notifications",
+            onBack = { state.currentScreen = "dashboard" },
+            trailing = {
+                IconButton(onClick = { state.currentScreen = "notification_settings" }) {
+                    Icon(Icons.Filled.Settings, contentDescription = "Notification settings", tint = Color(0xFF1B3221))
+                }
+            }
+        )
+
+        when {
+            records == null -> Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 24.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Color(0xFF9CB79F))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Loading...", fontSize = 13.sp, color = Color(0xFF697169))
+            }
+            records!!.isEmpty() -> EmptyStateCard(Icons.Filled.NotificationsNone, "No notifications yet. Health reminders, order and consultation updates will show up here.")
+            else -> Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                records!!.sortedByDescending { (it.values["createdAt"] as? com.google.firebase.Timestamp)?.seconds ?: 0 }.forEach { record ->
+                    val category = record.values["category"]?.toString() ?: "update"
+                    val title = record.values["title"]?.toString() ?: "Nirog Bhumi"
+                    val body = record.values["body"]?.toString().orEmpty()
+                    val route = record.values["route"]?.toString() ?: "dashboard"
+                    val timestamp = (record.values["createdAt"] as? com.google.firebase.Timestamp)?.toDate()
+                    val relative = timestamp?.let { relativeTimeLabel(it) } ?: ""
+                    val icon = when (category) {
+                        "reminder" -> Icons.Filled.NotificationsActive
+                        "order" -> Icons.Filled.ShoppingBag
+                        "consultation" -> Icons.Filled.MedicalServices
+                        "program" -> Icons.Filled.Checklist
+                        "report" -> Icons.Filled.Insights
+                        "expert_message" -> Icons.Filled.Person
+                        else -> Icons.Filled.Notifications
+                    }
+                    Card(
+                        modifier = Modifier.fillMaxWidth().clickable { state.currentScreen = route },
+                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                        shape = RoundedCornerShape(16.dp),
+                        border = BorderStroke(0.5.dp, Color(0xFFD8D0C0))
+                    ) {
+                        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.Top) {
+                            Box(
+                                modifier = Modifier.size(36.dp).clip(CircleShape).background(Color(0xFFF1FDEE)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(icon, contentDescription = null, tint = Color(0xFF426820), modifier = Modifier.size(18.dp))
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(title, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221), fontSize = 14.sp)
+                                if (body.isNotBlank()) Text(body, fontSize = 12.sp, color = Color(0xFF697169), maxLines = 2)
+                                if (relative.isNotBlank()) Text(relative, fontSize = 11.sp, color = Color(0xFF9CB79F), modifier = Modifier.padding(top = 4.dp))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(32.dp))
+    }
+}
+
+private fun relativeTimeLabel(date: java.util.Date): String {
+    val diffMs = System.currentTimeMillis() - date.time
+    val minutes = diffMs / 60000
+    return when {
+        minutes < 1 -> "Just now"
+        minutes < 60 -> "$minutes min ago"
+        minutes < 24 * 60 -> "${minutes / 60}h ago"
+        minutes < 7 * 24 * 60 -> "${minutes / (24 * 60)}d ago"
+        else -> java.text.SimpleDateFormat("MMM d", java.util.Locale.getDefault()).format(date)
+    }
+}
+
+// Notification Settings - custom Switch-based screen replacing the generic
+// checklist form. Health reminders are real, on-device WorkManager schedules
+// (see ReminderScheduler/ReminderWorker) so they fire even without connectivity;
+// "Updates" are server-driven categories the backend consults before sending FCM.
+@Composable
+fun NotificationSettingsScreen(state: NirogState) {
+    val context = LocalContext.current
+    val activity = context as? android.app.Activity
+    var permissionDeniedNotice by remember { mutableStateOf(false) }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { granted -> if (!granted) permissionDeniedNotice = true }
+
+    fun ensureNotificationPermission() {
+        if (android.os.Build.VERSION.SDK_INT >= 33 && activity != null &&
+            androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            permissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+
+    var reminderStates by remember {
+        mutableStateOf(com.nirogbhumi.app.notifications.ReminderType.entries.associateWith { com.nirogbhumi.app.notifications.ReminderScheduler.isEnabled(context, it) })
+    }
+    var quietStart by remember { mutableStateOf(com.nirogbhumi.app.notifications.ReminderScheduler.quietHoursStart(context)) }
+    var quietEnd by remember { mutableStateOf(com.nirogbhumi.app.notifications.ReminderScheduler.quietHoursEnd(context)) }
+    var showStartPicker by remember { mutableStateOf(false) }
+    var showEndPicker by remember { mutableStateOf(false) }
+
+    val updateCategories = listOf("consultation" to "Consultation updates", "program" to "Program reminders", "order" to "Order updates")
+    var updateStates by remember {
+        mutableStateOf(updateCategories.associate { (key, _) -> key to com.nirogbhumi.app.notifications.ReminderScheduler.isUpdateCategoryEnabled(context, key) })
+    }
+
+    Column(modifier = Modifier.fillMaxSize().background(Color(0xFFF8F6EF)).verticalScroll(rememberScrollState())) {
+        DetailScreenHeader("Notification Settings", onBack = { state.currentScreen = "profile" })
+        Text(
+            "Keep reminders useful and quiet.", fontSize = 13.sp, color = Color(0xFF697169),
+            modifier = Modifier.padding(horizontal = 20.dp)
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+        SettingsSection(title = "Health Reminders (on this device)") {
+            com.nirogbhumi.app.notifications.ReminderType.entries.forEachIndexed { index, type ->
+                ReminderToggleRow(
+                    label = type.title,
+                    checked = reminderStates[type] == true,
+                    showDivider = index != com.nirogbhumi.app.notifications.ReminderType.entries.lastIndex
+                ) { checked ->
+                    if (checked) ensureNotificationPermission()
+                    com.nirogbhumi.app.notifications.ReminderScheduler.setEnabled(context, type, checked)
+                    reminderStates = reminderStates + (type to checked)
+                }
+            }
+        }
+
+        SettingsSection(title = "Quiet Hours") {
+            Row(
+                modifier = Modifier.fillMaxWidth().clickable { showStartPicker = true }.padding(horizontal = 16.dp, vertical = 14.dp),
+                horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Starts at", color = Color(0xFF1B3221))
+                Text(quietStart, fontWeight = FontWeight.Bold, color = Color(0xFF314936))
+            }
+            Divider(color = Color(0xFFF0ECE2), thickness = 1.dp)
+            Row(
+                modifier = Modifier.fillMaxWidth().clickable { showEndPicker = true }.padding(horizontal = 16.dp, vertical = 14.dp),
+                horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Ends at", color = Color(0xFF1B3221))
+                Text(quietEnd, fontWeight = FontWeight.Bold, color = Color(0xFF314936))
+            }
+        }
+
+        SettingsSection(title = "Updates") {
+            updateCategories.forEachIndexed { index, (key, label) ->
+                ReminderToggleRow(
+                    label = label,
+                    checked = updateStates[key] == true,
+                    showDivider = index != updateCategories.lastIndex
+                ) { checked ->
+                    com.nirogbhumi.app.notifications.ReminderScheduler.setUpdateCategoryEnabled(context, key, checked)
+                    updateStates = updateStates + (key to checked)
+                    val selected = updateCategories.filter { (k, _) -> updateStates[k] == true }.map { it.second }
+                    state.repository.saveProfile(
+                        mapOf(
+                            "notificationPreferences" to mapOf(
+                                "enabledUpdateTypes" to selected,
+                                "quietHoursStart" to quietStart,
+                                "quietHoursEnd" to quietEnd
+                            ),
+                            "preferencesUpdatedAt" to com.google.firebase.firestore.FieldValue.serverTimestamp()
+                        )
+                    ) { }
+                }
+            }
+        }
+
+        if (permissionDeniedNotice) {
+            Surface(
+                color = Color(0xFFF5E7D1), shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)
+            ) {
+                Text(
+                    "Notifications are turned off for Nirog Bhumi in system settings, so reminders won't be visible until you allow them.",
+                    modifier = Modifier.padding(12.dp), fontSize = 12.sp, color = Color(0xFF6E4D16)
+                )
+            }
+        }
+
+        Text(
+            "Health reminders run on this device and work even offline. Quiet hours pause all reminders during that window.",
+            fontSize = 11.sp, color = Color(0xFF6B736C), lineHeight = 16.sp,
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)
+        )
+        Spacer(modifier = Modifier.height(24.dp))
+    }
+
+    if (showStartPicker) {
+        TimePickerAlertDialog(
+            initial = quietStart,
+            onDismiss = { showStartPicker = false },
+            onConfirm = { value ->
+                quietStart = value
+                com.nirogbhumi.app.notifications.ReminderScheduler.setQuietHours(context, value, quietEnd)
+                showStartPicker = false
+            }
+        )
+    }
+    if (showEndPicker) {
+        TimePickerAlertDialog(
+            initial = quietEnd,
+            onDismiss = { showEndPicker = false },
+            onConfirm = { value ->
+                quietEnd = value
+                com.nirogbhumi.app.notifications.ReminderScheduler.setQuietHours(context, quietStart, value)
+                showEndPicker = false
+            }
+        )
+    }
+}
+
+@Composable
+private fun ReminderToggleRow(label: String, checked: Boolean, showDivider: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    Column {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(label, fontSize = 14.sp, color = Color(0xFF1B3221), modifier = Modifier.weight(1f))
+            Switch(
+                checked = checked, onCheckedChange = onCheckedChange,
+                colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Color(0xFF314936))
+            )
+        }
+        if (showDivider) Divider(color = Color(0xFFF0ECE2), thickness = 1.dp, modifier = Modifier.padding(start = 16.dp))
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TimePickerAlertDialog(initial: String, onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
+    val parts = initial.split(":").mapNotNull { it.toIntOrNull() }
+    val pickerState = rememberTimePickerState(
+        initialHour = parts.getOrElse(0) { 21 },
+        initialMinute = parts.getOrElse(1) { 0 },
+        is24Hour = true
+    )
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Choose a time", fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221)) },
+        text = { TimePicker(state = pickerState) },
+        confirmButton = {
+            Button(
+                onClick = { onConfirm(String.format(java.util.Locale.US, "%02d:%02d", pickerState.hour, pickerState.minute)) },
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF314936))
+            ) { Text("Set", color = Color.White) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel", color = Color(0xFF737972)) } }
+    )
+}
+
+private fun openWebUrl(context: android.content.Context, url: String) {
+    if (url.isBlank()) return
+    runCatching {
+        context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)))
+    }
+}
+
+// Articles - replaces the generic Firestore-backed catalog list with real posts
+// pulled live from nirogbhumi.com's public WordPress API. Reading the rest of an
+// article opens the real page on the site rather than re-rendering raw post HTML
+// natively, since that HTML can contain arbitrary embeds that don't translate
+// reliably to Compose.
+@Composable
+fun ArticlesScreen(state: NirogState) {
+    val context = LocalContext.current
+    var result by remember { mutableStateOf<Result<List<com.nirogbhumi.app.content.NirogBhumiArticle>>?>(null) }
+    LaunchedEffect(Unit) {
+        result = com.nirogbhumi.app.content.NirogBhumiContentApi.fetchArticles()
+    }
+
+    Column(modifier = Modifier.fillMaxSize().background(Color(0xFFF8F6EF)).verticalScroll(rememberScrollState())) {
+        DetailScreenHeader("Learn", onBack = { state.currentScreen = "dashboard" })
+        Text(
+            "The latest from nirogbhumi.com.", fontSize = 13.sp, color = Color(0xFF697169),
+            modifier = Modifier.padding(horizontal = 20.dp)
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+
+        when (val current = result) {
+            null -> Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 24.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Color(0xFF9CB79F))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Loading articles from nirogbhumi.com...", fontSize = 13.sp, color = Color(0xFF697169))
+            }
+            else -> current.fold(
+                onSuccess = { articles ->
+                    if (articles.isEmpty()) {
+                        EmptyStateCard(Icons.Filled.MenuBook, "No articles available from nirogbhumi.com right now.")
+                    } else {
+                        Column(modifier = Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            articles.forEach { article -> ArticleCard(article) { openWebUrl(context, article.link) } }
+                        }
+                    }
+                },
+                onFailure = {
+                    Column(modifier = Modifier.padding(horizontal = 20.dp)) {
+                        EmptyStateCard(Icons.Filled.CloudOff, "Couldn't reach nirogbhumi.com right now. Check your connection and try again.")
+                        OutlinedButton(
+                            onClick = { openWebUrl(context, "https://nirogbhumi.com") },
+                            modifier = Modifier.fillMaxWidth().height(48.dp),
+                            shape = RoundedCornerShape(24.dp)
+                        ) { Text("Open nirogbhumi.com instead") }
+                    }
+                }
+            )
+        }
+        Spacer(modifier = Modifier.height(32.dp))
+    }
+}
+
+@Composable
+private fun ArticleCard(article: com.nirogbhumi.app.content.NirogBhumiArticle, onClick: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        shape = RoundedCornerShape(20.dp),
+        border = BorderStroke(0.5.dp, Color(0xFFD8D0C0))
+    ) {
+        Column {
+            article.imageUrl?.let { url ->
+                coil.compose.AsyncImage(
+                    model = url, contentDescription = article.title,
+                    modifier = Modifier.fillMaxWidth().height(160.dp),
+                    contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                )
+            }
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(article.title, fontFamily = FontFamily.Serif, fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+                if (article.excerpt.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(article.excerpt, fontSize = 13.sp, color = Color(0xFF434842), maxLines = 3, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                }
+                Spacer(modifier = Modifier.height(10.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Text(article.dateLabel, fontSize = 11.sp, color = Color(0xFF737972))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Read on nirogbhumi.com", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF314936))
+                        Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Color(0xFF314936), modifier = Modifier.size(14.dp))
+                    }
+                }
+            }
+        }
+    }
+}

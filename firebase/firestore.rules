@@ -39,6 +39,10 @@ service cloud.firestore {
       allow create: if collection in ['deviceConnections','carts'] && ownsRequest();
       allow update: if collection in ['deviceConnections','carts'] && ownsResource() && ownsRequest() && preservesUserId();
       allow create: if collection == 'orders' && validCreate() && request.resource.data.paymentStatus == 'pending' && request.resource.data.orderStatus == 'pending';
+      // The device itself (local reminder fired, FCM message received) is the
+      // one recording that a notification happened, so a self-scoped create
+      // is safe - it can only ever write an entry claiming to be its own user.
+      allow create: if collection == 'notifications' && validCreate();
     }
     match /contentItems/{id} { allow read: if resource.data.status == 'published' || admin(); allow write: if admin() || role('content_manager'); }
     match /products/{id} { allow read: if resource.data.active == true || admin(); allow write: if admin() || role('store_manager'); }

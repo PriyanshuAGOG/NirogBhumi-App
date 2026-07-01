@@ -57,7 +57,7 @@ class FirebaseHealthRepository : HealthRepository {
     override fun addHealthLog(collection: String, values: Map<String, Any?>, done: (CloudResult<String>) -> Unit) {
         val allowed = setOf(
             "profiles", "glucoseReadings", "bpReadings", "sleepLogs", "walkLogs", "weightLogs", "waterLogs",
-            "mealLogs", "medications", "medicationLogs", "labReports", "consultations", "orders", "checklistLogs", "supportRequests"
+            "mealLogs", "medications", "medicationLogs", "labReports", "consultations", "orders", "checklistLogs", "supportRequests", "notifications"
         )
         if (collection !in allowed) return done(CloudResult.Failure("Unsupported health log"))
         val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))

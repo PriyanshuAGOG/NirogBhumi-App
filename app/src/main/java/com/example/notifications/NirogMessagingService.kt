@@ -38,6 +38,7 @@ class NirogMessagingService : FirebaseMessagingService() {
             .setAutoCancel(true).setContentIntent(pending).build()
         if (android.os.Build.VERSION.SDK_INT < 33 || checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
             NotificationManagerCompat.from(this).notify(message.messageId?.hashCode() ?: body.hashCode(), notification)
+            NotificationLog.record(message.data["type"] ?: "update", title, body, route)
         }
     }
 }
