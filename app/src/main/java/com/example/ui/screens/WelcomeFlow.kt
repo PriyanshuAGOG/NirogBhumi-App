@@ -17,6 +17,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -42,72 +44,14 @@ val White = Color(0xFFFFFFFF)
 
 @Composable
 fun NirogLogo(modifier: Modifier = Modifier) {
-    androidx.compose.foundation.Canvas(modifier = modifier) {
-        val w = size.width
-        val h = size.height
-        val cX = w / 2
-        val cY = h / 2
-        val r = w / 2
-
-        // Background circle with gradient exactly like the colorful lotus leaf circle
-        drawCircle(
-            brush = androidx.compose.ui.graphics.Brush.radialGradient(
-                colors = listOf(
-                    Color(0xFFE5FA96), // Center yellowish-lime
-                    Color(0xFF7BD0D4)  // Outer pastel turquoise
-                ),
-                center = androidx.compose.ui.geometry.Offset(cX, cY),
-                radius = r
-            )
-        )
-
-        // Draw 3 lotus petals with sunset rainbow gradient
-        val scale = w / 100f
-
-        val petalGradient = androidx.compose.ui.graphics.Brush.verticalGradient(
-            colors = listOf(
-                Color(0xFFAC9EE6), // Top lavender
-                Color(0xFF81D7D2), // Teal
-                Color(0xFFA6E673), // Bright lime green
-                Color(0xFFF9D649), // Sunset yellow
-                Color(0xFFEE9749), // Tangerine orange
-                Color(0xFF4589CE)  // Indigo-blue bottom base
-            )
-        )
-
-        // 1. Central vertical leaf petal
-        val centralPetalPath = androidx.compose.ui.graphics.Path().apply {
-            moveTo(cX, cY - 26 * scale)
-            quadraticTo(cX - 16 * scale, cY, cX, cY + 26 * scale)
-            quadraticTo(cX + 16 * scale, cY, cX, cY - 26 * scale)
-        }
-
-        // 2. Left leaf petal
-        val leftPetalPath = androidx.compose.ui.graphics.Path().apply {
-            moveTo(cX, cY + 26 * scale)
-            quadraticTo(cX - 28 * scale, cY + 12 * scale, cX - 34 * scale, cY - 8 * scale)
-            quadraticTo(cX - 15 * scale, cY + 10 * scale, cX, cY + 26 * scale)
-        }
-
-        // 3. Right leaf petal
-        val rightPetalPath = androidx.compose.ui.graphics.Path().apply {
-            moveTo(cX, cY + 26 * scale)
-            quadraticTo(cX + 28 * scale, cY + 12 * scale, cX + 34 * scale, cY - 8 * scale)
-            quadraticTo(cX + 15 * scale, cY + 10 * scale, cX, cY + 26 * scale)
-        }
-
-        // Draw filled paths
-        drawPath(path = centralPetalPath, brush = petalGradient)
-        drawPath(path = leftPetalPath, brush = petalGradient)
-        drawPath(path = rightPetalPath, brush = petalGradient)
-
-        // Draw thin white border outline curves exactly matching the logo
-        val strokeWidth = 1.6f * scale
-        val stStyle = androidx.compose.ui.graphics.drawscope.Stroke(width = strokeWidth)
-        drawPath(path = centralPetalPath, color = Color.White, style = stStyle)
-        drawPath(path = leftPetalPath, color = Color.White, style = stStyle)
-        drawPath(path = rightPetalPath, color = Color.White, style = stStyle)
-    }
+    // Renders the actual brand mark asset (assets/branding/nirog-bhumi-logo-mark.png),
+    // not a hand-drawn approximation, so it's pixel-identical to the real logo everywhere it appears.
+    Image(
+        painter = painterResource(id = com.nirogbhumi.app.R.drawable.logo_nirog_mark),
+        contentDescription = "Nirog Bhumi logo",
+        modifier = modifier,
+        contentScale = ContentScale.Fit
+    )
 }
 
 // SCREEN 1: SPLASH SCREEN
