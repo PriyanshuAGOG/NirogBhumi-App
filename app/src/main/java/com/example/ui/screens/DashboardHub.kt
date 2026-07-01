@@ -27,7 +27,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.nirogbhumi.app.ui.NirogState
-import com.nirogbhumi.app.ui.StoreProduct
 import com.nirogbhumi.app.ui.SugarLog
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -36,15 +35,13 @@ fun MainHub(state: NirogState) {
     Scaffold(
         topBar = {
             NirogTopAppBar(
-                cartCount = state.cartProducts.size,
                 profileName = state.profileName,
                 onProfileClick = {
                     state.currentScreen = "profile"
                 },
                 onNotificationClick = {
                     state.currentScreen = "notifications"
-                },
-                onCartClick = { state.currentScreen = "cart" }
+                }
             )
         },
         bottomBar = {
@@ -242,7 +239,7 @@ fun OnboardingTourOverlay(state: NirogState) {
 
 // Custom Top App Bar matching Nirog Bhumi layout
 @Composable
-fun NirogTopAppBar(cartCount: Int, profileName: String, onProfileClick: () -> Unit, onNotificationClick: () -> Unit, onCartClick: () -> Unit) {
+fun NirogTopAppBar(profileName: String, onProfileClick: () -> Unit, onNotificationClick: () -> Unit) {
     Surface(
         color = Color(0xFFF1FDEE),
         modifier = Modifier
@@ -288,23 +285,6 @@ fun NirogTopAppBar(cartCount: Int, profileName: String, onProfileClick: () -> Un
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
-                if (cartCount > 0) {
-                    Box(
-                        modifier = Modifier
-                            .padding(end = 8.dp)
-                            .clickable(onClick = onCartClick)
-                            .background(Color(0xFFBFEE95), RoundedCornerShape(12.dp))
-                            .padding(horizontal = 8.dp, vertical = 4.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "$cartCount items",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF1B3221)
-                        )
-                    }
-                }
 
                 IconButton(onClick = onNotificationClick) {
                     Icon(
@@ -869,7 +849,6 @@ fun TrackTab(state: NirogState) {
             ) {
                 QuickLogChip("Sugar", Icons.Filled.Bloodtype, Color(0xFFBA1A1A)) { quickLogMetric = "sugar" }
                 QuickLogChip("BP", Icons.Filled.Favorite, Color(0xFF1B3221)) { quickLogMetric = "bp" }
-                QuickLogChip("Water", Icons.Filled.WaterDrop, Color(0xFF1B3221)) { quickLogMetric = "water" }
                 QuickLogChip("Weight", Icons.Filled.MonitorWeight, Color(0xFF4B6450)) { quickLogMetric = "weight" }
             }
         }
@@ -919,7 +898,7 @@ fun TrackTab(state: NirogState) {
                     icon = Icons.Filled.DirectionsWalk,
                     iconBg = Color(0xFFBFEE95).copy(alpha = 0.5f),
                     iconTint = Color(0xFF426820),
-                    title = "Walking",
+                    title = "Walking & Activity",
                     measuredValue = if (state.stepsLogged > 0) String.format("%,d", state.stepsLogged) else "No data",
                     labelSuffix = "",
                     onClick = { state.currentScreen = "walking_overview" }
@@ -927,90 +906,16 @@ fun TrackTab(state: NirogState) {
             }
         }
 
-        Row(modifier = Modifier.fillMaxWidth()) {
-            Box(modifier = Modifier.weight(1f).padding(end = 6.dp)) {
-                // Interactive modular water tracking directly inside Hub!
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .aspectRatio(1.0f)
-                        .clickable { state.currentScreen = "water_overview" }
-                        .border(width = 0.5.dp, color = Color(0xFFC3C8C0), roundedCorner = 24),
-                    colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = Color.White)
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp).fillMaxSize(),
-                        verticalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
-                                modifier = Modifier.size(36.dp).background(Color(0xFFCDEAD0), CircleShape),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(Icons.Filled.WaterDrop, "Water", tint = Color(0xFF1B3221), modifier = Modifier.size(18.dp))
-                            }
-                            // Quick Increment button
-                            IconButton(
-                                onClick = { state.currentScreen = "quick_water" },
-                                modifier = Modifier.size(24.dp)
-                            ) {
-                                Icon(Icons.Default.AddCircle, contentDescription = "Add Water", tint = Color(0xFF1B3221))
-                            }
-                        }
-
-                        Column {
-                            Text("Water", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF434842))
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Row(verticalAlignment = Alignment.Bottom) {
-                                Text("${1.5 + (0.25 * state.waterGlasses)}", fontSize = 24.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("L", fontSize = 12.sp, color = Color(0xFF737972))
-                            }
-                        }
-                    }
-                }
-            }
-            Box(modifier = Modifier.weight(1f).padding(start = 6.dp)) {
-                TrackModuleBox(
-                    icon = Icons.Filled.Restaurant,
-                    iconBg = Color(0xFFFFD9DE),
-                    iconTint = Color(0xFF43242A),
-                    title = "Food Impact",
-                    measuredValue = "Stable",
-                    labelSuffix = "",
-                    onClick = { state.currentScreen = "food_journal" }
-                )
-            }
-        }
-
-        Row(modifier = Modifier.fillMaxWidth()) {
-            Box(modifier = Modifier.weight(1f).padding(end = 6.dp)) {
-                TrackModuleBox(
-                    icon = Icons.Filled.Medication,
-                    iconBg = Color(0xFFFFD9DE),
-                    iconTint = Color(0xFF43242A),
-                    title = "Medication",
-                    measuredValue = "Taken",
-                    labelSuffix = "",
-                    onClick = { state.currentScreen = "medication_overview" }
-                )
-            }
-            Box(modifier = Modifier.weight(1f).padding(start = 6.dp)) {
-                TrackModuleBox(
-                    icon = Icons.Filled.Science,
-                    iconBg = Color(0xFFE5F1E2),
-                    iconTint = Color(0xFF1B3221),
-                    title = "Lab Reports",
-                    measuredValue = "New",
-                    labelSuffix = "",
-                    onClick = { state.currentScreen = "lab_reports" }
-                )
-            }
-        }
+        TrackModuleBox(
+            icon = Icons.Filled.Science,
+            iconBg = Color(0xFFE5F1E2),
+            iconTint = Color(0xFF1B3221),
+            title = "Lab Reports",
+            measuredValue = "Upload",
+            labelSuffix = "",
+            fullWidth = true,
+            onClick = { state.currentScreen = "lab_reports" }
+        )
         Spacer(modifier = Modifier.height(32.dp))
     }
 
@@ -1053,7 +958,6 @@ fun QuickLogSheet(state: NirogState, metric: String, onDismiss: () -> Unit) {
     val title = when (metric) {
         "sugar" -> "Log Blood Sugar"
         "bp" -> "Log Blood Pressure"
-        "water" -> "Log Water"
         else -> "Log Weight"
     }
 
@@ -1111,7 +1015,6 @@ fun QuickLogSheet(state: NirogState, metric: String, onDismiss: () -> Unit) {
                         modifier = Modifier.weight(1f)
                     )
                 }
-                "water" -> Text("Add one glass (250ml) to today's water intake.", fontSize = 14.sp, color = Color(0xFF434842))
                 else -> OutlinedTextField(
                     value = weightInput,
                     onValueChange = { weightInput = it.filter { c -> c.isDigit() || c == '.' } },
@@ -1180,19 +1083,6 @@ fun QuickLogSheet(state: NirogState, metric: String, onDismiss: () -> Unit) {
                                 } else state.cloudMessage = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
                             }
                         }
-                        "water" -> {
-                            state.repository.addHealthLog("waterLogs", mapOf(
-                                "glasses" to 1,
-                                "measuredAt" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
-                                "source" to "manual"
-                            )) { result ->
-                                saving = false
-                                if (result is com.nirogbhumi.app.data.CloudResult.Success) {
-                                    state.waterGlasses += 1
-                                    onDismiss()
-                                } else state.cloudMessage = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
-                            }
-                        }
                         else -> {
                             val weight = weightInput.toDoubleOrNull()
                             if (weight == null) { saving = false; return@Button }
@@ -1212,7 +1102,7 @@ fun QuickLogSheet(state: NirogState, metric: String, onDismiss: () -> Unit) {
                 }
             ) {
                 if (saving) CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
-                else Text(if (metric == "water") "Add Glass" else "Save", color = Color.White)
+                else Text("Save", color = Color.White)
             }
         },
         dismissButton = {
@@ -1234,12 +1124,13 @@ fun TrackModuleBox(
     title: String,
     measuredValue: String,
     labelSuffix: String,
+    fullWidth: Boolean = false,
     onClick: () -> Unit
 ) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .aspectRatio(1.0f)
+            .then(if (fullWidth) Modifier else Modifier.aspectRatio(1.0f))
             .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.4f), roundedCorner = 24)
             .clickable { onClick() },
         colors = CardDefaults.cardColors(containerColor = Color.White)
@@ -1248,7 +1139,7 @@ fun TrackModuleBox(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(16.dp),
-            verticalArrangement = Arrangement.SpaceBetween
+            verticalArrangement = if (fullWidth) Arrangement.spacedBy(10.dp) else Arrangement.SpaceBetween
         ) {
             Box(
                 modifier = Modifier
@@ -1765,12 +1656,6 @@ fun LearnTab(state: NirogState) {
     val context = LocalContext.current
     var featuredArticle by remember { mutableStateOf<Result<List<com.nirogbhumi.app.content.NirogBhumiArticle>>?>(null) }
     LaunchedEffect(Unit) { featuredArticle = com.nirogbhumi.app.content.NirogBhumiContentApi.fetchArticles(perPage = 1) }
-    val storeProducts = listOf(
-        StoreProduct(1, "Metabolic Health Kit", "Practical program support tools", "₹2,499", "https://lh3.googleusercontent.com/aida-public/AB6AXuAoO2CNikwTlslSE5tcf8ZZH0nlWC50VF5es0zN87-MW1SmCiM8KfOffKi_5IGARyQozjibn5VMupjhsi4f8A7bCsL80qJFP61a2xfmfFf9rWanenexPvohOBo0mjTEtrsp0xyHcgjBXP3DQzFeV6PoIUmCNMh9EFlPzhmecxaZ_PILJQJXEBYlOlQ3v7lOyQURl5JYoJBPPCRWRp38g1zXXdbNBUy4hpR6IChVg2kmjFpr3iMGkk6dJnfJEFo8rURhQZVc6iAceBw"),
-        StoreProduct(2, "Jal Neti Pot", "Ceramic sinus cleansing tool", "₹450", "https://lh3.googleusercontent.com/aida-public/AB6AXuDvaGRrpKr1PZz5fErBo90b5adVv18mhAphPhJSxqUeVkICr8EtPy7ihi1jvmIAvQzxpovja0bZGharwGHm7qOogAid_rgqT1VgbZPWM1K_8vnqC6JRO9KuSbm1ug27dD5vvj7F8e2fUlLRVCUYKko7-vEt7oJg3lbfOs_d14K7DDcKj2hwTIZ2OmRs954u4Jpj4pn_qsDRRQgsrSYJ_cYv07YXfVmiplTUnxGD91TmG1QJ28kLXS8YhsU3cOPgUBnsJr_IKshREGU"),
-        StoreProduct(3, "Acupressure Tool Set", "Handcrafted neem wood piece", "₹650", "https://lh3.googleusercontent.com/aida-public/AB6AXuAFMUfqnLWtrp62-4Gz77MCAHTycvtuLRku6m72kTEyRec7efonrRPvyDcCJwLRah2bJa16O_nYJsoehgNGn7Xy7CGRRjc1OM6eilWwWIgaZBNaXcsRMh16smFSfm_oYvZho3cSR9rhSXYPDJl9sBKKpdds2A9PD0f6oiQhMSzdHewy_He8HeWVaOQHKG5Lo_zZOxoBrXsfS5v-QbtnSf7S1KBtfPsvbLVDtX6A4KfaC2sTOOAwAhCvIV5QqoseKw1TWx4tEm6zc14"),
-        StoreProduct(4, "Vijaysar Tumbler", "Overnight metabolic water infusion", "₹890", "https://lh3.googleusercontent.com/aida-public/AB6AXuAJ5Crvk37pXEnB7GoEifO0dMTADM8sOK91xYVP5MahOfkUONjvVTOu993_XstoqUgM-4qKe3c3WjT_VIvw-sGnK6wkod1CIRD25Ko4B3G1PKaNOiMmLi5BV5We4j482Ims5_0mJykYTD2td9DTkRlm3MxPXxVQo4V_vCwq4ZXic93q5arYVGzNkxtAcYp2CtU2psvumplf3P97fzbPbrxguDC5FOgGplwVzVdUYgRNWxNSRl_tR7PKiSwycGPYABXIl59w5VHO6PA")
-    )
 
     Column(
         modifier = Modifier
@@ -1921,101 +1806,34 @@ fun LearnTab(state: NirogState) {
             }
         }
 
-        // Store Products Showcase
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column {
-                Text(
-                    text = "Nirog Bhumi Store",
-                    fontSize = 20.sp,
-                    fontFamily = FontFamily.Serif,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF1B3221)
-                )
-                Text("Tools for your wellness journey", fontSize = 12.sp, color = Color(0xFF737972))
-            }
-
-            TextButton(onClick = { state.currentScreen = "products" }) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("View All", color = Color(0xFF1B3221), fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                    Icon(Icons.Filled.ChevronRight, "More", modifier = Modifier.size(16.dp), tint = Color(0xFF1B3221))
-                }
-            }
-        }
-
-        // Horizontal scrolling products
-        Row(
+        // Store is not launched yet - a single clear teaser instead of a shop
+        // front with nothing real to sell.
+        Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                .clickable { state.currentScreen = "coming_soon" }
+                .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.35f), shape = RoundedCornerShape(24.dp)),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFFEEE8DC)),
+            shape = RoundedCornerShape(24.dp)
         ) {
-            storeProducts.forEach { product ->
-                StoreItemCard(
-                    product = product,
-                    isAdded = state.cartProducts.contains(product.id),
-                    onToggleCart = {
-                        val productKey = product.id.toString()
-                        if (state.cartProducts.contains(product.id)) {
-                            state.cartProducts.remove(product.id)
-                            state.cartItems.remove(productKey)
-                        } else {
-                            state.cartProducts.add(product.id)
-                            state.cartItems[productKey] = (state.cartItems[productKey] ?: 0) + 1
-                        }
-                    },
-                    onOpen = { state.currentScreen = "product_detail" }
-                )
+            Row(
+                modifier = Modifier.padding(20.dp).fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Nirog Bhumi Store",
+                        fontSize = 18.sp,
+                        fontFamily = FontFamily.Serif,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF1B3221)
+                    )
+                    Text("Wellness tools and kits - coming soon", fontSize = 12.sp, color = Color(0xFF737972))
+                }
+                Icon(Icons.Filled.ChevronRight, "Coming soon", tint = Color(0xFF1B3221))
             }
         }
         Spacer(modifier = Modifier.height(32.dp))
-    }
-
-    // Article reading modal
-    if (state.selectedArticleTitle != null) {
-        AlertDialog(
-            onDismissRequest = { state.selectedArticleTitle = null },
-            confirmButton = {
-                Button(
-                    onClick = { state.selectedArticleTitle = null },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF314936))
-                ) {
-                    Text("Close", color = Color.White)
-                }
-            },
-            title = {
-                Text(
-                    text = state.selectedArticleTitle!!,
-                    fontFamily = FontFamily.Serif,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 20.sp,
-                    color = Color(0xFF1B3221)
-                )
-            },
-            text = {
-                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                    Text(
-                        text = "The ancient texts of Ayurveda advocate Shatapavali—literally 'a hundred steps' taken immediately after taking a meal. In modern endocrinological fields, post-meal muscular activity directs glucose transporters (GLUT4) to migrate to the cell surface independent of insulin. Taking a simple, slow, 10–15 minute walk within an hour of taking dinner significantly blunts glycemic excursions by up to 15-22%. Walking helps draw circulating glucose into primary skeletal muscle matrices, thereby sustaining metabolic equilibrium.",
-                        fontSize = 14.sp,
-                        color = Color(0xFF434842),
-                        lineHeight = 20.sp
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        text = "Tip: Refrain from brisk running, which diverts circulation away from digestive networks. Maintain a gentle, meditative, natural walking speed.",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF426820),
-                        lineHeight = 18.sp
-                    )
-                }
-            },
-            containerColor = Color.White,
-            shape = RoundedCornerShape(20.dp)
-        )
     }
 }
 
@@ -2049,80 +1867,3 @@ fun LearnCategoryCard(title: String, icon: androidx.compose.ui.graphics.vector.I
     }
 }
 
-@Composable
-fun StoreItemCard(product: StoreProduct, isAdded: Boolean, onToggleCart: () -> Unit, onOpen: () -> Unit) {
-    Card(
-        modifier = Modifier
-            .width(180.dp)
-            .clickable(onClick = onOpen)
-            .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.35f), shape = RoundedCornerShape(16.dp)),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        shape = RoundedCornerShape(16.dp)
-    ) {
-        Column(
-            modifier = Modifier.padding(12.dp)
-        ) {
-            AsyncImage(
-                model = product.imageDescription,
-                contentDescription = product.name,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(100.dp)
-                    .clip(RoundedCornerShape(8.dp)),
-                contentScale = ContentScale.Crop
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            Text(
-                text = product.name,
-                fontWeight = FontWeight.Bold,
-                color = Color(0xFF1B3221),
-                fontSize = 14.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-
-            Text(
-                text = product.subtitle,
-                fontSize = 11.sp,
-                color = Color(0xFF737972),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = product.price,
-                    fontWeight = FontWeight.Black,
-                    color = Color(0xFF1B3221),
-                    fontSize = 14.sp,
-                    fontFamily = FontFamily.Monospace
-                )
-
-                Button(
-                    onClick = onToggleCart,
-                    modifier = Modifier.height(30.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (isAdded) Color(0xFFBFEE95) else Color(0xFF314936)
-                    ),
-                    contentPadding = PaddingValues(horizontal = 12.dp),
-                    shape = RoundedCornerShape(15.dp)
-                ) {
-                    Text(
-                        text = if (isAdded) "Added" else "Add",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isAdded) Color(0xFF1B3221) else Color.White
-                    )
-                }
-            }
-        }
-    }
-}

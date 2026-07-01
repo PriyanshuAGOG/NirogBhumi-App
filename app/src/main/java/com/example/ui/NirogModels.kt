@@ -18,14 +18,6 @@ data class SugarLog(
     val status: String // "High", "Normal" or "Low"
 )
 
-data class StoreProduct(
-    val id: Int,
-    val name: String,
-    val subtitle: String,
-    val price: String,
-    val imageDescription: String
-)
-
 data class ConsultationSlot(
     val date: String,
     val time: String
@@ -39,16 +31,13 @@ class NirogState {
     val routeSelections = mutableStateMapOf<String, String>()
     val checkedItems = mutableStateListOf<String>()
     val cloudRecords = mutableStateMapOf<String, List<CloudDocument>>()
-    val cartItems = mutableStateMapOf<String, Int>()
     var selectedDocumentId by mutableStateOf("")
     var selectedDocumentValues by mutableStateOf<Map<String, Any?>>(emptyMap())
     var activeProfileId by mutableStateOf("")
     var pendingConsultationId by mutableStateOf("")
-    var pendingOrderId by mutableStateOf("")
-    var pendingPaymentKind by mutableStateOf("")
     var pendingDeepLink by mutableStateOf("")
     var legalReturnRoute by mutableStateOf("profile")
-    var currentScreen by mutableStateOf("splash") // "splash", "welcome", "value_slides", "consent", "login_mobile", "login_otp", "email_auth", "password_reset", "setup_profile", "selection_caregiver", "health_profile_setup", "goal_selection", "program_code_optional", "onboarding_complete", "dashboard", "sugar_detail", "food_journal", "consult_stepper", "active_journey"
+    var currentScreen by mutableStateOf("splash") // "splash", "welcome", "value_slides", "consent", "login_mobile", "login_otp", "email_auth", "password_reset", "setup_profile", "selection_caregiver", "health_profile_setup", "goal_selection", "program_code_optional", "onboarding_complete", "dashboard", "sugar_detail", "consult_stepper", "active_journey"
     var viewMode by mutableStateOf("mobile") // "mobile", "admin", "expert"
 
     // Auth & Intake State
@@ -97,7 +86,6 @@ class NirogState {
     var sleepHours by mutableStateOf(0)
     var sleepMinutes by mutableStateOf(0)
     var stepsLogged by mutableStateOf(0)
-    var waterGlasses by mutableStateOf(0)
     var latestBpReading by mutableStateOf<String?>(null)
 
     // Sugar History & Tracking State - populated only from real Firestore reads
@@ -129,8 +117,6 @@ class NirogState {
 
     // Learn Section State
     var searchQuery by mutableStateOf("")
-    val cartProducts = mutableStateListOf<Int>() // Product IDs currently added to Cart
-    var selectedArticleTitle: String? = null // For detailed reading preview modal
 
     // Introduction Tour State
     var shouldShowTour by mutableStateOf(true)

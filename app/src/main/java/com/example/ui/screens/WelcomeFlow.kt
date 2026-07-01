@@ -54,6 +54,25 @@ fun NirogLogo(modifier: Modifier = Modifier) {
     )
 }
 
+// Restores the saved profile (name, etc.) into in-memory state on every cold start
+// and sign-in. Without this, fields the user already filled in reset to blank
+// defaults every time the process restarts, even though Firestore has the real
+// values - the account's data was never actually lost, it just wasn't reloaded.
+private fun applyProfileDocument(state: NirogState, document: com.google.firebase.firestore.DocumentSnapshot) {
+    document.getString("fullName")?.takeIf { it.isNotBlank() }?.let { state.profileName = it }
+    (document.get("age") as? Number)?.let { state.profileAge = it.toString() }
+    document.getString("gender")?.let { state.profileGender = it }
+    (document.get("heightCm") as? Number)?.let { state.profileHeight = it.toString() }
+    (document.get("weightKg") as? Number)?.let { state.profileWeight = it.toString() }
+    document.getString("city")?.let { state.profileCity = it }
+    document.getString("preferredLanguage")?.let { state.profileLanguage = it }
+    document.getString("diabetesStatus")?.let { state.selectedDiabetesStatus = it }
+    document.getString("bpStatus")?.let { state.selectedBpStatus = it }
+    document.getString("onMedication")?.let { state.selectedOnMedication = it }
+    document.getString("doctorSupervision")?.let { state.selectedDoctorSupervision = it }
+    runCatching { FirebaseAuth.getInstance().currentUser?.email }.getOrNull()?.let { state.userEmail = it }
+}
+
 // Existing accounts signing back in (any method) must land on their dashboard,
 // not repeat onboarding - only a genuinely new account has no completed profile yet.
 private fun routeAfterAuthSuccess(state: NirogState, deepLinkFallback: String = "dashboard") {
@@ -61,7 +80,12 @@ private fun routeAfterAuthSuccess(state: NirogState, deepLinkFallback: String = 
     if (uid == null) { state.currentScreen = "consent"; return }
     FirebaseFirestore.getInstance().collection("users").document(uid).get()
         .addOnSuccessListener { document ->
-            state.currentScreen = if (document.getBoolean("onboardingComplete") == true) deepLinkFallback else "consent"
+            if (document.getBoolean("onboardingComplete") == true) {
+                applyProfileDocument(state, document)
+                state.currentScreen = deepLinkFallback
+            } else {
+                state.currentScreen = "consent"
+            }
         }
         .addOnFailureListener { state.currentScreen = "consent" }
 }
@@ -1410,9 +1434,7 @@ fun SetupProfileScreen(state: NirogState) {
                 fontSize = 13.sp,
                 color = Ink.copy(alpha = 0.5f)
             )
-            TextButton(onClick = { state.currentScreen = "selection_caregiver" }) {
-                Text("Skip", color = DeepGreen, fontWeight = FontWeight.Bold)
-            }
+            Spacer(modifier = Modifier.width(48.dp))
         }
 
         Column(
@@ -1440,7 +1462,7 @@ fun SetupProfileScreen(state: NirogState) {
             Spacer(modifier = Modifier.height(8.dp))
 
             // Fields Questionnaire
-            OutlinedProfileField("Full Name", nameTemp, "e.g. Priyanshu") { nameTemp = it }
+            OutlinedProfileField("Full Name *", nameTemp, "e.g. Priyanshu") { nameTemp = it }
             OutlinedProfileField("Age", ageTemp, "e.g. 28") { ageTemp = it }
             OutlinedProfileField("Weight (kg)", weightTemp, "e.g. 72") { weightTemp = it }
             OutlinedProfileField("Height (cm)", heightTemp, "e.g. 174") { heightTemp = it }
@@ -1472,6 +1494,7 @@ fun SetupProfileScreen(state: NirogState) {
                 }
                 Button(
                     onClick = {
+                        if (nameTemp.isBlank()) { state.authError = "Please enter your name to continue"; return@Button }
                         state.authError = ""
                         isSaving = true
                         state.profileName = nameTemp

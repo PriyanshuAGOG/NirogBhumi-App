@@ -34,12 +34,12 @@ class MainActivity : ComponentActivity(), com.razorpay.PaymentResultListener {
 
   override fun onPaymentSuccess(paymentId: String?) {
     nirogState.cloudMessage = "Payment received securely"
-    nirogState.currentScreen = if (nirogState.pendingPaymentKind == "order") "order_success" else "consultation_confirmed"
+    nirogState.currentScreen = "consultation_confirmed"
   }
 
   override fun onPaymentError(code: Int, response: String?) {
     nirogState.cloudMessage = response ?: "Payment was not completed. You can safely try again."
-    nirogState.currentScreen = if (nirogState.pendingPaymentKind == "order") "checkout" else "payment_confirmation"
+    nirogState.currentScreen = "payment_confirmation"
   }
 
   override fun onCreate(savedInstanceState: Bundle?) {
@@ -290,7 +290,7 @@ fun ActiveScreenContent(state: NirogState) {
 
       // Metrics Detailed screens
       "sugar_detail" -> BloodSugarDetailScreen(state)
-      "food_journal" -> FoodJournalScreen(state)
+      "coming_soon" -> ComingSoonScreen(state)
       "consult_stepper" -> BookConsultationStepper(state)
       "active_journey" -> ActiveJourneyScreen(state)
       "insight_detail" -> InsightDetailScreen(state)

@@ -15,11 +15,9 @@ enum class ReminderType(
     val title: String,
     val body: String
 ) {
-    WATER("reminder_water", "nirog_reminder_water", 2, "Time to hydrate", "A glass of water keeps your rhythm steady. Log it in Track."),
     FASTING_SUGAR("reminder_sugar", "nirog_reminder_sugar", 24, "Fasting sugar check-in", "Log today's fasting sugar reading before breakfast."),
     BP("reminder_bp", "nirog_reminder_bp", 24, "Blood pressure check-in", "A quiet moment to measure and log your blood pressure."),
-    WALK("reminder_walk", "nirog_reminder_walk", 24, "Evening walk", "A 15-minute walk after dinner can help your sugar overnight."),
-    MEDICINE("reminder_medicine", "nirog_reminder_medicine", 12, "Medicine reminder", "Check if it's time for your scheduled medicine."),
+    WALK("reminder_walk", "nirog_reminder_walk", 24, "Evening walk or activity", "A 15-minute walk after dinner can help your sugar overnight."),
     SLEEP("reminder_sleep", "nirog_reminder_sleep", 24, "Wind down for sleep", "Start winding down soon for consistent, restful sleep.")
 }
 

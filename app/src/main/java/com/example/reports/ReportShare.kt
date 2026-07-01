@@ -28,7 +28,6 @@ object ReportShare {
             "Latest fasting sugar: ${state.fastingSugarValue} mg/dL",
             "Sleep: ${state.sleepHours}h ${state.sleepMinutes}m",
             "Walking: ${state.stepsLogged} steps",
-            "Water: ${state.waterGlasses} glasses",
             "Goals: ${state.selectedGoals.joinToString()}",
             "Program: ${if (state.isProgramActive) "Active" else "Not active"}"
         ).forEachIndexed { index, line -> canvas.drawText(line, 48f, 150f + index * 34f, body) }

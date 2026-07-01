@@ -396,197 +396,6 @@ fun SugarLogHistoryRow(log: SugarLog) {
     }
 }
 
-// Screen 2: Food Impact detailed journal log
-@Composable
-fun FoodJournalScreen(state: NirogState) {
-    var customMealInput by remember { mutableStateOf("") }
-    var selectedMealCategory by remember { mutableStateOf("Breakfast") }
-
-    val loggedMeals = remember { mutableStateListOf<Triple<String, String, String>>() }
-
-    DisposableEffect(Unit) {
-        val subscription = state.repository.listenUserCollection("mealLogs", 30) { result ->
-            if (result is com.nirogbhumi.app.data.CloudResult.Success) {
-                val synced = result.value.mapNotNull { doc ->
-                    val desc = doc.values["description"] as? String ?: return@mapNotNull null
-                    val category = doc.values["category"] as? String ?: "Meal"
-                    Triple(category, desc, "Logged")
-                }
-                loggedMeals.clear()
-                loggedMeals.addAll(synced)
-            }
-        }
-        onDispose { subscription.cancel() }
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            IconButton(onClick = { state.currentScreen = "dashboard" }) {
-                Icon(Icons.Outlined.ArrowBack, "Back", tint = Color(0xFF1B3221))
-            }
-            Text(
-                "Food Journal",
-                fontFamily = FontFamily.Serif,
-                fontWeight = FontWeight.Bold,
-                fontSize = 20.sp,
-                color = Color(0xFF1B3221)
-            )
-            Icon(Icons.Filled.Restaurant, "Meal Tracker", tint = Color(0xFF1B3221))
-        }
-
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            Text(
-                "Meal Log Timeline",
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color(0xFF1B3221)
-            )
-
-            // Timeline rows representation
-            if (loggedMeals.isEmpty()) {
-                Text(
-                    "No meals logged yet. Add your first one below.",
-                    fontSize = 13.sp,
-                    color = Color(0xFF697169)
-                )
-            }
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                loggedMeals.forEach { (cat, desc, impact) ->
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.35f), shape = RoundedCornerShape(16.dp)),
-                        colors = CardDefaults.cardColors(containerColor = Color.White),
-                        shape = RoundedCornerShape(16.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(16.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Column {
-                                Text(cat.uppercase(), fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF426820))
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(desc, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF1B3221))
-                            }
-
-                            Box(
-                                modifier = Modifier
-                                    .background(Color(0xFFE5F1E2), RoundedCornerShape(8.dp))
-                                    .padding(horizontal = 8.dp, vertical = 4.dp)
-                            ) {
-                                Text(impact, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
-                            }
-                        }
-                    }
-                }
-            }
-
-            Divider(color = Color(0xFFC3C8C0).copy(alpha = 0.3f))
-
-            Text(
-                "Quick Add Meal Entry",
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color(0xFF1B3221)
-            )
-
-            // Quick add inputs
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.4f), shape = RoundedCornerShape(20.dp)),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                shape = RoundedCornerShape(20.dp)
-            ) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    // Meal selectors
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        listOf("Breakfast", "Lunch", "Dinner").forEach { meal ->
-                            val active = selectedMealCategory == meal
-                            Surface(
-                                shape = RoundedCornerShape(12.dp),
-                                color = if (active) Color(0xFF314936) else Color(0xFFF1FDEE),
-                                modifier = Modifier
-                                    .clickable { selectedMealCategory = meal }
-                                    .weight(1f)
-                                    .padding(horizontal = 4.dp),
-                            ) {
-                                Text(
-                                    meal,
-                                    color = if (active) Color.White else Color(0xFF1B3221),
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                                    modifier = Modifier.padding(vertical = 10.dp)
-                                )
-                            }
-                        }
-                    }
-
-                    OutlinedTextField(
-                        value = customMealInput,
-                        onValueChange = { customMealInput = it },
-                        placeholder = { Text("What did you eat? (e.g. 2 Oats Roti, Sabzi)", color = Color(0xFFC3C8C0)) },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = Color(0xFFF8F6EF),
-                            unfocusedContainerColor = Color(0xFFF8F6EF),
-                            focusedBorderColor = Color(0xFF314936),
-                            unfocusedBorderColor = Color.Transparent
-                        )
-                    )
-
-                    Button(
-                        onClick = {
-                            if (customMealInput.isNotEmpty()) {
-                                val entry = customMealInput
-                                loggedMeals.add(0, Triple(selectedMealCategory, entry, "Logged"))
-                                customMealInput = ""
-                                state.repository.addHealthLog(
-                                    "mealLogs",
-                                    mapOf(
-                                        "category" to selectedMealCategory,
-                                        "description" to entry,
-                                        "measuredAt" to com.google.firebase.firestore.FieldValue.serverTimestamp()
-                                    )
-                                ) { result -> if (result is com.nirogbhumi.app.data.CloudResult.Failure) state.cloudMessage = result.message }
-                            }
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(44.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF314936)),
-                        shape = RoundedCornerShape(22.dp)
-                    ) {
-                        Text("Add Journal Entry", fontWeight = FontWeight.Bold, color = Color.White)
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(32.dp))
-        }
-    }
-}
-
 // Screen 3: Booking Stepper screen
 @Composable
 fun BookConsultationStepper(state: NirogState) {
@@ -1729,6 +1538,7 @@ fun ProfileEditScreen(state: NirogState) {
             // Save Buttons
             Button(
                 onClick = {
+                    if (editName.isBlank()) { state.cloudMessage = "Name cannot be empty"; return@Button }
                     state.profileName = editName
                     state.profileAge = editAge
                     state.profileGender = editGender
@@ -1958,15 +1768,7 @@ fun OrdersScreen(state: NirogState) {
                 Spacer(modifier = Modifier.width(8.dp))
                 Text("Loading your orders...", fontSize = 13.sp, color = Color(0xFF697169))
             }
-            records!!.isEmpty() -> Column {
-                EmptyStateCard(Icons.Filled.ShoppingBag, "No orders yet. Products you order from the store will show up here with live status.")
-                Button(
-                    onClick = { state.currentScreen = "store_home" },
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).height(48.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF314936)),
-                    shape = RoundedCornerShape(24.dp)
-                ) { Text("Browse the store", color = Color.White, fontWeight = FontWeight.Bold) }
-            }
+            records!!.isEmpty() -> EmptyStateCard(Icons.Filled.ShoppingBag, "No orders yet. The Nirog Bhumi store is coming soon.")
             else -> Column(modifier = Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 records!!.sortedByDescending { (it.values["createdAt"] as? com.google.firebase.Timestamp)?.seconds ?: 0 }.forEach { record ->
                     val status = (record.values["orderStatus"] ?: record.values["status"])?.toString() ?: "pending"
@@ -2271,9 +2073,39 @@ private fun ReminderToggleRow(label: String, checked: Boolean, showDivider: Bool
     }
 }
 
+// The in-app store was removed until it's actually ready to launch, so every
+// entry point that used to lead into it lands here instead of a dead end.
+@Composable
+fun ComingSoonScreen(state: NirogState) {
+    Column(
+        modifier = Modifier.fillMaxSize().background(Color(0xFFF8F6EF))
+    ) {
+        DetailScreenHeader("Nirog Bhumi Store", onBack = { state.currentScreen = "dashboard" })
+        Column(
+            modifier = Modifier.fillMaxSize().weight(1f).padding(32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Box(
+                modifier = Modifier.size(72.dp).clip(CircleShape).background(Color(0xFFEEE8DC)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Filled.ShoppingBag, contentDescription = null, tint = Color(0xFF314936), modifier = Modifier.size(32.dp))
+            }
+            Spacer(modifier = Modifier.height(20.dp))
+            Text("Coming Soon", fontFamily = FontFamily.Serif, fontSize = 26.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                "We're building a thoughtful collection of wellness tools and kits. Check back soon.",
+                fontSize = 14.sp, color = Color(0xFF697169), textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            )
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun TimePickerAlertDialog(initial: String, onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
+fun TimePickerAlertDialog(initial: String, onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
     val parts = initial.split(":").mapNotNull { it.toIntOrNull() }
     val pickerState = rememberTimePickerState(
         initialHour = parts.getOrElse(0) { 21 },

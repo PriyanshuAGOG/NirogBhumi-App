@@ -25,9 +25,9 @@ service cloud.firestore {
       allow delete: if ownsResource() || admin();
     }
     match /{collection}/{id} {
-      allow create: if collection in ['glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','waterLogs','mealLogs','medications','medicationLogs','labReports','dailyCheckins','checklistLogs'] && validCreate();
-      allow read, delete: if collection in ['glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','waterLogs','mealLogs','medications','medicationLogs','labReports','dailyCheckins','checklistLogs'] && (ownsResource() || admin() || assigned(resource.data.userId));
-      allow update: if collection in ['glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','waterLogs','mealLogs','medications','medicationLogs','labReports','dailyCheckins','checklistLogs'] && (admin() || (ownsResource() && ownsRequest() && preservesUserId()) || (assigned(resource.data.userId) && preservesUserId()));
+      allow create: if collection in ['glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','labReports','dailyCheckins','checklistLogs'] && validCreate();
+      allow read, delete: if collection in ['glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','labReports','dailyCheckins','checklistLogs'] && (ownsResource() || admin() || assigned(resource.data.userId));
+      allow update: if collection in ['glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','labReports','dailyCheckins','checklistLogs'] && (admin() || (ownsResource() && ownsRequest() && preservesUserId()) || (assigned(resource.data.userId) && preservesUserId()));
     }
     match /consultations/{id} {
       allow create: if validCreate() && request.resource.data.paymentStatus == 'pending' && request.resource.data.status in ['pending', 'payment_pending'];
@@ -35,9 +35,9 @@ service cloud.firestore {
       allow update: if admin() || (expert() && resource.data.expertId == request.auth.uid && preservesUserId()) || (ownsResource() && ownsRequest() && preservesUserId() && request.resource.data.paymentStatus == resource.data.paymentStatus && request.resource.data.status == resource.data.status);
     }
     match /{collection}/{id} {
-      allow read: if collection in ['dailyActions','weeklyReports','sugarStories','userPrograms','programPlans','expertNotes','notifications','deviceConnections','orders','carts'] && (ownsResource() || admin() || assigned(resource.data.userId));
-      allow create: if collection in ['deviceConnections','carts'] && ownsRequest();
-      allow update: if collection in ['deviceConnections','carts'] && ownsResource() && ownsRequest() && preservesUserId();
+      allow read: if collection in ['dailyActions','weeklyReports','sugarStories','userPrograms','programPlans','expertNotes','notifications','deviceConnections','orders'] && (ownsResource() || admin() || assigned(resource.data.userId));
+      allow create: if collection == 'deviceConnections' && ownsRequest();
+      allow update: if collection == 'deviceConnections' && ownsResource() && ownsRequest() && preservesUserId();
       allow create: if collection == 'orders' && validCreate() && request.resource.data.paymentStatus == 'pending' && request.resource.data.orderStatus == 'pending';
       // The device itself (local reminder fired, FCM message received) is the
       // one recording that a notification happened, so a self-scoped create
@@ -45,7 +45,6 @@ service cloud.firestore {
       allow create: if collection == 'notifications' && validCreate();
     }
     match /contentItems/{id} { allow read: if resource.data.status == 'published' || admin(); allow write: if admin() || role('content_manager'); }
-    match /products/{id} { allow read: if resource.data.active == true || admin(); allow write: if admin() || role('store_manager'); }
     match /programs/{id} { allow read: if signedIn(); allow write: if admin(); }
     match /consultationSlots/{id} { allow read: if signedIn() && resource.data.active == true; allow write: if admin() || expert(); }
     match /expertAssignments/{id} { allow read: if admin() || (expert() && resource.data.expertId == request.auth.uid); allow write: if admin(); }
