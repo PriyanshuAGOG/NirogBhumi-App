@@ -5,6 +5,7 @@ import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
@@ -19,6 +20,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -814,6 +816,8 @@ fun VitalBentoCard(
 // TAB 2: Track Hub Grid
 @Composable
 fun TrackTab(state: NirogState) {
+    var quickLogMetric by remember { mutableStateOf<String?>(null) }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -830,12 +834,29 @@ fun TrackTab(state: NirogState) {
                 color = Color(0xFF1B3221)
             )
             Text(
-                text = "Monitor your daily vitals and lifestyle patterns.",
+                text = "Log your vitals in under a minute.",
                 fontSize = 15.sp,
                 color = Color(0xFF434842),
                 modifier = Modifier.padding(top = 4.dp)
             )
         }
+
+        // Quick Log - single-tap entry without leaving this screen
+        Column {
+            Text("Quick Log", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+            Spacer(modifier = Modifier.height(10.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                QuickLogChip("Sugar", Icons.Filled.Bloodtype, Color(0xFFBA1A1A)) { quickLogMetric = "sugar" }
+                QuickLogChip("BP", Icons.Filled.Favorite, Color(0xFF1B3221)) { quickLogMetric = "bp" }
+                QuickLogChip("Water", Icons.Filled.WaterDrop, Color(0xFF1B3221)) { quickLogMetric = "water" }
+                QuickLogChip("Weight", Icons.Filled.MonitorWeight, Color(0xFF4B6450)) { quickLogMetric = "weight" }
+            }
+        }
+
+        Text("Today's Summary", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
 
         // Bento Grid Modules of Tracks
         Row(modifier = Modifier.fillMaxWidth()) {
@@ -845,8 +866,8 @@ fun TrackTab(state: NirogState) {
                     iconBg = Color(0xFFFFDAD6),
                     iconTint = Color(0xFFBA1A1A),
                     title = "Blood Sugar",
-                    measuredValue = "105",
-                    labelSuffix = "mg/dL",
+                    measuredValue = if (state.fastingSugarValue > 0) "${state.fastingSugarValue}" else "No data",
+                    labelSuffix = if (state.fastingSugarValue > 0) "mg/dL" else "",
                     onClick = { state.currentScreen = "sugar_detail" }
                 )
             }
@@ -856,7 +877,7 @@ fun TrackTab(state: NirogState) {
                     iconBg = Color(0xFFCDEAD0),
                     iconTint = Color(0xFF1B3221),
                     title = "BP",
-                    measuredValue = "120/80",
+                    measuredValue = state.latestBpReading ?: "No data",
                     labelSuffix = "",
                     onClick = { state.currentScreen = "bp_overview" }
                 )
@@ -870,7 +891,7 @@ fun TrackTab(state: NirogState) {
                     iconBg = Color(0xFFE5F1E2),
                     iconTint = Color(0xFF4B6450),
                     title = "Sleep",
-                    measuredValue = "7h 20m",
+                    measuredValue = if (state.sleepHours > 0 || state.sleepMinutes > 0) "${state.sleepHours}h ${state.sleepMinutes}m" else "No data",
                     labelSuffix = "",
                     onClick = { state.currentScreen = "sleep_overview" }
                 )
@@ -881,7 +902,7 @@ fun TrackTab(state: NirogState) {
                     iconBg = Color(0xFFBFEE95).copy(alpha = 0.5f),
                     iconTint = Color(0xFF426820),
                     title = "Walking",
-                    measuredValue = String.format("%,d", state.stepsLogged),
+                    measuredValue = if (state.stepsLogged > 0) String.format("%,d", state.stepsLogged) else "No data",
                     labelSuffix = "",
                     onClick = { state.currentScreen = "walking_overview" }
                 )
@@ -974,6 +995,182 @@ fun TrackTab(state: NirogState) {
         }
         Spacer(modifier = Modifier.height(32.dp))
     }
+
+    quickLogMetric?.let { metric ->
+        QuickLogSheet(state = state, metric = metric, onDismiss = { quickLogMetric = null })
+    }
+}
+
+@Composable
+fun QuickLogChip(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, tint: Color, onClick: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .width(72.dp)
+            .clickable { onClick() },
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(
+            modifier = Modifier
+                .size(52.dp)
+                .background(tint.copy(alpha = 0.12f), CircleShape)
+                .border(1.dp, tint.copy(alpha = 0.3f), CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(icon, contentDescription = "Log $label", tint = tint, modifier = Modifier.size(22.dp))
+        }
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(label, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+    }
+}
+
+@Composable
+fun QuickLogSheet(state: NirogState, metric: String, onDismiss: () -> Unit) {
+    var sugarInput by remember { mutableStateOf("") }
+    var sugarType by remember { mutableStateOf("Fasting") }
+    var systolicInput by remember { mutableStateOf("") }
+    var diastolicInput by remember { mutableStateOf("") }
+    var weightInput by remember { mutableStateOf(state.profileWeight) }
+    var saving by remember { mutableStateOf(false) }
+
+    val title = when (metric) {
+        "sugar" -> "Log Blood Sugar"
+        "bp" -> "Log Blood Pressure"
+        "water" -> "Log Water"
+        else -> "Log Weight"
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221)) },
+        text = {
+            when (metric) {
+                "sugar" -> Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("Fasting", "Post-meal").forEach { type ->
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = if (sugarType == type) Color(0xFF314936) else Color(0xFFEBF7E8),
+                                modifier = Modifier.clickable { sugarType = type }
+                            ) {
+                                Text(type, color = if (sugarType == type) Color.White else Color(0xFF1B3221), fontSize = 13.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+                            }
+                        }
+                    }
+                    OutlinedTextField(
+                        value = sugarInput,
+                        onValueChange = { sugarInput = it.filter(Char::isDigit) },
+                        label = { Text("Value (mg/dL)") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+                "bp" -> Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedTextField(
+                        value = systolicInput,
+                        onValueChange = { systolicInput = it.filter(Char::isDigit) },
+                        label = { Text("Systolic") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedTextField(
+                        value = diastolicInput,
+                        onValueChange = { diastolicInput = it.filter(Char::isDigit) },
+                        label = { Text("Diastolic") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                "water" -> Text("Add one glass (250ml) to today's water intake.", fontSize = 14.sp, color = Color(0xFF434842))
+                else -> OutlinedTextField(
+                    value = weightInput,
+                    onValueChange = { weightInput = it.filter { c -> c.isDigit() || c == '.' } },
+                    label = { Text("Weight (kg)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                enabled = !saving,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF314936)),
+                onClick = {
+                    saving = true
+                    when (metric) {
+                        "sugar" -> {
+                            val value = sugarInput.toIntOrNull()
+                            if (value == null) { saving = false; return@Button }
+                            state.repository.addHealthLog("glucoseReadings", mapOf(
+                                "value" to value,
+                                "unit" to "mg/dL",
+                                "readingType" to if (sugarType == "Fasting") "fasting" else "post_meal",
+                                "measuredAt" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
+                                "source" to "manual"
+                            )) { result ->
+                                saving = false
+                                if (result is com.nirogbhumi.app.data.CloudResult.Success) {
+                                    state.fastingSugarValue = value
+                                    state.sugarLogs.add(0, SugarLog(state.sugarLogs.size + 1, value, sugarType, "Today, Just Now", if (value > 130) "High" else if (value < 80) "Low" else "Normal"))
+                                    onDismiss()
+                                } else state.cloudMessage = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
+                            }
+                        }
+                        "bp" -> {
+                            val sys = systolicInput.toIntOrNull()
+                            val dia = diastolicInput.toIntOrNull()
+                            if (sys == null || dia == null) { saving = false; return@Button }
+                            state.repository.addHealthLog("bpReadings", mapOf(
+                                "systolic" to sys,
+                                "diastolic" to dia,
+                                "measuredAt" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
+                                "source" to "manual"
+                            )) { result ->
+                                saving = false
+                                if (result is com.nirogbhumi.app.data.CloudResult.Success) {
+                                    state.latestBpReading = "$sys/$dia"
+                                    onDismiss()
+                                } else state.cloudMessage = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
+                            }
+                        }
+                        "water" -> {
+                            state.repository.addHealthLog("waterLogs", mapOf(
+                                "glasses" to 1,
+                                "measuredAt" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
+                                "source" to "manual"
+                            )) { result ->
+                                saving = false
+                                if (result is com.nirogbhumi.app.data.CloudResult.Success) {
+                                    state.waterGlasses += 1
+                                    onDismiss()
+                                } else state.cloudMessage = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
+                            }
+                        }
+                        else -> {
+                            val weight = weightInput.toDoubleOrNull()
+                            if (weight == null) { saving = false; return@Button }
+                            state.repository.addHealthLog("weightLogs", mapOf(
+                                "valueKg" to weight,
+                                "measuredAt" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
+                                "source" to "manual"
+                            )) { result ->
+                                saving = false
+                                if (result is com.nirogbhumi.app.data.CloudResult.Success) {
+                                    state.profileWeight = weightInput
+                                    onDismiss()
+                                } else state.cloudMessage = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
+                            }
+                        }
+                    }
+                }
+            ) {
+                if (saving) CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
+                else Text(if (metric == "water") "Add Glass" else "Save", color = Color.White)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel", color = Color(0xFF737972)) }
+        }
+    )
 }
 
 // Fixed compile extension function for modifier border to prevent error
