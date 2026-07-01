@@ -318,7 +318,7 @@ fun ValueSlidesScreen(state: NirogState) {
                     0 -> {
                         // Pattern Graph simulation
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("Fast Sugar (Mon-Sun)", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = DeepGreen)
+                            Text("Fasting Sugar (Mon-Sun)", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = DeepGreen)
                             Spacer(modifier = Modifier.height(16.dp))
                             Canvas(modifier = Modifier.fillMaxWidth().height(100.dp)) {
                                 val steps = size.width / 5

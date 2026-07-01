@@ -66,7 +66,7 @@ class NirogState {
     var isTrackingForSelf by mutableStateOf(true) // true for Myself, false for Family Member
 
     // Profile Details
-    var profileName by mutableStateOf("Priyanshu")
+    var profileName by mutableStateOf("")
     var profileAge by mutableStateOf("28")
     var profileGender by mutableStateOf("Male")
     var profileHeight by mutableStateOf("174")

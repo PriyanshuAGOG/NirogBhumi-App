@@ -44,6 +44,14 @@ class MainActivity : ComponentActivity(), com.razorpay.PaymentResultListener {
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
+    // Lets testers get prompted to install new builds from inside the app itself,
+    // instead of depending on the separate "Firebase App Tester" companion app or
+    // an easily-missed email - this is what the debug distribution channel is for.
+    if (BuildConfig.DEBUG) {
+      com.google.firebase.appdistribution.FirebaseAppDistribution.getInstance()
+        .updateIfNewReleaseAvailable()
+        .addOnFailureListener { /* not signed in as a tester yet, or no newer release - nothing to show */ }
+    }
     nirogState.pendingDeepLink = intent.getStringExtra("route").orEmpty()
     val tourSeen = getSharedPreferences("nirog_prefs", MODE_PRIVATE).getBoolean("onboarding_tour_seen", false)
     nirogState.shouldShowTour = !tourSeen

@@ -383,8 +383,11 @@ fun TodayTab(state: NirogState) {
         val sugarSub = state.repository.listenUserCollection("glucoseReadings", 7) { result ->
             if (result is com.nirogbhumi.app.data.CloudResult.Success) {
                 val synced = result.value.mapIndexedNotNull { index, doc ->
-                    val value = (doc.values["value"] as? Number)?.toInt() ?: return@mapIndexedNotNull null
                     val readingType = doc.values["readingType"] as? String
+                    // HbA1c is a lab percentage on a different scale than mg/dL readings,
+                    // so it's excluded here to avoid corrupting the mg/dL trend/average.
+                    if (readingType == "hba1c") return@mapIndexedNotNull null
+                    val value = (doc.values["value"] as? Number)?.toInt() ?: return@mapIndexedNotNull null
                     val type = if (readingType == "fasting") "Fasting" else "Post-meal"
                     val timestamp = (doc.values["measuredAt"] as? com.google.firebase.Timestamp)
                         ?: (doc.values["createdAt"] as? com.google.firebase.Timestamp)
@@ -613,7 +616,7 @@ fun TodayTab(state: NirogState) {
                 VitalBentoCard(
                     icon = Icons.Filled.Bedtime,
                     iconColor = Color(0xFF4B6450),
-                    title = "Sleep Quality",
+                    title = "Sleep Duration",
                     value = if (state.sleepHours > 0 || state.sleepMinutes > 0) "${state.sleepHours}h ${state.sleepMinutes}m" else "—",
                     unit = "",
                     annotation = if (state.sleepHours > 0 || state.sleepMinutes > 0) "Last night" else "No data yet",
@@ -1060,24 +1063,37 @@ fun QuickLogSheet(state: NirogState, metric: String, onDismiss: () -> Unit) {
         text = {
             when (metric) {
                 "sugar" -> Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf("Fasting", "Post-meal").forEach { type ->
+                    Row(
+                        modifier = Modifier.horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf("Fasting", "Post-meal", "HbA1c").forEach { type ->
                             Surface(
                                 shape = RoundedCornerShape(12.dp),
                                 color = if (sugarType == type) Color(0xFF314936) else Color(0xFFEBF7E8),
-                                modifier = Modifier.clickable { sugarType = type }
+                                modifier = Modifier.clickable { sugarType = type; sugarInput = "" }
                             ) {
                                 Text(type, color = if (sugarType == type) Color.White else Color(0xFF1B3221), fontSize = 13.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
                             }
                         }
                     }
-                    OutlinedTextField(
-                        value = sugarInput,
-                        onValueChange = { sugarInput = it.filter(Char::isDigit) },
-                        label = { Text("Value (mg/dL)") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                    if (sugarType == "HbA1c") {
+                        OutlinedTextField(
+                            value = sugarInput,
+                            onValueChange = { value -> sugarInput = value.filter { it.isDigit() || it == '.' }.let { candidate -> if (candidate.count { c -> c == '.' } <= 1) candidate else sugarInput } },
+                            label = { Text("Value (%)") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    } else {
+                        OutlinedTextField(
+                            value = sugarInput,
+                            onValueChange = { sugarInput = it.filter(Char::isDigit) },
+                            label = { Text("Value (mg/dL)") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
                 }
                 "bp" -> Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     OutlinedTextField(
@@ -1112,7 +1128,24 @@ fun QuickLogSheet(state: NirogState, metric: String, onDismiss: () -> Unit) {
                 onClick = {
                     saving = true
                     when (metric) {
-                        "sugar" -> {
+                        "sugar" -> if (sugarType == "HbA1c") {
+                            val value = sugarInput.toDoubleOrNull()
+                            if (value == null) { saving = false; return@Button }
+                            // HbA1c is a lab percentage on a totally different scale than day-to-day
+                            // mg/dL readings, so it's saved separately and kept out of sugarLogs/
+                            // fastingSugarValue to avoid corrupting the mg/dL trend and averages.
+                            state.repository.addHealthLog("glucoseReadings", mapOf(
+                                "value" to value,
+                                "unit" to "%",
+                                "readingType" to "hba1c",
+                                "measuredAt" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
+                                "source" to "manual"
+                            )) { result ->
+                                saving = false
+                                if (result is com.nirogbhumi.app.data.CloudResult.Success) onDismiss()
+                                else state.cloudMessage = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
+                            }
+                        } else {
                             val value = sugarInput.toIntOrNull()
                             if (value == null) { saving = false; return@Button }
                             state.repository.addHealthLog("glucoseReadings", mapOf(

@@ -118,6 +118,7 @@ dependencies {
   implementation(libs.firebase.messaging)
   implementation(libs.firebase.analytics)
   implementation(libs.firebase.crashlytics)
+  implementation(libs.firebase.appdistribution.api)
   implementation(libs.firebase.appcheck.playintegrity)
   implementation(libs.play.services.auth)
   implementation(libs.razorpay.checkout)
