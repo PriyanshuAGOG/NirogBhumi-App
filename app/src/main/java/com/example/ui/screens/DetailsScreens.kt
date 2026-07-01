@@ -30,6 +30,34 @@ fun BloodSugarDetailScreen(state: NirogState) {
     var sugarInputText by remember { mutableStateOf("") }
     var isRecordingDialogueOpen by remember { mutableStateOf(false) }
 
+    DisposableEffect(Unit) {
+        val subscription = state.repository.listenUserCollection("glucoseReadings", 30) { result ->
+            when (result) {
+                is com.nirogbhumi.app.data.CloudResult.Success -> {
+                    val synced = result.value.mapIndexedNotNull { index, doc ->
+                        val value = (doc.values["value"] as? Number)?.toInt() ?: return@mapIndexedNotNull null
+                        val readingType = doc.values["readingType"] as? String
+                        val type = if (readingType == "fasting") "Fasting" else "Post-meal"
+                        val timestamp = (doc.values["measuredAt"] as? com.google.firebase.Timestamp)
+                            ?: (doc.values["createdAt"] as? com.google.firebase.Timestamp)
+                        val time = timestamp?.toDate()?.let {
+                            java.text.SimpleDateFormat("MMM d, h:mm a", java.util.Locale.getDefault()).format(it)
+                        } ?: "Synced"
+                        val status = if (value > 130) "High" else if (value < 80) "Low" else "Normal"
+                        SugarLog(index + 1, value, type, time, status)
+                    }
+                    if (synced.isNotEmpty()) {
+                        state.sugarLogs.clear()
+                        state.sugarLogs.addAll(synced)
+                        state.fastingSugarValue = synced.firstOrNull { it.type == "Fasting" }?.value ?: state.fastingSugarValue
+                    }
+                }
+                is com.nirogbhumi.app.data.CloudResult.Failure -> Unit
+            }
+        }
+        onDispose { subscription.cancel() }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -195,6 +223,21 @@ fun BloodSugarDetailScreen(state: NirogState) {
                                 )
                             )
                             state.fastingSugarValue = sugarInt
+                            state.repository.addHealthLog(
+                                "glucoseReadings",
+                                mapOf(
+                                    "value" to sugarInt,
+                                    "unit" to "mg/dL",
+                                    "readingType" to if (selectedLogType == "Fasting") "fasting" else "post_meal",
+                                    "measuredAt" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
+                                    "source" to "manual"
+                                )
+                            ) { result ->
+                                state.cloudMessage = when (result) {
+                                    is com.nirogbhumi.app.data.CloudResult.Success -> "Synced securely"
+                                    is com.nirogbhumi.app.data.CloudResult.Failure -> result.message
+                                }
+                            }
                             isRecordingDialogueOpen = false
                             sugarInputText = ""
                         },

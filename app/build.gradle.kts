@@ -45,9 +45,20 @@ android {
       }
     }
     // Committed so every machine/CI run signs debug builds with the same
-    // certificate. Its SHA-1/SHA-256 is registered on the Firebase Android
-    // app so Google Sign-In works on debug builds; a rotating debug key
-    // would break that on every fresh CI run.
+    // certificate, letting a new debug APK install over an older one
+    // in place instead of requiring an uninstall first.
+    //
+    // SECURITY: this repo is public and this keystore's password is
+    // printed right here, so its private key must be treated as public.
+    // Never register its SHA-1/SHA-256 fingerprint against a Firebase
+    // project's Google Sign-In OAuth config (or any other SHA-pinned
+    // Google API) — doing so lets anyone who clones this repo build an
+    // APK with the same applicationId, signed with this same key, that
+    // Google Play Services will trust as "the real app" for that
+    // project, letting them capture legitimate Firebase Auth sessions
+    // for real users. Google Sign-In therefore intentionally does not
+    // work on debug builds; validate it only on a signed release build
+    // using the private release keystore instead.
     getByName("debug") {
       storeFile = file("ci-debug.keystore")
       storePassword = "android"

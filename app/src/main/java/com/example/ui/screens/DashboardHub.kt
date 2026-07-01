@@ -1591,10 +1591,13 @@ fun LearnTab(state: NirogState) {
                     product = product,
                     isAdded = state.cartProducts.contains(product.id),
                     onToggleCart = {
+                        val productKey = product.id.toString()
                         if (state.cartProducts.contains(product.id)) {
                             state.cartProducts.remove(product.id)
+                            state.cartItems.remove(productKey)
                         } else {
                             state.cartProducts.add(product.id)
+                            state.cartItems[productKey] = (state.cartItems[productKey] ?: 0) + 1
                         }
                     },
                     onOpen = { state.currentScreen = "product_detail" }
