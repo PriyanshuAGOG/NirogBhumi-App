@@ -136,6 +136,6 @@ fun backDestinationFor(spec: ScreenSpec): String = ExplicitBackDestinations[spec
     "Program" -> if (spec.route == "active_journey") "care_hub" else "active_journey"
     "Learn" -> if (spec.route == "learn_hub") "dashboard" else "learn_hub"
     "Store" -> if (spec.route == "store_home") "learn_hub" else "store_home"
-    "Family", "Devices", "Settings" -> "profile"
+    "Family", "Devices", "Settings" -> if (spec.route == "profile") "dashboard" else "profile"
     else -> "dashboard"
 }

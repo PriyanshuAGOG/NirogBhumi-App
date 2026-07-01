@@ -92,23 +92,20 @@ class NirogState {
     // Active Tab under Dashboard
     var activeTab by mutableStateOf("Today") // "Today", "Track", "Insights", "Care", "Learn"
 
-    // User Metrics State
-    var fastingSugarValue by mutableStateOf(105)
-    var sleepHours by mutableStateOf(7)
-    var sleepMinutes by mutableStateOf(20)
-    var stepsLogged by mutableStateOf(8432)
-    var waterGlasses by mutableStateOf(3)
+    // User Metrics State - starts at nil/zero until the user logs a real reading
+    var fastingSugarValue by mutableStateOf(0)
+    var sleepHours by mutableStateOf(0)
+    var sleepMinutes by mutableStateOf(0)
+    var stepsLogged by mutableStateOf(0)
+    var waterGlasses by mutableStateOf(0)
+    var latestBpReading by mutableStateOf<String?>(null)
 
-    // Sugar History & Tracking State
-    val sugarLogs = mutableStateListOf(
-        SugarLog(1, 136, "Post-meal", "Today, 8:45 AM", "High"),
-        SugarLog(2, 92, "Fasting", "Today, 6:30 AM", "Normal"),
-        SugarLog(3, 115, "Post-meal", "Yesterday, 9:15 PM", "Normal")
-    )
+    // Sugar History & Tracking State - populated only from real Firestore reads
+    val sugarLogs = mutableStateListOf<SugarLog>()
 
     // Log FASTING sugar bottom sheet state
     var isQuickLogFastingOpen by mutableStateOf(false)
-    var quickLogFastingValue by mutableStateOf(136)
+    var quickLogFastingValue by mutableStateOf(100)
 
     // Daily Checklist State
     var dailyRitualsCompleted = mutableStateListOf<String>()
@@ -118,10 +115,8 @@ class NirogState {
     var experimentDayCount by mutableStateOf(1)
 
     // Active Journey Protocol State
-    var activeJourneyProgress by mutableStateOf(42) // 42% initial state
-    val completedProtocols = mutableStateListOf<String>().apply {
-        add("Fasting Blood Sugar")
-    }
+    var activeJourneyProgress by mutableStateOf(0)
+    val completedProtocols = mutableStateListOf<String>()
 
     // Book Consultation State
     var consultStep by mutableStateOf(1) // 1: Service, 2: Slot & Form, 3: Success

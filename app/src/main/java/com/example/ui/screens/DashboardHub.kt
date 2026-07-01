@@ -16,6 +16,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -34,6 +35,7 @@ fun MainHub(state: NirogState) {
         topBar = {
             NirogTopAppBar(
                 cartCount = state.cartProducts.size,
+                profileName = state.profileName,
                 onProfileClick = {
                     state.currentScreen = "profile"
                 },
@@ -71,8 +73,14 @@ fun MainHub(state: NirogState) {
     }
 }
 
+private fun markTourSeen(context: android.content.Context) {
+    context.getSharedPreferences("nirog_prefs", android.content.Context.MODE_PRIVATE)
+        .edit().putBoolean("onboarding_tour_seen", true).apply()
+}
+
 @Composable
 fun OnboardingTourOverlay(state: NirogState) {
+    val context = LocalContext.current
     val step = state.currentTourStep
     val title = when (step) {
         0 -> "1. Your Daily Action"
@@ -171,6 +179,7 @@ fun OnboardingTourOverlay(state: NirogState) {
                         }
                     } else {
                         state.shouldShowTour = false
+                        markTourSeen(context)
                         state.activeTab = "Today"
                     }
                 },
@@ -204,6 +213,7 @@ fun OnboardingTourOverlay(state: NirogState) {
                 TextButton(
                     onClick = {
                         state.shouldShowTour = false
+                        markTourSeen(context)
                     }
                 ) {
                     Text("Skip Tour", color = Color(0xFF1B3221).copy(alpha = 0.5f))
@@ -215,7 +225,7 @@ fun OnboardingTourOverlay(state: NirogState) {
 
 // Custom Top App Bar matching Nirog Bhumi layout
 @Composable
-fun NirogTopAppBar(cartCount: Int, onProfileClick: () -> Unit, onNotificationClick: () -> Unit, onCartClick: () -> Unit) {
+fun NirogTopAppBar(cartCount: Int, profileName: String, onProfileClick: () -> Unit, onNotificationClick: () -> Unit, onCartClick: () -> Unit) {
     Surface(
         color = Color(0xFFF1FDEE),
         modifier = Modifier
@@ -225,22 +235,29 @@ fun NirogTopAppBar(cartCount: Int, onProfileClick: () -> Unit, onNotificationCli
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .statusBarsPadding()
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                // Editorial user profile picture
-                AsyncImage(
-                    model = "https://lh3.googleusercontent.com/aida-public/AB6AXuD3SJTqwkd-IfhxbEBzxNHWNxnVmDGPPUV_eBVRPcKL488OzQWI0EArbUTY34o9XZElJKSuu28NGvHB2gvbbD82l0RqBijwjuHs0SeTSRdEjfaOCtnuJVObWMcA3_HSeD9iU91Zlxi_5I329o4W_HuwE1Ia2E479hy2lMzsJM-0unvdqMva4fmRRqWxb7qxTmNgRowhNMjxHpz12M6X9YPNgruOUp_NxMAnxaOfRmm4sBwgv3XbRq5E3zXM-ueLutxa-OmXwW8EI8w",
-                    contentDescription = "User profile photo",
+                // Initials avatar - no placeholder/stranger photo until the user uploads their own
+                Box(
                     modifier = Modifier
                         .size(38.dp)
                         .clip(CircleShape)
+                        .background(Color(0xFF314936))
                         .border(1.dp, Color(0xFFC3C8C0), CircleShape)
                         .clickable { onProfileClick() },
-                    contentScale = ContentScale.Crop
-                )
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = profileName.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp
+                    )
+                }
                 Spacer(modifier = Modifier.width(10.dp))
                 NirogLogo(modifier = Modifier.size(28.dp))
                 Spacer(modifier = Modifier.width(6.dp))
@@ -297,7 +314,7 @@ fun NirogBottomNavigationBar(activeTab: String, onTabSelect: (String) -> Unit) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 12.dp, horizontal = 8.dp),
+                .padding(top = 10.dp, bottom = 4.dp, start = 8.dp, end = 8.dp),
             horizontalArrangement = Arrangement.SpaceAround,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -345,12 +362,44 @@ fun NirogBottomNavItem(
 // TAB 1: Today Tab Dashboard
 @Composable
 fun TodayTab(state: NirogState) {
+    DisposableEffect(Unit) {
+        val sugarSub = state.repository.listenUserCollection("glucoseReadings", 7) { result ->
+            if (result is com.nirogbhumi.app.data.CloudResult.Success) {
+                val synced = result.value.mapIndexedNotNull { index, doc ->
+                    val value = (doc.values["value"] as? Number)?.toInt() ?: return@mapIndexedNotNull null
+                    val readingType = doc.values["readingType"] as? String
+                    val type = if (readingType == "fasting") "Fasting" else "Post-meal"
+                    val timestamp = (doc.values["measuredAt"] as? com.google.firebase.Timestamp)
+                        ?: (doc.values["createdAt"] as? com.google.firebase.Timestamp)
+                    val time = timestamp?.toDate()?.let {
+                        java.text.SimpleDateFormat("MMM d, h:mm a", java.util.Locale.getDefault()).format(it)
+                    } ?: "Synced"
+                    val status = if (value > 130) "High" else if (value < 80) "Low" else "Normal"
+                    SugarLog(index + 1, value, type, time, status)
+                }
+                if (synced.isNotEmpty()) {
+                    state.sugarLogs.clear()
+                    state.sugarLogs.addAll(synced)
+                    state.fastingSugarValue = synced.firstOrNull { it.type == "Fasting" }?.value ?: state.fastingSugarValue
+                }
+            }
+        }
+        val bpSub = state.repository.listenUserCollection("bpReadings", 1) { result ->
+            if (result is com.nirogbhumi.app.data.CloudResult.Success) {
+                val latest = result.value.firstOrNull()
+                val systolic = (latest?.values?.get("systolic") as? Number)?.toInt()
+                val diastolic = (latest?.values?.get("diastolic") as? Number)?.toInt()
+                if (systolic != null && diastolic != null) state.latestBpReading = "$systolic/$diastolic"
+            }
+        }
+        onDispose { sugarSub.cancel(); bpSub.cancel() }
+    }
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(20.dp)
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         // Welcome and Pitta Chip
         Row(
@@ -359,15 +408,22 @@ fun TodayTab(state: NirogState) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column {
+                val calendar = remember { java.util.Calendar.getInstance() }
+                val greetingWord = when (calendar.get(java.util.Calendar.HOUR_OF_DAY)) {
+                    in 4..11 -> "Good morning"
+                    in 12..16 -> "Good afternoon"
+                    else -> "Good evening"
+                }
+                val firstName = state.profileName.trim().substringBefore(" ").ifBlank { "there" }
                 Text(
-                    text = "Good morning, Priyanshu",
+                    text = "$greetingWord, $firstName",
                     fontSize = 24.sp,
                     fontFamily = FontFamily.Serif,
                     fontWeight = FontWeight.Bold,
                     color = Color(0xFF1B3221)
                 )
                 Text(
-                    text = "Thursday, 18 June",
+                    text = remember { java.text.SimpleDateFormat("EEEE, d MMMM", java.util.Locale.getDefault()).format(java.util.Date()) },
                     fontSize = 14.sp,
                     color = Color(0xFF434842),
                     modifier = Modifier.padding(top = 2.dp)
@@ -433,33 +489,58 @@ fun TodayTab(state: NirogState) {
 
                 Spacer(modifier = Modifier.height(18.dp))
 
-                Button(
-                    onClick = {
-                        if (isWalkTaskDone) {
+                if (isWalkTaskDone) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color.White.copy(alpha = 0.12f), RoundedCornerShape(24.dp))
+                            .padding(vertical = 14.dp, horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = Color(0xFFBFEE95), modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Completed for today", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        }
+                        TextButton(onClick = {
                             state.dailyRitualsCompleted.remove("Walk")
                             state.stepsLogged -= 1500
-                        } else {
+                            state.repository.addHealthLog("checklistLogs", mapOf(
+                                "taskId" to "daily_post_dinner_walk",
+                                "title" to "Walk 15 minutes after dinner",
+                                "status" to "pending",
+                                "date" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
+                                "completedAt" to null
+                            )) { result -> if (result is com.nirogbhumi.app.data.CloudResult.Failure) state.cloudMessage = result.message }
+                        }) {
+                            Text("Undo", color = Color(0xFFB2CEB4), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        }
+                    }
+                } else {
+                    Button(
+                        onClick = {
                             state.dailyRitualsCompleted.add("Walk")
                             state.stepsLogged += 1500
-                        }
-                        state.repository.addHealthLog("checklistLogs", mapOf(
-                            "taskId" to "daily_post_dinner_walk",
-                            "title" to "Walk 15 minutes after dinner",
-                            "status" to if (isWalkTaskDone) "pending" else "done",
-                            "date" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
-                            "completedAt" to if (isWalkTaskDone) null else com.google.firebase.firestore.FieldValue.serverTimestamp()
-                        )) { result -> if (result is com.nirogbhumi.app.data.CloudResult.Failure) state.cloudMessage = result.message }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color.White),
-                    shape = RoundedCornerShape(24.dp)
-                ) {
-                    Text(
-                        text = if (isWalkTaskDone) "Log Completed" else "Mark Complete",
-                        color = Color(0xFF314936),
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp
-                    )
+                            state.repository.addHealthLog("checklistLogs", mapOf(
+                                "taskId" to "daily_post_dinner_walk",
+                                "title" to "Walk 15 minutes after dinner",
+                                "status" to "done",
+                                "date" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
+                                "completedAt" to com.google.firebase.firestore.FieldValue.serverTimestamp()
+                            )) { result -> if (result is com.nirogbhumi.app.data.CloudResult.Failure) state.cloudMessage = result.message }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.White),
+                        shape = RoundedCornerShape(24.dp)
+                    ) {
+                        Text(
+                            text = "Mark Complete",
+                            color = Color(0xFF314936),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp
+                        )
+                    }
                 }
             }
         }
@@ -483,9 +564,9 @@ fun TodayTab(state: NirogState) {
                     icon = Icons.Filled.Bloodtype,
                     iconColor = Color(0xFFBA1A1A),
                     title = "Fasting Sugar",
-                    value = "${state.fastingSugarValue}",
-                    unit = "mg/dL",
-                    annotation = "+2 yesterday",
+                    value = if (state.fastingSugarValue > 0) "${state.fastingSugarValue}" else "—",
+                    unit = if (state.fastingSugarValue > 0) "mg/dL" else "",
+                    annotation = if (state.fastingSugarValue > 0) "Today" else "Tap to log",
                     onClick = { state.isQuickLogFastingOpen = true }
                 )
             }
@@ -498,9 +579,9 @@ fun TodayTab(state: NirogState) {
                     icon = Icons.Filled.Favorite,
                     iconColor = Color(0xFF426820),
                     title = "Blood Pressure",
-                    value = "124/82",
+                    value = state.latestBpReading ?: "—",
                     unit = "",
-                    annotation = "Optimal",
+                    annotation = if (state.latestBpReading != null) "Latest" else "No data yet",
                     onClick = { state.currentScreen = "bp_overview" }
                 )
             }
@@ -516,9 +597,9 @@ fun TodayTab(state: NirogState) {
                     icon = Icons.Filled.Bedtime,
                     iconColor = Color(0xFF4B6450),
                     title = "Sleep Quality",
-                    value = "${state.sleepHours}h ${state.sleepMinutes}m",
+                    value = if (state.sleepHours > 0 || state.sleepMinutes > 0) "${state.sleepHours}h ${state.sleepMinutes}m" else "—",
                     unit = "",
-                    annotation = "Avg duration",
+                    annotation = if (state.sleepHours > 0 || state.sleepMinutes > 0) "Last night" else "No data yet",
                     onClick = { state.currentScreen = "sleep_overview" }
                 )
             }
@@ -531,9 +612,9 @@ fun TodayTab(state: NirogState) {
                     icon = Icons.Filled.DirectionsWalk,
                     iconColor = Color(0xFF426820),
                     title = "Steps Done",
-                    value = String.format("%,d", state.stepsLogged),
-                    unit = "steps",
-                    annotation = "Daily total",
+                    value = if (state.stepsLogged > 0) String.format("%,d", state.stepsLogged) else "—",
+                    unit = if (state.stepsLogged > 0) "steps" else "",
+                    annotation = if (state.stepsLogged > 0) "Today" else "No data yet",
                     onClick = { state.currentScreen = "walking_overview" }
                 )
             }
@@ -573,60 +654,70 @@ fun TodayTab(state: NirogState) {
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // Custom Canvas Drawing of Weekly Rhythm Barchart
-                Canvas(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(100.dp)
-                ) {
-                    val days = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
-                    // simulated step rates out of 100% capacity
-                    val percentageValues = listOf(0.6f, 0.8f, 0.4f, 0.7f, 0.1f, 0.1f, 0.1f)
-                    val spacing = size.width / 7
-                    val barWidth = 14.dp.toPx()
-
-                    days.forEachIndexed { index, name ->
-                        val x = index * spacing + (spacing / 2) - (barWidth / 2)
-                        val totalHeight = size.height - 30.dp.toPx()
-                        val barHeight = totalHeight * percentageValues[index]
-                        val y = totalHeight - barHeight
-
-                        // Background pillar track
-                        drawRoundRect(
-                            color = Color(0xFFE5F1E2),
-                            topLeft = androidx.compose.ui.geometry.Offset(x, 0f),
-                            size = androidx.compose.ui.geometry.Size(barWidth, totalHeight),
-                            cornerRadius = CornerRadius(4.dp.toPx(), 4.dp.toPx())
-                        )
-
-                        // If it is Thursday (today), highlight it in deep green, others in average green
-                        val isToday = index == 3
-                        val barColor = if (isToday) Color(0xFF1B3221) else Color(0xFF426820).copy(alpha = 0.5f)
-
-                        drawRoundRect(
-                            color = barColor,
-                            topLeft = androidx.compose.ui.geometry.Offset(x, y),
-                            size = androidx.compose.ui.geometry.Size(barWidth, barHeight),
-                            cornerRadius = CornerRadius(4.dp.toPx(), 4.dp.toPx())
-                        )
-                    }
-                }
-
-                // X-Axis text names
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    val days = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
-                    days.forEachIndexed { i, d ->
+                if (state.sugarLogs.isEmpty()) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(Icons.Outlined.Insights, contentDescription = null, tint = Color(0xFF9CB79F), modifier = Modifier.size(28.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = d,
-                            fontSize = 11.sp,
-                            fontWeight = if (i == 3) FontWeight.Bold else FontWeight.Medium,
-                            color = if (i == 3) Color(0xFF1B3221) else Color(0xFF737972),
-                            modifier = Modifier.width(36.dp),
+                            "Start logging today to see your weekly rhythm here",
+                            fontSize = 12.sp,
+                            color = Color(0xFF737972),
                             textAlign = TextAlign.Center
                         )
+                    }
+                } else {
+                    // Recent readings sparkline built from real logged sugar values
+                    val recent = state.sugarLogs.take(7).reversed()
+                    Canvas(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(100.dp)
+                    ) {
+                        val spacing = size.width / recent.size
+                        val barWidth = 14.dp.toPx()
+                        val maxValue = (recent.maxOfOrNull { it.value } ?: 1).coerceAtLeast(1)
+
+                        recent.forEachIndexed { index, log ->
+                            val x = index * spacing + (spacing / 2) - (barWidth / 2)
+                            val totalHeight = size.height - 30.dp.toPx()
+                            val barHeight = totalHeight * (log.value.toFloat() / maxValue)
+                            val y = totalHeight - barHeight
+                            val isLast = index == recent.size - 1
+
+                            drawRoundRect(
+                                color = Color(0xFFE5F1E2),
+                                topLeft = androidx.compose.ui.geometry.Offset(x, 0f),
+                                size = androidx.compose.ui.geometry.Size(barWidth, totalHeight),
+                                cornerRadius = CornerRadius(4.dp.toPx(), 4.dp.toPx())
+                            )
+
+                            val barColor = if (isLast) Color(0xFF1B3221) else Color(0xFF426820).copy(alpha = 0.5f)
+                            drawRoundRect(
+                                color = barColor,
+                                topLeft = androidx.compose.ui.geometry.Offset(x, y),
+                                size = androidx.compose.ui.geometry.Size(barWidth, barHeight),
+                                cornerRadius = CornerRadius(4.dp.toPx(), 4.dp.toPx())
+                            )
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        recent.forEachIndexed { i, log ->
+                            Text(
+                                text = log.type.take(4),
+                                fontSize = 10.sp,
+                                fontWeight = if (i == recent.size - 1) FontWeight.Bold else FontWeight.Medium,
+                                color = if (i == recent.size - 1) Color(0xFF1B3221) else Color(0xFF737972),
+                                modifier = Modifier.width(36.dp),
+                                textAlign = TextAlign.Center
+                            )
+                        }
                     }
                 }
             }

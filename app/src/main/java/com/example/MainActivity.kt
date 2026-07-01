@@ -45,6 +45,8 @@ class MainActivity : ComponentActivity(), com.razorpay.PaymentResultListener {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     nirogState.pendingDeepLink = intent.getStringExtra("route").orEmpty()
+    val tourSeen = getSharedPreferences("nirog_prefs", MODE_PRIVATE).getBoolean("onboarding_tour_seen", false)
+    nirogState.shouldShowTour = !tourSeen
     enableEdgeToEdge()
     setContent {
       MyApplicationTheme {

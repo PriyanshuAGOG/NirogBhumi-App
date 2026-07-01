@@ -1088,7 +1088,7 @@ fun ProfileEditScreen(state: NirogState) {
                 .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = { state.currentScreen = "dashboard" }) {
+            IconButton(onClick = { state.currentScreen = "profile" }) {
                 Icon(
                     imageVector = Icons.Default.ArrowBack,
                     contentDescription = "Back",

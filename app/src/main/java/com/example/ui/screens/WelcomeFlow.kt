@@ -1777,7 +1777,11 @@ fun GoalSelectionScreen(state: NirogState) {
             .padding(24.dp),
         verticalArrangement = Arrangement.SpaceBetween
     ) {
-        Column {
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState())
+        ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1826,7 +1830,7 @@ fun GoalSelectionScreen(state: NirogState) {
                             Card(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(60.dp)
+                                    .heightIn(min = 60.dp)
                                     .border(
                                         1.5.dp,
                                         if (contains) DeepGreen else Line.copy(alpha = 0.4f),
@@ -1842,25 +1846,25 @@ fun GoalSelectionScreen(state: NirogState) {
                                 colors = CardDefaults.cardColors(containerColor = if (contains) SoftClay else White),
                                 shape = RoundedCornerShape(12.dp)
                             ) {
-                                Box(
-                                    modifier = Modifier.fillMaxSize().padding(12.dp),
-                                    contentAlignment = Alignment.CenterStart
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(
-                                            imageVector = if (contains) Icons.Filled.CheckCircle else Icons.Outlined.AddCircle,
-                                            contentDescription = null,
-                                            tint = if (contains) DeepGreen else Ink.copy(alpha = 0.4f),
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Text(
-                                            text = goalItem,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Ink,
-                                            fontSize = 13.sp
-                                        )
-                                    }
+                                    Icon(
+                                        imageVector = if (contains) Icons.Filled.CheckCircle else Icons.Outlined.AddCircle,
+                                        contentDescription = null,
+                                        tint = if (contains) DeepGreen else Ink.copy(alpha = 0.4f),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = goalItem,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Ink,
+                                        fontSize = 13.sp,
+                                        lineHeight = 16.sp,
+                                        modifier = Modifier.weight(1f)
+                                    )
                                 }
                             }
                         }
@@ -1868,6 +1872,8 @@ fun GoalSelectionScreen(state: NirogState) {
                 }
             }
         }
+
+        Spacer(modifier = Modifier.height(16.dp))
 
         Button(
             onClick = { state.currentScreen = "program_code_optional" },
