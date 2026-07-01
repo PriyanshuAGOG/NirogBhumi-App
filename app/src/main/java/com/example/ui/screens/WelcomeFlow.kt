@@ -54,6 +54,18 @@ fun NirogLogo(modifier: Modifier = Modifier) {
     )
 }
 
+// Existing accounts signing back in (any method) must land on their dashboard,
+// not repeat onboarding - only a genuinely new account has no completed profile yet.
+private fun routeAfterAuthSuccess(state: NirogState, deepLinkFallback: String = "dashboard") {
+    val uid = runCatching { FirebaseAuth.getInstance().currentUser?.uid }.getOrNull()
+    if (uid == null) { state.currentScreen = "consent"; return }
+    FirebaseFirestore.getInstance().collection("users").document(uid).get()
+        .addOnSuccessListener { document ->
+            state.currentScreen = if (document.getBoolean("onboardingComplete") == true) deepLinkFallback else "consent"
+        }
+        .addOnFailureListener { state.currentScreen = "consent" }
+}
+
 // SCREEN 1: SPLASH SCREEN
 @Composable
 fun SplashScreen(state: NirogState) {
@@ -61,9 +73,7 @@ fun SplashScreen(state: NirogState) {
         kotlinx.coroutines.delay(900)
         val user = runCatching { FirebaseAuth.getInstance().currentUser }.getOrNull()
         if (user == null) state.currentScreen = "welcome"
-        else FirebaseFirestore.getInstance().collection("users").document(user.uid).get()
-            .addOnSuccessListener { document -> state.currentScreen = if (document.getBoolean("onboardingComplete") == true) state.pendingDeepLink.ifBlank { "dashboard" } else "consent" }
-            .addOnFailureListener { state.currentScreen = "consent" }
+        else routeAfterAuthSuccess(state, state.pendingDeepLink.ifBlank { "dashboard" })
     }
     Box(
         modifier = Modifier
@@ -775,7 +785,7 @@ fun LoginOtpScreen(state: NirogState) {
                             } else {
                                 state.authBusy = true
                                 FirebaseAuthGateway.verifyOtp(state.otpVerificationId, pinVal,
-                                    onSuccess = { state.authBusy = false; state.currentScreen = "consent" },
+                                    onSuccess = { state.authBusy = false; routeAfterAuthSuccess(state) },
                                     onError = { state.authBusy = false; state.authError = it; isValidState = false })
                             }
                         },
@@ -810,7 +820,7 @@ fun EmailAuthScreen(state: NirogState) {
             result.data,
             onSuccess = {
                 state.authBusy = false
-                state.currentScreen = "consent"
+                routeAfterAuthSuccess(state)
             },
             onError = {
                 state.authBusy = false
@@ -1023,7 +1033,7 @@ fun EmailAuthScreen(state: NirogState) {
                             state.userEmail = emailInput
                             state.authBusy = true; state.authError = ""
                             FirebaseAuthGateway.email(emailInput, passwordInput, state.isSignUpMode,
-                                onSuccess = { state.authBusy = false; state.currentScreen = "consent" },
+                                onSuccess = { state.authBusy = false; routeAfterAuthSuccess(state) },
                                 onError = { state.authBusy = false; state.authError = it })
                         },
                         enabled = emailInput.contains("@") && passwordInput.length >= 6 && !state.authBusy,
