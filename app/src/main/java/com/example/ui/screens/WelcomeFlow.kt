@@ -17,6 +17,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -42,72 +44,64 @@ val White = Color(0xFFFFFFFF)
 
 @Composable
 fun NirogLogo(modifier: Modifier = Modifier) {
-    androidx.compose.foundation.Canvas(modifier = modifier) {
-        val w = size.width
-        val h = size.height
-        val cX = w / 2
-        val cY = h / 2
-        val r = w / 2
+    // Renders the actual brand mark asset (assets/branding/nirog-bhumi-logo-mark.png),
+    // not a hand-drawn approximation, so it's pixel-identical to the real logo everywhere it appears.
+    Image(
+        painter = painterResource(id = com.nirogbhumi.app.R.drawable.logo_nirog_mark),
+        contentDescription = "Nirog Bhumi logo",
+        modifier = modifier,
+        contentScale = ContentScale.Fit
+    )
+}
 
-        // Background circle with gradient exactly like the colorful lotus leaf circle
-        drawCircle(
-            brush = androidx.compose.ui.graphics.Brush.radialGradient(
-                colors = listOf(
-                    Color(0xFFE5FA96), // Center yellowish-lime
-                    Color(0xFF7BD0D4)  // Outer pastel turquoise
-                ),
-                center = androidx.compose.ui.geometry.Offset(cX, cY),
-                radius = r
-            )
-        )
+// Restores the saved profile (name, etc.) into in-memory state on every cold start
+// and sign-in. Without this, fields the user already filled in reset to blank
+// defaults every time the process restarts, even though Firestore has the real
+// values - the account's data was never actually lost, it just wasn't reloaded.
+private fun applyProfileDocument(state: NirogState, document: com.google.firebase.firestore.DocumentSnapshot) {
+    document.getString("fullName")?.takeIf { it.isNotBlank() }?.let { state.profileName = it }
+    (document.get("age") as? Number)?.let { state.profileAge = it.toString() }
+    document.getString("gender")?.let { state.profileGender = it }
+    (document.get("heightCm") as? Number)?.let { state.profileHeight = it.toString() }
+    (document.get("weightKg") as? Number)?.let { state.profileWeight = it.toString() }
+    document.getString("city")?.let { state.profileCity = it }
+    document.getString("preferredLanguage")?.let { state.profileLanguage = it }
+    document.getString("diabetesStatus")?.let { state.selectedDiabetesStatus = it }
+    document.getString("bpStatus")?.let { state.selectedBpStatus = it }
+    document.getString("onMedication")?.let { state.selectedOnMedication = it }
+    document.getString("doctorSupervision")?.let { state.selectedDoctorSupervision = it }
+    document.getBoolean("programActive")?.let { state.isProgramActive = it }
+    document.getString("activeProgramId")?.let { state.activeProgramId = it }
+    document.getString("activeProgramName")?.let { state.activeProgramName = it }
+    (document.get("programDurationDays") as? Number)?.let { state.programDurationDays = it.toLong() }
+    (document.get("programStartedAt") as? com.google.firebase.Timestamp)?.let { state.programStartedAtMillis = it.toDate().time }
+    runCatching { FirebaseAuth.getInstance().currentUser?.email }.getOrNull()?.let { state.userEmail = it }
+}
 
-        // Draw 3 lotus petals with sunset rainbow gradient
-        val scale = w / 100f
+// Care+ admin capability (posting announcements) is granted server-side via a Firebase
+// custom claim, never trusted from anything the client itself could set - a forced
+// token refresh picks up a claim change without requiring the user to sign out first.
+private fun refreshAdminClaim(state: NirogState) {
+    FirebaseAuth.getInstance().currentUser?.getIdToken(true)
+        ?.addOnSuccessListener { result -> state.isAdmin = result.claims["role"] == "admin" }
+}
 
-        val petalGradient = androidx.compose.ui.graphics.Brush.verticalGradient(
-            colors = listOf(
-                Color(0xFFAC9EE6), // Top lavender
-                Color(0xFF81D7D2), // Teal
-                Color(0xFFA6E673), // Bright lime green
-                Color(0xFFF9D649), // Sunset yellow
-                Color(0xFFEE9749), // Tangerine orange
-                Color(0xFF4589CE)  // Indigo-blue bottom base
-            )
-        )
-
-        // 1. Central vertical leaf petal
-        val centralPetalPath = androidx.compose.ui.graphics.Path().apply {
-            moveTo(cX, cY - 26 * scale)
-            quadraticTo(cX - 16 * scale, cY, cX, cY + 26 * scale)
-            quadraticTo(cX + 16 * scale, cY, cX, cY - 26 * scale)
+// Existing accounts signing back in (any method) must land on their dashboard,
+// not repeat onboarding - only a genuinely new account has no completed profile yet.
+private fun routeAfterAuthSuccess(state: NirogState, deepLinkFallback: String = "dashboard") {
+    val uid = runCatching { FirebaseAuth.getInstance().currentUser?.uid }.getOrNull()
+    if (uid == null) { state.currentScreen = "consent"; return }
+    refreshAdminClaim(state)
+    FirebaseFirestore.getInstance().collection("users").document(uid).get()
+        .addOnSuccessListener { document ->
+            if (document.getBoolean("onboardingComplete") == true) {
+                applyProfileDocument(state, document)
+                state.currentScreen = deepLinkFallback
+            } else {
+                state.currentScreen = "consent"
+            }
         }
-
-        // 2. Left leaf petal
-        val leftPetalPath = androidx.compose.ui.graphics.Path().apply {
-            moveTo(cX, cY + 26 * scale)
-            quadraticTo(cX - 28 * scale, cY + 12 * scale, cX - 34 * scale, cY - 8 * scale)
-            quadraticTo(cX - 15 * scale, cY + 10 * scale, cX, cY + 26 * scale)
-        }
-
-        // 3. Right leaf petal
-        val rightPetalPath = androidx.compose.ui.graphics.Path().apply {
-            moveTo(cX, cY + 26 * scale)
-            quadraticTo(cX + 28 * scale, cY + 12 * scale, cX + 34 * scale, cY - 8 * scale)
-            quadraticTo(cX + 15 * scale, cY + 10 * scale, cX, cY + 26 * scale)
-        }
-
-        // Draw filled paths
-        drawPath(path = centralPetalPath, brush = petalGradient)
-        drawPath(path = leftPetalPath, brush = petalGradient)
-        drawPath(path = rightPetalPath, brush = petalGradient)
-
-        // Draw thin white border outline curves exactly matching the logo
-        val strokeWidth = 1.6f * scale
-        val stStyle = androidx.compose.ui.graphics.drawscope.Stroke(width = strokeWidth)
-        drawPath(path = centralPetalPath, color = Color.White, style = stStyle)
-        drawPath(path = leftPetalPath, color = Color.White, style = stStyle)
-        drawPath(path = rightPetalPath, color = Color.White, style = stStyle)
-    }
+        .addOnFailureListener { state.currentScreen = "consent" }
 }
 
 // SCREEN 1: SPLASH SCREEN
@@ -117,9 +111,7 @@ fun SplashScreen(state: NirogState) {
         kotlinx.coroutines.delay(900)
         val user = runCatching { FirebaseAuth.getInstance().currentUser }.getOrNull()
         if (user == null) state.currentScreen = "welcome"
-        else FirebaseFirestore.getInstance().collection("users").document(user.uid).get()
-            .addOnSuccessListener { document -> state.currentScreen = if (document.getBoolean("onboardingComplete") == true) state.pendingDeepLink.ifBlank { "dashboard" } else "consent" }
-            .addOnFailureListener { state.currentScreen = "consent" }
+        else routeAfterAuthSuccess(state, state.pendingDeepLink.ifBlank { "dashboard" })
     }
     Box(
         modifier = Modifier
@@ -330,6 +322,7 @@ fun ValueSlidesScreen(state: NirogState) {
         modifier = Modifier
             .fillMaxSize()
             .background(Paper)
+            .verticalScroll(rememberScrollState())
             .padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.SpaceBetween
@@ -363,7 +356,7 @@ fun ValueSlidesScreen(state: NirogState) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth(0.9f)
-                    .height(200.dp)
+                    .heightIn(min = 200.dp)
                     .background(SoftClay.copy(alpha = 0.5f), RoundedCornerShape(24.dp))
                     .border(1.dp, Line, RoundedCornerShape(24.dp))
                     .padding(16.dp),
@@ -373,7 +366,7 @@ fun ValueSlidesScreen(state: NirogState) {
                     0 -> {
                         // Pattern Graph simulation
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("Fast Sugar (Mon-Sun)", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = DeepGreen)
+                            Text("Fasting Sugar (Mon-Sun)", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = DeepGreen)
                             Spacer(modifier = Modifier.height(16.dp))
                             Canvas(modifier = Modifier.fillMaxWidth().height(100.dp)) {
                                 val steps = size.width / 5
@@ -830,7 +823,7 @@ fun LoginOtpScreen(state: NirogState) {
                             } else {
                                 state.authBusy = true
                                 FirebaseAuthGateway.verifyOtp(state.otpVerificationId, pinVal,
-                                    onSuccess = { state.authBusy = false; state.currentScreen = "consent" },
+                                    onSuccess = { state.authBusy = false; routeAfterAuthSuccess(state) },
                                     onError = { state.authBusy = false; state.authError = it; isValidState = false })
                             }
                         },
@@ -865,7 +858,7 @@ fun EmailAuthScreen(state: NirogState) {
             result.data,
             onSuccess = {
                 state.authBusy = false
-                state.currentScreen = "consent"
+                routeAfterAuthSuccess(state)
             },
             onError = {
                 state.authBusy = false
@@ -1078,7 +1071,7 @@ fun EmailAuthScreen(state: NirogState) {
                             state.userEmail = emailInput
                             state.authBusy = true; state.authError = ""
                             FirebaseAuthGateway.email(emailInput, passwordInput, state.isSignUpMode,
-                                onSuccess = { state.authBusy = false; state.currentScreen = "consent" },
+                                onSuccess = { state.authBusy = false; routeAfterAuthSuccess(state) },
                                 onError = { state.authBusy = false; state.authError = it })
                         },
                         enabled = emailInput.contains("@") && passwordInput.length >= 6 && !state.authBusy,
@@ -1252,6 +1245,7 @@ fun ConsentScreen(state: NirogState) {
     var check1 by remember { mutableStateOf(false) }
     var check2 by remember { mutableStateOf(false) }
     var check3 by remember { mutableStateOf(false) }
+    var isSaving by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -1324,6 +1318,17 @@ fun ConsentScreen(state: NirogState) {
                 Text("Read full policies and medical disclaimer", color = DeepGreen, fontWeight = FontWeight.SemiBold)
             }
 
+            if (!(check1 && check2 && check3)) {
+                Text(
+                    "Check all three items above to continue.",
+                    color = Ink.copy(alpha = 0.55f),
+                    fontSize = 12.sp
+                )
+            }
+            if (state.authError.isNotBlank()) {
+                Text(state.authError, color = Color(0xFF8B2E2E), fontSize = 12.sp)
+            }
+
             Spacer(modifier = Modifier.height(32.dp))
         }
 
@@ -1336,15 +1341,18 @@ fun ConsentScreen(state: NirogState) {
         ) {
             Button(
                 onClick = {
+                    state.authError = ""
+                    isSaving = true
                     state.consentHealthData = check1
                     state.consentExpertReview = check2
                     state.consentMedicalDisclaimer = check3
                     state.repository.saveProfile(mapOf("consent" to mapOf("healthData" to check1, "expertReview" to check2, "medicalDisclaimer" to check3, "version" to "1.0"))) { result ->
+                        isSaving = false
                         if (result is com.nirogbhumi.app.data.CloudResult.Success) state.currentScreen = "setup_profile"
                         else state.authError = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
                     }
                 },
-                enabled = check1 && check2 && check3,
+                enabled = check1 && check2 && check3 && !isSaving,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(54.dp),
@@ -1354,10 +1362,14 @@ fun ConsentScreen(state: NirogState) {
                 ),
                 shape = RoundedCornerShape(27.dp)
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(text = "Agree & Continue", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Icon(imageVector = Icons.Filled.ArrowForward, contentDescription = "Proceed", tint = Color.White)
+                if (isSaving) {
+                    CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+                } else {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(text = "Agree & Continue", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Icon(imageVector = Icons.Filled.ArrowForward, contentDescription = "Proceed", tint = Color.White)
+                    }
                 }
             }
         }
@@ -1412,6 +1424,7 @@ fun SetupProfileScreen(state: NirogState) {
     var heightTemp by remember { mutableStateOf(state.profileHeight) }
     var cityTemp by remember { mutableStateOf(state.profileCity) }
     var languageTemp by remember { mutableStateOf(state.profileLanguage) }
+    var isSaving by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -1435,9 +1448,7 @@ fun SetupProfileScreen(state: NirogState) {
                 fontSize = 13.sp,
                 color = Ink.copy(alpha = 0.5f)
             )
-            TextButton(onClick = { state.currentScreen = "selection_caregiver" }) {
-                Text("Skip", color = DeepGreen, fontWeight = FontWeight.Bold)
-            }
+            Spacer(modifier = Modifier.width(48.dp))
         }
 
         Column(
@@ -1465,7 +1476,7 @@ fun SetupProfileScreen(state: NirogState) {
             Spacer(modifier = Modifier.height(8.dp))
 
             // Fields Questionnaire
-            OutlinedProfileField("Full Name", nameTemp, "e.g. Priyanshu") { nameTemp = it }
+            OutlinedProfileField("Full Name *", nameTemp, "e.g. Priyanshu") { nameTemp = it }
             OutlinedProfileField("Age", ageTemp, "e.g. 28") { ageTemp = it }
             OutlinedProfileField("Weight (kg)", weightTemp, "e.g. 72") { weightTemp = it }
             OutlinedProfileField("Height (cm)", heightTemp, "e.g. 174") { heightTemp = it }
@@ -1491,26 +1502,40 @@ fun SetupProfileScreen(state: NirogState) {
         }
 
         Box(modifier = Modifier.padding(16.dp)) {
-            Button(
-                onClick = {
-                    state.profileName = nameTemp
-                    state.profileAge = ageTemp
-                    state.profileWeight = weightTemp
-                    state.profileHeight = heightTemp
-                    state.profileCity = cityTemp
-                    state.profileLanguage = languageTemp
-                    state.repository.saveProfile(mapOf("fullName" to nameTemp, "age" to ageTemp.toIntOrNull(), "weightKg" to weightTemp.toDoubleOrNull(), "heightCm" to heightTemp.toDoubleOrNull(), "city" to cityTemp, "preferredLanguage" to languageTemp)) { result ->
-                        if (result is com.nirogbhumi.app.data.CloudResult.Success) state.currentScreen = "selection_caregiver"
-                        else state.authError = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
+            Column {
+                if (state.authError.isNotBlank()) {
+                    Text(state.authError, color = Color(0xFF8B2E2E), fontSize = 12.sp, modifier = Modifier.padding(bottom = 8.dp))
+                }
+                Button(
+                    onClick = {
+                        if (nameTemp.isBlank()) { state.authError = "Please enter your name to continue"; return@Button }
+                        state.authError = ""
+                        isSaving = true
+                        state.profileName = nameTemp
+                        state.profileAge = ageTemp
+                        state.profileWeight = weightTemp
+                        state.profileHeight = heightTemp
+                        state.profileCity = cityTemp
+                        state.profileLanguage = languageTemp
+                        state.repository.saveProfile(mapOf("fullName" to nameTemp, "age" to ageTemp.toIntOrNull(), "weightKg" to weightTemp.toDoubleOrNull(), "heightCm" to heightTemp.toDoubleOrNull(), "city" to cityTemp, "preferredLanguage" to languageTemp)) { result ->
+                            isSaving = false
+                            if (result is com.nirogbhumi.app.data.CloudResult.Success) state.currentScreen = "selection_caregiver"
+                            else state.authError = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
+                        }
+                    },
+                    enabled = !isSaving,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(54.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = DeepGreen),
+                    shape = RoundedCornerShape(27.dp)
+                ) {
+                    if (isSaving) {
+                        CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+                    } else {
+                        Text("Continue", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                     }
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(54.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = DeepGreen),
-                shape = RoundedCornerShape(27.dp)
-            ) {
-                Text("Continue", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                }
             }
         }
     }
@@ -1548,7 +1573,11 @@ fun SelfOrCaregiverScreen(state: NirogState) {
             .padding(24.dp),
         verticalArrangement = Arrangement.SpaceBetween
     ) {
-        Column {
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState())
+        ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.Start
@@ -1799,7 +1828,11 @@ fun GoalSelectionScreen(state: NirogState) {
             .padding(24.dp),
         verticalArrangement = Arrangement.SpaceBetween
     ) {
-        Column {
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState())
+        ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1848,7 +1881,7 @@ fun GoalSelectionScreen(state: NirogState) {
                             Card(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(60.dp)
+                                    .heightIn(min = 60.dp)
                                     .border(
                                         1.5.dp,
                                         if (contains) DeepGreen else Line.copy(alpha = 0.4f),
@@ -1864,25 +1897,25 @@ fun GoalSelectionScreen(state: NirogState) {
                                 colors = CardDefaults.cardColors(containerColor = if (contains) SoftClay else White),
                                 shape = RoundedCornerShape(12.dp)
                             ) {
-                                Box(
-                                    modifier = Modifier.fillMaxSize().padding(12.dp),
-                                    contentAlignment = Alignment.CenterStart
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(
-                                            imageVector = if (contains) Icons.Filled.CheckCircle else Icons.Outlined.AddCircle,
-                                            contentDescription = null,
-                                            tint = if (contains) DeepGreen else Ink.copy(alpha = 0.4f),
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Text(
-                                            text = goalItem,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Ink,
-                                            fontSize = 13.sp
-                                        )
-                                    }
+                                    Icon(
+                                        imageVector = if (contains) Icons.Filled.CheckCircle else Icons.Outlined.AddCircle,
+                                        contentDescription = null,
+                                        tint = if (contains) DeepGreen else Ink.copy(alpha = 0.4f),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = goalItem,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Ink,
+                                        fontSize = 13.sp,
+                                        lineHeight = 16.sp,
+                                        modifier = Modifier.weight(1f)
+                                    )
                                 }
                             }
                         }
@@ -1890,6 +1923,8 @@ fun GoalSelectionScreen(state: NirogState) {
                 }
             }
         }
+
+        Spacer(modifier = Modifier.height(16.dp))
 
         Button(
             onClick = { state.currentScreen = "program_code_optional" },
@@ -1924,7 +1959,10 @@ fun ProgramCodeOptionalScreen(state: NirogState) {
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.Start
             ) {
-                IconButton(onClick = { state.currentScreen = "goal_selection" }) {
+                IconButton(onClick = {
+                    state.currentScreen = if (state.enteringProgramCodeFromCarePlus) "dashboard" else "goal_selection"
+                    state.enteringProgramCodeFromCarePlus = false
+                }) {
                     Icon(imageVector = Icons.Filled.ArrowBack, contentDescription = "Back", tint = Ink)
                 }
             }
@@ -2005,7 +2043,17 @@ fun ProgramCodeOptionalScreen(state: NirogState) {
                     state.repository.redeemProgramCode(codeText) { result ->
                         verifying = false
                         when (result) {
-                            is com.nirogbhumi.app.data.CloudResult.Success -> { state.isProgramActive = true; state.programCodeInput = codeText; state.currentScreen = "onboarding_complete" }
+                            is com.nirogbhumi.app.data.CloudResult.Success -> {
+                                state.isProgramActive = true
+                                state.programCodeInput = codeText
+                                (result.value["activeProgramId"] as? String)?.let { state.activeProgramId = it }
+                                (result.value["activeProgramName"] as? String)?.let { state.activeProgramName = it }
+                                (result.value["programDurationDays"] as? Long)?.let { state.programDurationDays = it }
+                                state.programStartedAtMillis = System.currentTimeMillis()
+                                val fromCarePlus = state.enteringProgramCodeFromCarePlus
+                                state.enteringProgramCodeFromCarePlus = false
+                                state.currentScreen = if (fromCarePlus) "dashboard" else "onboarding_complete"
+                            }
                             is com.nirogbhumi.app.data.CloudResult.Failure -> errorMessage = result.message
                         }
                     }
@@ -2022,7 +2070,9 @@ fun ProgramCodeOptionalScreen(state: NirogState) {
 
             OutlinedButton(
                 onClick = {
-                    state.currentScreen = "onboarding_complete"
+                    val fromCarePlus = state.enteringProgramCodeFromCarePlus
+                    state.enteringProgramCodeFromCarePlus = false
+                    state.currentScreen = if (fromCarePlus) "dashboard" else "onboarding_complete"
                 },
                 modifier = Modifier
                     .fillMaxWidth()
@@ -2041,6 +2091,7 @@ fun ProgramCodeOptionalScreen(state: NirogState) {
 // SCREEN 12: ONBOARDING COMPLETE GREETING CARD SCREEN
 @Composable
 fun OnboardingCompleteScreen(state: NirogState) {
+    var isSaving by remember { mutableStateOf(false) }
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -2111,8 +2162,14 @@ fun OnboardingCompleteScreen(state: NirogState) {
 
             Spacer(modifier = Modifier.height(16.dp))
 
+            if (state.authError.isNotBlank()) {
+                Text(state.authError, color = Color(0xFF8B2E2E), fontSize = 12.sp, modifier = Modifier.padding(bottom = 8.dp))
+            }
+
             Button(
                 onClick = {
+                    state.authError = ""
+                    isSaving = true
                     state.repository.saveProfile(mapOf(
                         "onboardingComplete" to true,
                         "trackingFor" to if (state.isTrackingForSelf) "self" else "family",
@@ -2123,17 +2180,23 @@ fun OnboardingCompleteScreen(state: NirogState) {
                         "goals" to state.selectedGoals.toList(),
                         "programActive" to state.isProgramActive
                     )) { result ->
+                        isSaving = false
                         if (result is com.nirogbhumi.app.data.CloudResult.Success) state.currentScreen = "dashboard"
                         else state.authError = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
                     }
                 },
+                enabled = !isSaving,
                 modifier = Modifier
                     .fillModifierOnboarding()
                     .height(54.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = DeepGreen),
                 shape = RoundedCornerShape(27.dp)
             ) {
-                Text("Go to Today", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                if (isSaving) {
+                    CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+                } else {
+                    Text("Go to Today", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                }
             }
         }
     }

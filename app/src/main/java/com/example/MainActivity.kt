@@ -34,17 +34,27 @@ class MainActivity : ComponentActivity(), com.razorpay.PaymentResultListener {
 
   override fun onPaymentSuccess(paymentId: String?) {
     nirogState.cloudMessage = "Payment received securely"
-    nirogState.currentScreen = if (nirogState.pendingPaymentKind == "order") "order_success" else "consultation_confirmed"
+    nirogState.currentScreen = "consultation_confirmed"
   }
 
   override fun onPaymentError(code: Int, response: String?) {
     nirogState.cloudMessage = response ?: "Payment was not completed. You can safely try again."
-    nirogState.currentScreen = if (nirogState.pendingPaymentKind == "order") "checkout" else "payment_confirmation"
+    nirogState.currentScreen = "payment_confirmation"
   }
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
+    // Lets testers get prompted to install new builds from inside the app itself,
+    // instead of depending on the separate "Firebase App Tester" companion app or
+    // an easily-missed email - this is what the debug distribution channel is for.
+    if (BuildConfig.DEBUG) {
+      com.google.firebase.appdistribution.FirebaseAppDistribution.getInstance()
+        .updateIfNewReleaseAvailable()
+        .addOnFailureListener { /* not signed in as a tester yet, or no newer release - nothing to show */ }
+    }
     nirogState.pendingDeepLink = intent.getStringExtra("route").orEmpty()
+    val tourSeen = getSharedPreferences("nirog_prefs", MODE_PRIVATE).getBoolean("onboarding_tour_seen", false)
+    nirogState.shouldShowTour = !tourSeen
     enableEdgeToEdge()
     setContent {
       MyApplicationTheme {
@@ -269,11 +279,25 @@ fun ActiveScreenContent(state: NirogState) {
       "program_code_optional" -> ProgramCodeOptionalScreen(state)
       "onboarding_complete" -> OnboardingCompleteScreen(state)
       "dashboard" -> MainHub(state)
+      "profile" -> ProfileScreen(state)
       "profile_edit" -> ProfileEditScreen(state)
+      "device_hub" -> DeviceSyncScreen(state)
+      "notifications" -> NotificationInboxScreen(state)
+      "notification_settings" -> NotificationSettingsScreen(state)
+      "family_profiles" -> FamilyProfilesScreen(state)
+      "orders" -> OrdersScreen(state)
+      "articles" -> ArticlesScreen(state)
+      "daily_checkin" -> DailyCheckInScreen(state)
+      "bp_overview" -> BpOverviewScreen(state)
+      "sleep_overview" -> SleepOverviewScreen(state)
+      "walking_overview" -> WalkingActivityScreen(state)
+      "program_calendar" -> ProgramCalendarScreen(state)
+      "announcements" -> AnnouncementsScreen(state)
+      "program_chat" -> ProgramChatScreen(state)
 
       // Metrics Detailed screens
       "sugar_detail" -> BloodSugarDetailScreen(state)
-      "food_journal" -> FoodJournalScreen(state)
+      "coming_soon" -> ComingSoonScreen(state)
       "consult_stepper" -> BookConsultationStepper(state)
       "active_journey" -> ActiveJourneyScreen(state)
       "insight_detail" -> InsightDetailScreen(state)

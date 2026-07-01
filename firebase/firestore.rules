@@ -11,6 +11,10 @@ service cloud.firestore {
     function ownsRequest() { return owner(request.resource.data.userId); }
     function preservesUserId() { return request.resource.data.userId == resource.data.userId; }
     function validCreate() { return ownsRequest() && request.resource.data.createdAt == request.time; }
+    // Care+ (program calendar/chat) is a second layer only for people who've actually
+    // enrolled in a program - both checks read the caller's own profile document.
+    function programMember() { return signedIn() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.programActive == true; }
+    function ownProgram(programId) { return signedIn() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.activeProgramId == programId; }
 
     match /users/{uid} {
       allow create: if owner(uid) && request.resource.data.userId == uid && (!('role' in request.resource.data) || request.resource.data.role == 'user');
@@ -25,9 +29,9 @@ service cloud.firestore {
       allow delete: if ownsResource() || admin();
     }
     match /{collection}/{id} {
-      allow create: if collection in ['glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','waterLogs','mealLogs','medications','medicationLogs','labReports','dailyCheckins','checklistLogs'] && validCreate();
-      allow read, delete: if collection in ['glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','waterLogs','mealLogs','medications','medicationLogs','labReports','dailyCheckins','checklistLogs'] && (ownsResource() || admin() || assigned(resource.data.userId));
-      allow update: if collection in ['glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','waterLogs','mealLogs','medications','medicationLogs','labReports','dailyCheckins','checklistLogs'] && (admin() || (ownsResource() && ownsRequest() && preservesUserId()) || (assigned(resource.data.userId) && preservesUserId()));
+      allow create: if collection in ['glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','labReports','dailyCheckins','checklistLogs'] && validCreate();
+      allow read, delete: if collection in ['glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','labReports','dailyCheckins','checklistLogs'] && (ownsResource() || admin() || assigned(resource.data.userId));
+      allow update: if collection in ['glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','labReports','dailyCheckins','checklistLogs'] && (admin() || (ownsResource() && ownsRequest() && preservesUserId()) || (assigned(resource.data.userId) && preservesUserId()));
     }
     match /consultations/{id} {
       allow create: if validCreate() && request.resource.data.paymentStatus == 'pending' && request.resource.data.status in ['pending', 'payment_pending'];
@@ -35,14 +39,30 @@ service cloud.firestore {
       allow update: if admin() || (expert() && resource.data.expertId == request.auth.uid && preservesUserId()) || (ownsResource() && ownsRequest() && preservesUserId() && request.resource.data.paymentStatus == resource.data.paymentStatus && request.resource.data.status == resource.data.status);
     }
     match /{collection}/{id} {
-      allow read: if collection in ['dailyActions','weeklyReports','sugarStories','userPrograms','programPlans','expertNotes','notifications','deviceConnections','orders','carts'] && (ownsResource() || admin() || assigned(resource.data.userId));
-      allow create: if collection in ['deviceConnections','carts'] && ownsRequest();
-      allow update: if collection in ['deviceConnections','carts'] && ownsResource() && ownsRequest() && preservesUserId();
+      allow read: if collection in ['dailyActions','weeklyReports','sugarStories','userPrograms','programPlans','expertNotes','notifications','deviceConnections','orders'] && (ownsResource() || admin() || assigned(resource.data.userId));
+      allow create: if collection == 'deviceConnections' && ownsRequest();
+      allow update: if collection == 'deviceConnections' && ownsResource() && ownsRequest() && preservesUserId();
       allow create: if collection == 'orders' && validCreate() && request.resource.data.paymentStatus == 'pending' && request.resource.data.orderStatus == 'pending';
+      // The device itself (local reminder fired, FCM message received) is the
+      // one recording that a notification happened, so a self-scoped create
+      // is safe - it can only ever write an entry claiming to be its own user.
+      allow create: if collection == 'notifications' && validCreate();
     }
     match /contentItems/{id} { allow read: if resource.data.status == 'published' || admin(); allow write: if admin() || role('content_manager'); }
-    match /products/{id} { allow read: if resource.data.active == true || admin(); allow write: if admin() || role('store_manager'); }
     match /programs/{id} { allow read: if signedIn(); allow write: if admin(); }
+    match /announcements/{id} {
+      allow read: if programMember();
+      allow create: if admin() && request.resource.data.authorId == request.auth.uid && request.resource.data.createdAt == request.time;
+    }
+    match /programChatMessages/{id} {
+      allow read: if programMember() && ownProgram(resource.data.programId);
+      allow create: if programMember() && ownProgram(request.resource.data.programId) && request.resource.data.userId == request.auth.uid && request.resource.data.createdAt == request.time;
+    }
+    match /reportedMessages/{id} {
+      // Any program member can report a message they can see; only admins review them.
+      allow create: if programMember() && request.resource.data.reporterId == request.auth.uid && request.resource.data.createdAt == request.time;
+      allow read, update: if admin();
+    }
     match /consultationSlots/{id} { allow read: if signedIn() && resource.data.active == true; allow write: if admin() || expert(); }
     match /expertAssignments/{id} { allow read: if admin() || (expert() && resource.data.expertId == request.auth.uid); allow write: if admin(); }
     match /{collection}/{id} {

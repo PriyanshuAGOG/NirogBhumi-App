@@ -21,6 +21,7 @@ class NirogBhumiApplication : Application() {
                 }
             )
         }
+        com.nirogbhumi.app.notifications.ReminderScheduler.rescheduleAllEnabled(this)
         val app = FirebaseApp.initializeApp(this) ?: return
         FirebaseFirestore.getInstance(app).firestoreSettings = FirebaseFirestoreSettings.Builder()
             .setLocalCacheSettings(

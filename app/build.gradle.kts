@@ -44,6 +44,27 @@ android {
         keyPassword = keyPasswordValue
       }
     }
+    // Committed so every machine/CI run signs debug builds with the same
+    // certificate, letting a new debug APK install over an older one
+    // in place instead of requiring an uninstall first.
+    //
+    // SECURITY: this repo is public and this keystore's password is
+    // printed right here, so its private key must be treated as public.
+    // Never register its SHA-1/SHA-256 fingerprint against a Firebase
+    // project's Google Sign-In OAuth config (or any other SHA-pinned
+    // Google API) — doing so lets anyone who clones this repo build an
+    // APK with the same applicationId, signed with this same key, that
+    // Google Play Services will trust as "the real app" for that
+    // project, letting them capture legitimate Firebase Auth sessions
+    // for real users. Google Sign-In therefore intentionally does not
+    // work on debug builds; validate it only on a signed release build
+    // using the private release keystore instead.
+    getByName("debug") {
+      storeFile = file("ci-debug.keystore")
+      storePassword = "android"
+      keyAlias = "androiddebugkey"
+      keyPassword = "android"
+    }
   }
 
   buildTypes {
@@ -97,10 +118,12 @@ dependencies {
   implementation(libs.firebase.messaging)
   implementation(libs.firebase.analytics)
   implementation(libs.firebase.crashlytics)
+  implementation(libs.firebase.appdistribution.api)
   implementation(libs.firebase.appcheck.playintegrity)
   implementation(libs.play.services.auth)
   implementation(libs.razorpay.checkout)
   implementation(libs.androidx.health.connect)
+  implementation(libs.androidx.work.runtime.ktx)
   implementation(libs.kotlinx.coroutines.android)
   implementation(libs.kotlinx.coroutines.core)
   testImplementation(libs.androidx.compose.ui.test.junit4)

@@ -22,6 +22,7 @@ firebase/functions/lib/
 firebase-debug.log
 *.jks
 *.keystore
+!app/ci-debug.keystore
 *.log
 hs_err_pid*.log
 *.pid

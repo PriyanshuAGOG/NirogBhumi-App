@@ -33,6 +33,14 @@ interface HealthRepository {
     fun upsertUserRecord(collection: String, documentId: String, values: Map<String, Any?>, done: (CloudResult<Unit>) -> Unit = {})
     fun getPrivateDownloadUrl(storagePath: String, done: (CloudResult<String>) -> Unit)
     fun redeemProgramCode(code: String, done: (CloudResult<Map<String, Any?>>) -> Unit)
+
+    // Care+ (program members only): one shared announcement feed, plus one chat room
+    // per program so members only see conversation relevant to the program they joined.
+    fun listenAnnouncements(update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription
+    fun postAnnouncement(title: String, body: String, done: (CloudResult<Unit>) -> Unit)
+    fun listenProgramChat(programId: String, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription
+    fun sendProgramChatMessage(programId: String, text: String, senderName: String, done: (CloudResult<Unit>) -> Unit)
+    fun reportChatMessage(messageId: String, programId: String, reportedText: String, reportedUserId: String, done: (CloudResult<Unit>) -> Unit)
 }
 
 class FirebaseHealthRepository : HealthRepository {
@@ -56,8 +64,8 @@ class FirebaseHealthRepository : HealthRepository {
 
     override fun addHealthLog(collection: String, values: Map<String, Any?>, done: (CloudResult<String>) -> Unit) {
         val allowed = setOf(
-            "profiles", "glucoseReadings", "bpReadings", "sleepLogs", "walkLogs", "weightLogs", "waterLogs",
-            "mealLogs", "medications", "medicationLogs", "labReports", "consultations", "orders", "checklistLogs", "supportRequests"
+            "profiles", "glucoseReadings", "bpReadings", "sleepLogs", "walkLogs", "weightLogs",
+            "labReports", "consultations", "orders", "checklistLogs", "supportRequests", "notifications"
         )
         if (collection !in allowed) return done(CloudResult.Failure("Unsupported health log"))
         val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
@@ -81,7 +89,7 @@ class FirebaseHealthRepository : HealthRepository {
 
     override fun listenUserCollection(collection: String, limit: Long, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription {
         val uid = userId ?: run { update(CloudResult.Failure("Sign in is required")); return CloudSubscription {} }
-        val allowed = setOf("profiles", "glucoseReadings", "bpReadings", "sleepLogs", "walkLogs", "weightLogs", "waterLogs", "mealLogs", "medications", "medicationLogs", "labReports", "dailyActions", "weeklyReports", "sugarStories", "consultations", "userPrograms", "programPlans", "checklistLogs", "expertNotes", "notifications", "deviceConnections", "carts", "orders", "supportRequests", "dataExportRequests", "deletionRequests")
+        val allowed = setOf("profiles", "glucoseReadings", "bpReadings", "sleepLogs", "walkLogs", "weightLogs", "labReports", "dailyActions", "weeklyReports", "sugarStories", "consultations", "userPrograms", "programPlans", "checklistLogs", "expertNotes", "notifications", "deviceConnections", "orders", "supportRequests", "dataExportRequests", "deletionRequests")
         if (collection !in allowed) { update(CloudResult.Failure("Unsupported collection")); return CloudSubscription {} }
         val query = db?.collection(collection)?.whereEqualTo("userId", uid)?.limit(limit)
             ?: run { update(CloudResult.Failure("Firebase is not configured")); return CloudSubscription {} }
@@ -131,14 +139,109 @@ class FirebaseHealthRepository : HealthRepository {
             ?: done(CloudResult.Failure("Firebase is not configured"))
     }
 
+    // Validated directly against the public "programs" collection instead of a Cloud
+    // Function - this project's Cloud Functions can't be deployed without Blaze billing,
+    // and a client-side lookup plus a self-scoped profile write is a reasonable tradeoff
+    // for a small, invite-only beta rather than leaving enrollment entirely broken.
     override fun redeemProgramCode(code: String, done: (CloudResult<Map<String, Any?>>) -> Unit) {
-        val callable = functions?.getHttpsCallable("redeemProgramCode") ?: return done(CloudResult.Failure("Firebase is not configured"))
-        callable.call(mapOf("code" to code.trim().uppercase()))
-            .addOnSuccessListener { result ->
-                @Suppress("UNCHECKED_CAST")
-                done(CloudResult.Success(result.data as? Map<String, Any?> ?: emptyMap()))
+        val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
+        val database = db ?: return done(CloudResult.Failure("Firebase is not configured"))
+        database.collection("programs")
+            .whereEqualTo("code", code.trim().uppercase())
+            .limit(1)
+            .get()
+            .addOnSuccessListener { snapshot ->
+                val programDoc = snapshot.documents.firstOrNull()
+                if (programDoc == null) {
+                    done(CloudResult.Failure("That program code wasn't recognized"))
+                    return@addOnSuccessListener
+                }
+                val programId = programDoc.id
+                val programName = programDoc.getString("name") ?: "Nirog Bhumi Program"
+                val durationDays = (programDoc.get("durationDays") as? Number)?.toLong() ?: 0L
+                val enrollment = mapOf(
+                    "programActive" to true,
+                    "activeProgramId" to programId,
+                    "activeProgramName" to programName,
+                    "programDurationDays" to durationDays,
+                    "programStartedAt" to FieldValue.serverTimestamp()
+                )
+                database.collection("users").document(uid).set(enrollment, SetOptions.merge())
+                    .addOnSuccessListener { done(CloudResult.Success(enrollment)) }
+                    .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Enrollment could not be saved", it)) }
             }
             .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Program code could not be verified", it)) }
+    }
+
+    override fun listenAnnouncements(update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription {
+        val database = db ?: run { update(CloudResult.Failure("Firebase is not configured")); return CloudSubscription {} }
+        val registration = database.collection("announcements")
+            .orderBy("createdAt", com.google.firebase.firestore.Query.Direction.DESCENDING)
+            .limit(50)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) update(CloudResult.Failure(error.message ?: "Could not load announcements", error))
+                else update(CloudResult.Success(snapshot?.documents.orEmpty().map { CloudDocument(it.id, it.data.orEmpty()) }))
+            }
+        return CloudSubscription { registration.remove() }
+    }
+
+    override fun postAnnouncement(title: String, body: String, done: (CloudResult<Unit>) -> Unit) {
+        val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
+        val database = db ?: return done(CloudResult.Failure("Firebase is not configured"))
+        database.collection("announcements").add(
+            mapOf(
+                "title" to title,
+                "body" to body,
+                "authorId" to uid,
+                "createdAt" to FieldValue.serverTimestamp()
+            )
+        ).addOnSuccessListener { done(CloudResult.Success(Unit)) }
+            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Announcement could not be posted", it)) }
+    }
+
+    override fun listenProgramChat(programId: String, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription {
+        val database = db ?: run { update(CloudResult.Failure("Firebase is not configured")); return CloudSubscription {} }
+        val registration = database.collection("programChatMessages")
+            .whereEqualTo("programId", programId)
+            .orderBy("createdAt", com.google.firebase.firestore.Query.Direction.DESCENDING)
+            .limit(100)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) update(CloudResult.Failure(error.message ?: "Could not load messages", error))
+                else update(CloudResult.Success(snapshot?.documents.orEmpty().map { CloudDocument(it.id, it.data.orEmpty()) }))
+            }
+        return CloudSubscription { registration.remove() }
+    }
+
+    override fun sendProgramChatMessage(programId: String, text: String, senderName: String, done: (CloudResult<Unit>) -> Unit) {
+        val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
+        val database = db ?: return done(CloudResult.Failure("Firebase is not configured"))
+        database.collection("programChatMessages").add(
+            mapOf(
+                "programId" to programId,
+                "userId" to uid,
+                "senderName" to senderName,
+                "text" to text,
+                "createdAt" to FieldValue.serverTimestamp()
+            )
+        ).addOnSuccessListener { done(CloudResult.Success(Unit)) }
+            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Message could not be sent", it)) }
+    }
+
+    override fun reportChatMessage(messageId: String, programId: String, reportedText: String, reportedUserId: String, done: (CloudResult<Unit>) -> Unit) {
+        val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
+        val database = db ?: return done(CloudResult.Failure("Firebase is not configured"))
+        database.collection("reportedMessages").add(
+            mapOf(
+                "messageId" to messageId,
+                "programId" to programId,
+                "reportedText" to reportedText,
+                "reportedUserId" to reportedUserId,
+                "reporterId" to uid,
+                "status" to "open",
+                "createdAt" to FieldValue.serverTimestamp()
+            )
+        ).addOnSuccessListener { done(CloudResult.Success(Unit)) }
+            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Report could not be submitted", it)) }
     }
 
     override fun upsertUserRecord(collection: String, documentId: String, values: Map<String, Any?>, done: (CloudResult<Unit>) -> Unit) {
