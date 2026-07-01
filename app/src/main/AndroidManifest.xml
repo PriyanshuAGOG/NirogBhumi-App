@@ -11,6 +11,12 @@
     <uses-permission android:name="android.permission.health.READ_BLOOD_GLUCOSE" />
     <uses-permission android:name="android.permission.health.READ_BLOOD_PRESSURE" />
 
+    <!-- Required for HealthConnectClient.getSdkStatus() to reliably detect the
+         Health Connect provider app across Android versions (package visibility). -->
+    <queries>
+        <package android:name="com.google.android.apps.healthdata" />
+    </queries>
+
     <application
         android:name=".NirogBhumiApplication"
         android:allowBackup="false"

@@ -1,6 +1,8 @@
 package com.nirogbhumi.app.health
 
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.permission.HealthPermission
 import androidx.health.connect.client.records.*
@@ -14,6 +16,10 @@ import java.util.Date
 
 data class HealthSyncSummary(val steps: Int, val sleep: Int, val glucose: Int, val bloodPressure: Int, val weight: Int)
 
+private const val HEALTH_CONNECT_PACKAGE = "com.google.android.apps.healthdata"
+
+enum class HealthConnectStatus { AVAILABLE, NEEDS_INSTALL_OR_UPDATE, UNSUPPORTED }
+
 class HealthConnectManager(private val context: Context, private val repository: HealthRepository) {
     companion object {
         val permissions = setOf(
@@ -24,9 +30,26 @@ class HealthConnectManager(private val context: Context, private val repository:
             HealthPermission.getReadPermission(BloodGlucoseRecord::class),
             HealthPermission.getReadPermission(BloodPressureRecord::class)
         )
+
+        /** Opens the Play Store listing so the user can install/update the Health Connect app. */
+        fun openHealthConnectInstall(context: Context) {
+            val marketIntent = Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$HEALTH_CONNECT_PACKAGE"))
+                .setPackage("com.android.vending")
+            runCatching { context.startActivity(marketIntent) }
+                .onFailure {
+                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=$HEALTH_CONNECT_PACKAGE")))
+                }
+        }
     }
 
-    val isAvailable: Boolean get() = HealthConnectClient.getSdkStatus(context) == HealthConnectClient.SDK_AVAILABLE
+    val status: HealthConnectStatus
+        get() = when (HealthConnectClient.getSdkStatus(context, HEALTH_CONNECT_PACKAGE)) {
+            HealthConnectClient.SDK_AVAILABLE -> HealthConnectStatus.AVAILABLE
+            HealthConnectClient.SDK_UNAVAILABLE_PROVIDER_UPDATE_REQUIRED -> HealthConnectStatus.NEEDS_INSTALL_OR_UPDATE
+            else -> HealthConnectStatus.UNSUPPORTED
+        }
+
+    val isAvailable: Boolean get() = status == HealthConnectStatus.AVAILABLE
     private val client: HealthConnectClient get() = HealthConnectClient.getOrCreate(context)
 
     suspend fun hasPermissions(): Boolean = isAvailable && client.permissionController.getGrantedPermissions().isNotEmpty()

@@ -1,5 +1,6 @@
 package com.nirogbhumi.app.ui.screens
 
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.animation.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
@@ -15,13 +16,18 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.health.connect.client.PermissionController
+import com.nirogbhumi.app.health.HealthConnectManager
+import com.nirogbhumi.app.health.HealthConnectStatus
 import com.nirogbhumi.app.ui.NirogState
 import com.nirogbhumi.app.ui.SugarLog
+import kotlinx.coroutines.launch
 
 // Screen 1: Sugar Metric detailed deepdive
 @Composable
@@ -1054,6 +1060,171 @@ fun InsightDetailScreen(state: NirogState) {
             }
             Spacer(modifier = Modifier.height(32.dp))
         }
+    }
+}
+
+@Composable
+fun DeviceSyncScreen(state: NirogState) {
+    val context = LocalContext.current
+    val healthConnect = remember { HealthConnectManager(context.applicationContext, state.repository) }
+    val coroutineScope = rememberCoroutineScope()
+
+    var isConnected by remember { mutableStateOf(false) }
+    var isSyncing by remember { mutableStateOf(false) }
+    var lastSyncMessage by remember { mutableStateOf<String?>(null) }
+    var lastError by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(Unit) {
+        isConnected = runCatching { healthConnect.hasPermissions() }.getOrDefault(false)
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(PermissionController.createRequestPermissionResultContract()) { granted ->
+        isConnected = granted.isNotEmpty()
+        if (granted.isEmpty()) lastError = "No categories were approved. You can connect anytime from here."
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFFF8F6EF))
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = { state.currentScreen = "profile" }) {
+                Icon(Icons.Outlined.ArrowBack, contentDescription = "Back", tint = Color(0xFF1B3221))
+            }
+            Text("Connected Devices", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+        }
+
+        Text(
+            "Bring in data from your smart band, watch, or health app. This syncs through Android Health Connect, so it works with Samsung Health, Fitbit, Google Fit, Mi Band/Zepp, Garmin, and most other wearables that already share data with Health Connect.",
+            fontSize = 14.sp,
+            color = Color(0xFF434842),
+            lineHeight = 20.sp
+        )
+
+        Card(
+            modifier = Modifier.fillMaxWidth().border(BorderStroke(0.5.dp, Color(0xFFD8D0C0)), RoundedCornerShape(20.dp)),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            shape = RoundedCornerShape(20.dp)
+        ) {
+            Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier.size(40.dp).clip(CircleShape)
+                            .background(if (isConnected) Color(0xFFE0ECDD) else Color(0xFFF1EDE6)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            if (isConnected) Icons.Filled.CheckCircle else Icons.Filled.Watch,
+                            contentDescription = null,
+                            tint = if (isConnected) Color(0xFF314936) else Color(0xFF737972),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column {
+                        Text(
+                            if (isConnected) "Connected" else "Not connected",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp,
+                            color = Color(0xFF1B3221)
+                        )
+                        Text(
+                            when (healthConnect.status) {
+                                HealthConnectStatus.AVAILABLE -> "Health Connect"
+                                HealthConnectStatus.NEEDS_INSTALL_OR_UPDATE -> "Health Connect app needed"
+                                HealthConnectStatus.UNSUPPORTED -> "Not supported on this device"
+                            },
+                            fontSize = 12.sp,
+                            color = Color(0xFF737972)
+                        )
+                    }
+                }
+
+                when (healthConnect.status) {
+                    HealthConnectStatus.NEEDS_INSTALL_OR_UPDATE -> Button(
+                        onClick = { HealthConnectManager.openHealthConnectInstall(context) },
+                        modifier = Modifier.fillMaxWidth().height(48.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF314936)),
+                        shape = RoundedCornerShape(24.dp)
+                    ) { Text("Install Health Connect", color = Color.White, fontWeight = FontWeight.Bold) }
+
+                    HealthConnectStatus.UNSUPPORTED -> Text(
+                        "Your device or Android version doesn't support Health Connect. You can still log everything manually from Track.",
+                        fontSize = 13.sp, color = Color(0xFF8B2E2E)
+                    )
+
+                    HealthConnectStatus.AVAILABLE -> {
+                        if (!isConnected) {
+                            Button(
+                                onClick = { permissionLauncher.launch(HealthConnectManager.permissions) },
+                                modifier = Modifier.fillMaxWidth().height(48.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF314936)),
+                                shape = RoundedCornerShape(24.dp)
+                            ) { Text("Connect", color = Color.White, fontWeight = FontWeight.Bold) }
+                        } else {
+                            Button(
+                                enabled = !isSyncing,
+                                onClick = {
+                                    isSyncing = true
+                                    lastError = null
+                                    coroutineScope.launch {
+                                        runCatching { healthConnect.syncLastThirtyDays() }
+                                            .onSuccess { summary ->
+                                                lastSyncMessage = "Synced ${summary.steps} steps, ${summary.sleep} sleep, ${summary.glucose} glucose, ${summary.bloodPressure} BP, ${summary.weight} weight records"
+                                            }
+                                            .onFailure { lastError = it.message ?: "Sync failed" }
+                                        isSyncing = false
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth().height(48.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF314936)),
+                                shape = RoundedCornerShape(24.dp)
+                            ) {
+                                if (isSyncing) CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
+                                else Text("Sync Now", color = Color.White, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+
+                lastSyncMessage?.let {
+                    Text(it, fontSize = 12.sp, color = Color(0xFF426820), fontWeight = FontWeight.Medium)
+                }
+                lastError?.let {
+                    Text(it, fontSize = 12.sp, color = Color(0xFF8B2E2E), fontWeight = FontWeight.Medium)
+                }
+            }
+        }
+
+        Text("What syncs automatically", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+        listOf(
+            "Steps" to Icons.Filled.DirectionsWalk,
+            "Sleep" to Icons.Filled.Bedtime,
+            "Heart rate" to Icons.Filled.Favorite,
+            "Weight" to Icons.Filled.MonitorWeight,
+            "Blood glucose (supported CGMs)" to Icons.Filled.Bloodtype,
+            "Blood pressure (supported cuffs)" to Icons.Filled.Favorite
+        ).forEach { (label, icon) ->
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 2.dp)) {
+                Icon(icon, contentDescription = null, tint = Color(0xFF426820), modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(10.dp))
+                Text(label, fontSize = 13.sp, color = Color(0xFF434842))
+            }
+        }
+
+        Text(
+            "Prefer manual entry? You can always log everything yourself from the Track tab in under a minute a day.",
+            fontSize = 12.sp,
+            color = Color(0xFF737972),
+            modifier = Modifier.padding(bottom = 24.dp)
+        )
     }
 }
 

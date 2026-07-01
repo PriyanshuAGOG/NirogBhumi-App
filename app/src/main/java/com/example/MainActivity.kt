@@ -273,6 +273,7 @@ fun ActiveScreenContent(state: NirogState) {
       "dashboard" -> MainHub(state)
       "profile" -> ProfileScreen(state)
       "profile_edit" -> ProfileEditScreen(state)
+      "device_hub" -> DeviceSyncScreen(state)
 
       // Metrics Detailed screens
       "sugar_detail" -> BloodSugarDetailScreen(state)
