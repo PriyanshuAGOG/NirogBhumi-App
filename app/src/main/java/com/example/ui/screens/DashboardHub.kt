@@ -401,58 +401,28 @@ fun TodayTab(state: NirogState) {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // Welcome and Pitta Chip
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column {
-                val calendar = remember { java.util.Calendar.getInstance() }
-                val greetingWord = when (calendar.get(java.util.Calendar.HOUR_OF_DAY)) {
-                    in 4..11 -> "Good morning"
-                    in 12..16 -> "Good afternoon"
-                    else -> "Good evening"
-                }
-                val firstName = state.profileName.trim().substringBefore(" ").ifBlank { "there" }
-                Text(
-                    text = "$greetingWord, $firstName",
-                    fontSize = 24.sp,
-                    fontFamily = FontFamily.Serif,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF1B3221)
-                )
-                Text(
-                    text = remember { java.text.SimpleDateFormat("EEEE, d MMMM", java.util.Locale.getDefault()).format(java.util.Date()) },
-                    fontSize = 14.sp,
-                    color = Color(0xFF434842),
-                    modifier = Modifier.padding(top = 2.dp)
-                )
+        // Welcome header
+        Column {
+            val calendar = remember { java.util.Calendar.getInstance() }
+            val greetingWord = when (calendar.get(java.util.Calendar.HOUR_OF_DAY)) {
+                in 4..11 -> "Good morning"
+                in 12..16 -> "Good afternoon"
+                else -> "Good evening"
             }
-
-            // Pitta cycle indicator
-            Box(
-                modifier = Modifier
-                    .background(Color(0xFFE0ECDD), RoundedCornerShape(16.dp))
-                    .border(width = 0.5.dp, color = Color(0xFFC3C8C0), shape = RoundedCornerShape(16.dp))
-                    .padding(horizontal = 12.dp, vertical = 6.dp)
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Filled.WbSunny,
-                        contentDescription = "Pitta Cycle",
-                        tint = Color(0xFF426820),
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "Pitta Cycle",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF141E15)
-                    )
-                }
-            }
+            val firstName = state.profileName.trim().substringBefore(" ").ifBlank { "there" }
+            Text(
+                text = "$greetingWord, $firstName",
+                fontSize = 24.sp,
+                fontFamily = FontFamily.Serif,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF1B3221)
+            )
+            Text(
+                text = remember { java.text.SimpleDateFormat("EEEE, d MMMM", java.util.Locale.getDefault()).format(java.util.Date()) },
+                fontSize = 14.sp,
+                color = Color(0xFF434842),
+                modifier = Modifier.padding(top = 2.dp)
+            )
         }
 
         // Highlight daily task card
@@ -1464,21 +1434,21 @@ fun CareTab(state: NirogState) {
     ) {
         Column {
             Text(
-                text = "Care",
+                text = "Care+",
                 fontSize = 32.sp,
                 fontFamily = FontFamily.Serif,
                 fontWeight = FontWeight.Bold,
                 color = Color(0xFF1B3221)
             )
             Text(
-                text = "Connect with your expert team and care programs.",
+                text = "Your expert consultations and program community.",
                 fontSize = 15.sp,
                 color = Color(0xFF434842),
                 modifier = Modifier.padding(top = 4.dp)
             )
         }
 
-        // Welcome / Consultation CTA
+        // Consultation booking - real, functional, redirects to the site
         Card(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1487,9 +1457,7 @@ fun CareTab(state: NirogState) {
             colors = CardDefaults.cardColors(containerColor = Color(0xFFEEE8DC)),
             shape = RoundedCornerShape(24.dp)
         ) {
-            Column(
-                modifier = Modifier.padding(20.dp)
-            ) {
+            Column(modifier = Modifier.padding(20.dp)) {
                 Text(
                     text = "Your Care Team",
                     fontSize = 22.sp,
@@ -1497,18 +1465,14 @@ fun CareTab(state: NirogState) {
                     fontWeight = FontWeight.Bold,
                     color = Color(0xFF1B3221)
                 )
-
                 Spacer(modifier = Modifier.height(4.dp))
-
                 Text(
                     text = "Schedule video consultations or follow-ups with qualified experts and metabolic coaches on nirogbhumi.com.",
                     fontSize = 14.sp,
                     color = Color(0xFF434842),
                     lineHeight = 18.sp
                 )
-
                 Spacer(modifier = Modifier.height(18.dp))
-
                 Button(
                     onClick = { openNirogBhumiWebsite(context) },
                     modifier = Modifier.fillMaxWidth(),
@@ -1524,129 +1488,94 @@ fun CareTab(state: NirogState) {
             }
         }
 
-        // Bento care options
-        Row(modifier = Modifier.fillMaxWidth()) {
-            Box(modifier = Modifier.weight(1f).padding(end = 6.dp)) {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { state.currentScreen = "active_journey" }
-                        .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.35f), shape = RoundedCornerShape(24.dp)),
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
-                    shape = RoundedCornerShape(24.dp)
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Box(
-                            modifier = Modifier.size(36.dp).background(Color(0xFFEBF7E8), CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Outlined.Assignment, "Program", tint = Color(0xFF1B3221), modifier = Modifier.size(18.dp))
-                        }
-                        Spacer(modifier = Modifier.height(14.dp))
-                        Text("My Program", fontSize = 16.sp, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF141E15))
-                        Text("Lifestyle care plan", fontSize = 12.sp, color = Color(0xFF737972))
-                    }
-                }
-            }
-            Box(modifier = Modifier.weight(1f).padding(start = 6.dp)) {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { state.currentScreen = "expert_notes" }
-                        .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.35f), shape = RoundedCornerShape(24.dp)),
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
-                    shape = RoundedCornerShape(24.dp)
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Box(
-                            modifier = Modifier.size(36.dp).background(Color(0xFFEBF7E8), CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Outlined.Description, "Notes", tint = Color(0xFF1B3221), modifier = Modifier.size(18.dp))
-                        }
-                        Spacer(modifier = Modifier.height(14.dp))
-                        Text("Expert Notes", fontSize = 16.sp, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF141E15))
-                        Text("Summaries & reports", fontSize = 12.sp, color = Color(0xFF737972))
-                    }
-                }
-            }
-        }
-
-        Row(modifier = Modifier.fillMaxWidth()) {
-            Box(modifier = Modifier.weight(1f).padding(end = 6.dp)) {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { state.currentScreen = "yoga_plan" }
-                        .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.35f), shape = RoundedCornerShape(24.dp)),
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
-                    shape = RoundedCornerShape(24.dp)
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Icon(Icons.Outlined.SelfImprovement, "Yoga", tint = Color(0xFF426820), modifier = Modifier.size(24.dp))
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Text("Yoga Plan", fontSize = 16.sp, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF141E15))
-                        Text("Metabolic posture loops", fontSize = 12.sp, color = Color(0xFF737972))
-                    }
-                }
-            }
-            Box(modifier = Modifier.weight(1f).padding(start = 6.dp)) {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { state.currentScreen = "naturopathy_plan" }
-                        .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.35f), shape = RoundedCornerShape(24.dp)),
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
-                    shape = RoundedCornerShape(24.dp)
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Icon(Icons.Outlined.Eco, "Naturopathy", tint = Color(0xFF426820), modifier = Modifier.size(24.dp))
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Text("Naturopathy", fontSize = 16.sp, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF141E15))
-                        Text("Supportive routines", fontSize = 12.sp, color = Color(0xFF737972))
-                    }
-                }
-            }
-        }
-
-        // Scheduled check detail
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { state.currentScreen = "consultation_detail" }
-                .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.3f), shape = RoundedCornerShape(24.dp)),
-            colors = CardDefaults.cardColors(containerColor = Color.White),
-            shape = RoundedCornerShape(24.dp)
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+        if (!state.isProgramActive) {
+            // Care+'s calendar/community layer is a second tier only for enrolled
+            // program members - a locked upsell replaces the old bento grid of
+            // mostly-empty program screens for everyone else.
+            Card(
+                modifier = Modifier.fillMaxWidth().border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.3f), shape = RoundedCornerShape(24.dp)),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                shape = RoundedCornerShape(24.dp)
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.padding(20.dp)) {
                     Box(
-                        modifier = Modifier.size(44.dp).background(Color(0xFFEBF7E8), CircleShape),
+                        modifier = Modifier.size(40.dp).background(Color(0xFFEBF7E8), CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(Icons.Filled.EventAvailable, "Upcoming", tint = Color(0xFF1B3221))
+                        Icon(Icons.Filled.Lock, "Locked", tint = Color(0xFF1B3221), modifier = Modifier.size(20.dp))
                     }
-                    Spacer(modifier = Modifier.width(16.dp))
-                    Column {
-                        Text("Upcoming Follow-ups", fontWeight = FontWeight.Bold, color = Color(0xFF141E15), fontSize = 16.sp)
-                        Text(
-                            text = if (state.userConcernText.isNotEmpty()) "Next: Dr. Sharma, ${state.selectedConsultDate} Nov" else "Next: Dr. Sharma, Oct 12",
-                            fontSize = 12.sp,
-                            color = Color(0xFF737972)
-                        )
-                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text("Unlock Care+", fontSize = 18.sp, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        "Members enrolled in a Nirog Bhumi program get a day-by-day program calendar, admin announcements, and a community chat with fellow members.",
+                        fontSize = 13.sp, color = Color(0xFF434842), lineHeight = 18.sp
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Button(
+                        onClick = {
+                            state.enteringProgramCodeFromCarePlus = true
+                            state.currentScreen = "program_code_optional"
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF314936)),
+                        shape = RoundedCornerShape(20.dp)
+                    ) { Text("Enter program code", fontWeight = FontWeight.Bold) }
                 }
-                Icon(Icons.Filled.ChevronRight, "Go", tint = Color(0xFF737972))
             }
+        } else {
+            val dayNumber = if (state.programStartedAtMillis > 0) {
+                (((System.currentTimeMillis() - state.programStartedAtMillis) / (1000L * 60 * 60 * 24)) + 1).coerceAtLeast(1)
+            } else 1
+            Card(
+                modifier = Modifier.fillMaxWidth().border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.3f), shape = RoundedCornerShape(24.dp)),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF314936)),
+                shape = RoundedCornerShape(24.dp)
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Text(state.activeProgramName.ifBlank { "Your Program" }, fontSize = 18.sp, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color.White)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        if (state.programDurationDays > 0) "Day $dayNumber of ${state.programDurationDays}" else "Day $dayNumber",
+                        fontSize = 13.sp, color = Color(0xFFB2CEB4)
+                    )
+                }
+            }
+
+            CareRow(Icons.Outlined.Checklist, "Today's Checklist", "Your daily program actions") { state.currentScreen = "active_journey" }
+            CareRow(Icons.Outlined.CalendarMonth, "Program Calendar", "See your full program timeline") { state.currentScreen = "program_calendar" }
+            CareRow(Icons.Outlined.Campaign, "Announcements", "Updates from the Nirog Bhumi team") { state.currentScreen = "announcements" }
+            CareRow(Icons.Outlined.Forum, "Community Chat", "Talk with others in your program") { state.currentScreen = "program_chat" }
         }
 
         Spacer(modifier = Modifier.height(32.dp))
+    }
+}
+
+@Composable
+private fun CareRow(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, subtitle: String, onClick: () -> Unit) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.3f), shape = RoundedCornerShape(20.dp)),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        shape = RoundedCornerShape(20.dp)
+    ) {
+        Row(modifier = Modifier.padding(16.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier.size(40.dp).background(Color(0xFFEBF7E8), CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(icon, title, tint = Color(0xFF1B3221), modifier = Modifier.size(18.dp))
+            }
+            Spacer(modifier = Modifier.width(14.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(title, fontWeight = FontWeight.Bold, color = Color(0xFF141E15), fontSize = 15.sp)
+                Text(subtitle, fontSize = 12.sp, color = Color(0xFF737972))
+            }
+            Icon(Icons.Filled.ChevronRight, null, tint = Color(0xFF737972))
+        }
     }
 }
 

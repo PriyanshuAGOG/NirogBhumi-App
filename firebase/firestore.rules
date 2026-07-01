@@ -11,6 +11,10 @@ service cloud.firestore {
     function ownsRequest() { return owner(request.resource.data.userId); }
     function preservesUserId() { return request.resource.data.userId == resource.data.userId; }
     function validCreate() { return ownsRequest() && request.resource.data.createdAt == request.time; }
+    // Care+ (program calendar/chat) is a second layer only for people who've actually
+    // enrolled in a program - both checks read the caller's own profile document.
+    function programMember() { return signedIn() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.programActive == true; }
+    function ownProgram(programId) { return signedIn() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.activeProgramId == programId; }
 
     match /users/{uid} {
       allow create: if owner(uid) && request.resource.data.userId == uid && (!('role' in request.resource.data) || request.resource.data.role == 'user');
@@ -46,6 +50,14 @@ service cloud.firestore {
     }
     match /contentItems/{id} { allow read: if resource.data.status == 'published' || admin(); allow write: if admin() || role('content_manager'); }
     match /programs/{id} { allow read: if signedIn(); allow write: if admin(); }
+    match /announcements/{id} {
+      allow read: if programMember();
+      allow create: if admin() && request.resource.data.authorId == request.auth.uid && request.resource.data.createdAt == request.time;
+    }
+    match /programChatMessages/{id} {
+      allow read: if programMember() && ownProgram(resource.data.programId);
+      allow create: if programMember() && ownProgram(request.resource.data.programId) && request.resource.data.userId == request.auth.uid && request.resource.data.createdAt == request.time;
+    }
     match /consultationSlots/{id} { allow read: if signedIn() && resource.data.active == true; allow write: if admin() || expert(); }
     match /expertAssignments/{id} { allow read: if admin() || (expert() && resource.data.expertId == request.auth.uid); allow write: if admin(); }
     match /{collection}/{id} {

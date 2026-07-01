@@ -70,7 +70,20 @@ private fun applyProfileDocument(state: NirogState, document: com.google.firebas
     document.getString("bpStatus")?.let { state.selectedBpStatus = it }
     document.getString("onMedication")?.let { state.selectedOnMedication = it }
     document.getString("doctorSupervision")?.let { state.selectedDoctorSupervision = it }
+    document.getBoolean("programActive")?.let { state.isProgramActive = it }
+    document.getString("activeProgramId")?.let { state.activeProgramId = it }
+    document.getString("activeProgramName")?.let { state.activeProgramName = it }
+    (document.get("programDurationDays") as? Number)?.let { state.programDurationDays = it.toLong() }
+    (document.get("programStartedAt") as? com.google.firebase.Timestamp)?.let { state.programStartedAtMillis = it.toDate().time }
     runCatching { FirebaseAuth.getInstance().currentUser?.email }.getOrNull()?.let { state.userEmail = it }
+}
+
+// Care+ admin capability (posting announcements) is granted server-side via a Firebase
+// custom claim, never trusted from anything the client itself could set - a forced
+// token refresh picks up a claim change without requiring the user to sign out first.
+private fun refreshAdminClaim(state: NirogState) {
+    FirebaseAuth.getInstance().currentUser?.getIdToken(true)
+        ?.addOnSuccessListener { result -> state.isAdmin = result.claims["role"] == "admin" }
 }
 
 // Existing accounts signing back in (any method) must land on their dashboard,
@@ -78,6 +91,7 @@ private fun applyProfileDocument(state: NirogState, document: com.google.firebas
 private fun routeAfterAuthSuccess(state: NirogState, deepLinkFallback: String = "dashboard") {
     val uid = runCatching { FirebaseAuth.getInstance().currentUser?.uid }.getOrNull()
     if (uid == null) { state.currentScreen = "consent"; return }
+    refreshAdminClaim(state)
     FirebaseFirestore.getInstance().collection("users").document(uid).get()
         .addOnSuccessListener { document ->
             if (document.getBoolean("onboardingComplete") == true) {
@@ -1945,7 +1959,10 @@ fun ProgramCodeOptionalScreen(state: NirogState) {
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.Start
             ) {
-                IconButton(onClick = { state.currentScreen = "goal_selection" }) {
+                IconButton(onClick = {
+                    state.currentScreen = if (state.enteringProgramCodeFromCarePlus) "dashboard" else "goal_selection"
+                    state.enteringProgramCodeFromCarePlus = false
+                }) {
                     Icon(imageVector = Icons.Filled.ArrowBack, contentDescription = "Back", tint = Ink)
                 }
             }
@@ -2026,7 +2043,17 @@ fun ProgramCodeOptionalScreen(state: NirogState) {
                     state.repository.redeemProgramCode(codeText) { result ->
                         verifying = false
                         when (result) {
-                            is com.nirogbhumi.app.data.CloudResult.Success -> { state.isProgramActive = true; state.programCodeInput = codeText; state.currentScreen = "onboarding_complete" }
+                            is com.nirogbhumi.app.data.CloudResult.Success -> {
+                                state.isProgramActive = true
+                                state.programCodeInput = codeText
+                                (result.value["activeProgramId"] as? String)?.let { state.activeProgramId = it }
+                                (result.value["activeProgramName"] as? String)?.let { state.activeProgramName = it }
+                                (result.value["programDurationDays"] as? Long)?.let { state.programDurationDays = it }
+                                state.programStartedAtMillis = System.currentTimeMillis()
+                                val fromCarePlus = state.enteringProgramCodeFromCarePlus
+                                state.enteringProgramCodeFromCarePlus = false
+                                state.currentScreen = if (fromCarePlus) "dashboard" else "onboarding_complete"
+                            }
                             is com.nirogbhumi.app.data.CloudResult.Failure -> errorMessage = result.message
                         }
                     }
@@ -2043,7 +2070,9 @@ fun ProgramCodeOptionalScreen(state: NirogState) {
 
             OutlinedButton(
                 onClick = {
-                    state.currentScreen = "onboarding_complete"
+                    val fromCarePlus = state.enteringProgramCodeFromCarePlus
+                    state.enteringProgramCodeFromCarePlus = false
+                    state.currentScreen = if (fromCarePlus) "dashboard" else "onboarding_complete"
                 },
                 modifier = Modifier
                     .fillMaxWidth()

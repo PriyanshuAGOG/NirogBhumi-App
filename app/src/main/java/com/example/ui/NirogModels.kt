@@ -77,6 +77,20 @@ class NirogState {
     // Program Code Storing
     var programCodeInput by mutableStateOf("")
     var isProgramActive by mutableStateOf(false)
+    // ProgramCodeOptionalScreen is shared between first-time onboarding and the
+    // Care+ "Enter program code" unlock reached mid-session - this tells it which
+    // context it's in so back/success routing doesn't dump an existing user back
+    // into the middle of onboarding.
+    var enteringProgramCodeFromCarePlus by mutableStateOf(false)
+    var activeProgramId by mutableStateOf("")
+    var activeProgramName by mutableStateOf("")
+    var programDurationDays by mutableStateOf(0L)
+    var programStartedAtMillis by mutableStateOf(0L)
+
+    // Care+ (Announcements/Chat) admin capability - resolved from the signed-in user's
+    // Firebase custom claims, not a client-trusted flag, so it can only ever reflect
+    // what the server actually granted.
+    var isAdmin by mutableStateOf(false)
 
     // Active Tab under Dashboard
     var activeTab by mutableStateOf("Today") // "Today", "Track", "Insights", "Care", "Learn"

@@ -4,6 +4,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.animation.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -1093,6 +1096,9 @@ fun DeviceSyncScreen(state: NirogState) {
 @Composable
 fun ProfileScreen(state: NirogState) {
     var showSignOutConfirm by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    var updateCheckMessage by remember { mutableStateOf<String?>(null) }
+    var checkingUpdate by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -1157,7 +1163,28 @@ fun ProfileScreen(state: NirogState) {
 
         SettingsSection(title = "Support") {
             SettingsRow(Icons.Filled.HelpOutline, "Help & support") { state.currentScreen = "support" }
-            SettingsRow(Icons.Filled.Description, "Legal & policies", showDivider = false) { state.currentScreen = "legal_center" }
+            SettingsRow(Icons.Filled.Description, "Legal & policies") { state.currentScreen = "legal_center" }
+            SettingsRow(Icons.Filled.SystemUpdate, "Check for updates", showDivider = false) {
+                if (checkingUpdate) return@SettingsRow
+                checkingUpdate = true
+                val activity = context as? android.app.Activity
+                if (activity == null) {
+                    checkingUpdate = false
+                    updateCheckMessage = "Couldn't check for updates right now."
+                    return@SettingsRow
+                }
+                com.google.firebase.appdistribution.FirebaseAppDistribution.getInstance()
+                    .updateIfNewReleaseAvailable()
+                    .addOnSuccessListener {
+                        checkingUpdate = false
+                        updateCheckMessage = "You're on the latest build available to testers."
+                    }
+                    .addOnFailureListener { error ->
+                        checkingUpdate = false
+                        updateCheckMessage = "Update check failed: ${error.message ?: "unknown error"}. " +
+                            "If this is your first check, you may need to sign in as a tester in the browser tab that just opened."
+                    }
+            }
         }
 
         Spacer(modifier = Modifier.height(8.dp))
@@ -1189,6 +1216,19 @@ fun ProfileScreen(state: NirogState) {
             },
             dismissButton = {
                 TextButton(onClick = { showSignOutConfirm = false }) { Text("Cancel") }
+            }
+        )
+    }
+
+    updateCheckMessage?.let { msg ->
+        AlertDialog(
+            onDismissRequest = { updateCheckMessage = null },
+            title = { Text("Update check", fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221)) },
+            text = { Text(msg, fontSize = 14.sp, color = Color(0xFF434842)) },
+            confirmButton = {
+                Button(onClick = { updateCheckMessage = null }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF314936))) {
+                    Text("OK", color = Color.White)
+                }
             }
         )
     }
@@ -2070,6 +2110,259 @@ private fun ReminderToggleRow(label: String, checked: Boolean, showDivider: Bool
             )
         }
         if (showDivider) Divider(color = Color(0xFFF0ECE2), thickness = 1.dp, modifier = Modifier.padding(start = 16.dp))
+    }
+}
+
+// Care+ program calendar - a simple day-by-day agenda rather than a full month-grid
+// widget, since a program's meaningful unit is "day N of the program," not a
+// specific calendar date; today is highlighted so members always know where they are.
+@Composable
+fun ProgramCalendarScreen(state: NirogState) {
+    val totalDays = state.programDurationDays.toInt().coerceAtLeast(1)
+    val startMillis = state.programStartedAtMillis.takeIf { it > 0 } ?: System.currentTimeMillis()
+    val todayIndex = (((System.currentTimeMillis() - startMillis) / (1000L * 60 * 60 * 24)) + 1).toInt().coerceIn(1, totalDays)
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = (todayIndex - 3).coerceAtLeast(0))
+
+    Column(modifier = Modifier.fillMaxSize().background(Color(0xFFF8F6EF))) {
+        DetailScreenHeader(state.activeProgramName.ifBlank { "Program Calendar" }, onBack = { state.currentScreen = "dashboard" })
+        Text(
+            "Day $todayIndex of $totalDays", fontSize = 13.sp, color = Color(0xFF697169),
+            modifier = Modifier.padding(horizontal = 20.dp)
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(bottom = 32.dp)
+        ) {
+            items(totalDays) { index ->
+                val dayNumber = index + 1
+                val dayDate = java.util.Date(startMillis + (dayNumber - 1) * 24L * 60 * 60 * 1000)
+                val isToday = dayNumber == todayIndex
+                val isPast = dayNumber < todayIndex
+                Card(
+                    modifier = Modifier.fillMaxWidth().then(
+                        if (isToday) Modifier.border(1.5.dp, Color(0xFF314936), RoundedCornerShape(16.dp)) else Modifier
+                    ),
+                    colors = CardDefaults.cardColors(containerColor = if (isToday) Color(0xFFEBF7E8) else Color.White),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp).fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Day $dayNumber", fontWeight = FontWeight.Bold, color = Color(0xFF1B3221), fontSize = 14.sp)
+                            Text(
+                                java.text.SimpleDateFormat("EEEE, d MMMM", java.util.Locale.getDefault()).format(dayDate),
+                                fontSize = 12.sp, color = Color(0xFF697169)
+                            )
+                        }
+                        if (isToday) {
+                            Surface(color = Color(0xFF314936), shape = RoundedCornerShape(10.dp)) {
+                                Text("TODAY", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+                            }
+                        } else if (isPast) {
+                            Icon(Icons.Filled.CheckCircle, contentDescription = "Past", tint = Color(0xFF9CB79F), modifier = Modifier.size(18.dp))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Care+ admin announcement feed - read-only for regular program members, with a
+// compose action shown only when the signed-in account actually has the admin
+// custom claim (server-verified, not a client-trusted flag).
+@Composable
+fun AnnouncementsScreen(state: NirogState) {
+    var records by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>?>(null) }
+    var showComposer by remember { mutableStateOf(false) }
+    var composeTitle by remember { mutableStateOf("") }
+    var composeBody by remember { mutableStateOf("") }
+    var posting by remember { mutableStateOf(false) }
+
+    DisposableEffect(Unit) {
+        val subscription = state.repository.listenAnnouncements { result ->
+            records = when (result) {
+                is com.nirogbhumi.app.data.CloudResult.Success -> result.value
+                is com.nirogbhumi.app.data.CloudResult.Failure -> emptyList()
+            }
+        }
+        onDispose { subscription.cancel() }
+    }
+
+    Column(modifier = Modifier.fillMaxSize().background(Color(0xFFF8F6EF))) {
+        DetailScreenHeader(
+            "Announcements",
+            onBack = { state.currentScreen = "dashboard" },
+            trailing = {
+                if (state.isAdmin) {
+                    IconButton(onClick = { showComposer = true }) {
+                        Icon(Icons.Filled.Add, contentDescription = "New announcement", tint = Color(0xFF1B3221))
+                    }
+                }
+            }
+        )
+        Column(modifier = Modifier.fillMaxSize().weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)) {
+            when {
+                records == null -> Row(modifier = Modifier.padding(vertical = 24.dp), verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Color(0xFF9CB79F))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Loading...", fontSize = 13.sp, color = Color(0xFF697169))
+                }
+                records!!.isEmpty() -> EmptyStateCard(Icons.Filled.Campaign, "No announcements yet. Updates from the Nirog Bhumi team will show up here.")
+                else -> Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    records!!.forEach { record ->
+                        val timestamp = (record.values["createdAt"] as? com.google.firebase.Timestamp)?.toDate()
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(containerColor = Color.White),
+                            shape = RoundedCornerShape(16.dp),
+                            border = BorderStroke(0.5.dp, Color(0xFFD8D0C0))
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Text(record.values["title"]?.toString() ?: "Announcement", fontWeight = FontWeight.Bold, color = Color(0xFF1B3221), fontSize = 15.sp)
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(record.values["body"]?.toString().orEmpty(), fontSize = 13.sp, color = Color(0xFF434842), lineHeight = 18.sp)
+                                if (timestamp != null) {
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(relativeTimeLabel(timestamp), fontSize = 11.sp, color = Color(0xFF9CB79F))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(32.dp))
+        }
+    }
+
+    if (showComposer) {
+        AlertDialog(
+            onDismissRequest = { if (!posting) showComposer = false },
+            title = { Text("New Announcement", fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedTextField(value = composeTitle, onValueChange = { composeTitle = it }, label = { Text("Title") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(value = composeBody, onValueChange = { composeBody = it }, label = { Text("Message") }, minLines = 3, modifier = Modifier.fillMaxWidth())
+                }
+            },
+            confirmButton = {
+                Button(
+                    enabled = !posting && composeTitle.isNotBlank() && composeBody.isNotBlank(),
+                    onClick = {
+                        posting = true
+                        state.repository.postAnnouncement(composeTitle.trim(), composeBody.trim()) { result ->
+                            posting = false
+                            if (result is com.nirogbhumi.app.data.CloudResult.Success) {
+                                composeTitle = ""; composeBody = ""; showComposer = false
+                            } else state.cloudMessage = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF314936))
+                ) { Text(if (posting) "Posting..." else "Post", color = Color.White) }
+            },
+            dismissButton = { TextButton(onClick = { showComposer = false }, enabled = !posting) { Text("Cancel", color = Color(0xFF737972)) } }
+        )
+    }
+}
+
+// Care+ community chat - one shared room per program, not one global room, so
+// conversation stays relevant to the program a member actually joined.
+@Composable
+fun ProgramChatScreen(state: NirogState) {
+    var records by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>?>(null) }
+    var messageInput by remember { mutableStateOf("") }
+    var sending by remember { mutableStateOf(false) }
+    val listState = rememberLazyListState()
+    val coroutineScope = rememberCoroutineScope()
+
+    DisposableEffect(state.activeProgramId) {
+        val subscription = state.repository.listenProgramChat(state.activeProgramId) { result ->
+            records = when (result) {
+                is com.nirogbhumi.app.data.CloudResult.Success -> result.value
+                is com.nirogbhumi.app.data.CloudResult.Failure -> emptyList()
+            }
+        }
+        onDispose { subscription.cancel() }
+    }
+
+    Column(modifier = Modifier.fillMaxSize().background(Color(0xFFF8F6EF))) {
+        DetailScreenHeader("Community Chat", onBack = { state.currentScreen = "dashboard" })
+        Text(
+            state.activeProgramName.ifBlank { "Your program" }, fontSize = 12.sp, color = Color(0xFF697169),
+            modifier = Modifier.padding(horizontal = 20.dp)
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+
+        when {
+            records == null -> Box(modifier = Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = Color(0xFF9CB79F))
+            }
+            records!!.isEmpty() -> Box(modifier = Modifier.fillMaxWidth().weight(1f).padding(horizontal = 20.dp), contentAlignment = Alignment.Center) {
+                EmptyStateCard(Icons.Filled.Forum, "No messages yet. Say hello to your program community!")
+            }
+            else -> LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxWidth().weight(1f).padding(horizontal = 20.dp),
+                reverseLayout = true,
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(records!!) { record ->
+                    val isMine = record.values["userId"] == state.repository.userId
+                    val senderName = record.values["senderName"]?.toString() ?: "Member"
+                    val text = record.values["text"]?.toString().orEmpty()
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = if (isMine) Arrangement.End else Arrangement.Start) {
+                        Column(
+                            modifier = Modifier
+                                .widthIn(max = 280.dp)
+                                .background(if (isMine) Color(0xFF314936) else Color.White, RoundedCornerShape(16.dp))
+                                .then(if (isMine) Modifier else Modifier.border(0.5.dp, Color(0xFFD8D0C0), RoundedCornerShape(16.dp)))
+                                .padding(horizontal = 14.dp, vertical = 10.dp)
+                        ) {
+                            if (!isMine) Text(senderName, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF426820))
+                            Text(text, fontSize = 14.sp, color = if (isMine) Color.White else Color(0xFF1B3221))
+                        }
+                    }
+                }
+            }
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            OutlinedTextField(
+                value = messageInput,
+                onValueChange = { messageInput = it },
+                modifier = Modifier.weight(1f),
+                placeholder = { Text("Message your program...") },
+                shape = RoundedCornerShape(24.dp),
+                singleLine = true,
+                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFF314936), unfocusedBorderColor = Color(0xFFD8D0C0), focusedContainerColor = Color.White, unfocusedContainerColor = Color.White)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            IconButton(
+                onClick = {
+                    val text = messageInput.trim()
+                    if (text.isBlank() || sending) return@IconButton
+                    sending = true
+                    state.repository.sendProgramChatMessage(state.activeProgramId, text, state.profileName.ifBlank { "Member" }) { result ->
+                        sending = false
+                        if (result is com.nirogbhumi.app.data.CloudResult.Success) {
+                            messageInput = ""
+                            coroutineScope.launch { listState.animateScrollToItem(0) }
+                        } else state.cloudMessage = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
+                    }
+                },
+                modifier = Modifier.size(48.dp).background(Color(0xFF314936), CircleShape)
+            ) {
+                Icon(Icons.Filled.Send, contentDescription = "Send", tint = Color.White, modifier = Modifier.size(20.dp))
+            }
+        }
     }
 }
 
