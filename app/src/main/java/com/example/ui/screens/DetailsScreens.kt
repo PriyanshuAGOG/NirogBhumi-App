@@ -1023,7 +1023,7 @@ fun InsightDetailScreen(state: NirogState) {
                     shape = RoundedCornerShape(20.dp)
                 ) {
                     Column(modifier = Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(Icons.Outlined.Insights, contentDescription = null, tint = Color(0xFF9CB79F), modifier = Modifier.size(28.dp))
+                        Icon(Icons.Filled.Insights, contentDescription = null, tint = Color(0xFF9CB79F), modifier = Modifier.size(28.dp))
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
                             "Not enough data yet for your personal comparison (${state.sugarLogs.size}/5 sugar readings logged).",
