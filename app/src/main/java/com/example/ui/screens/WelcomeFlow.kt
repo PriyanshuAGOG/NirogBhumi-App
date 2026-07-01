@@ -1269,6 +1269,17 @@ fun ConsentScreen(state: NirogState) {
                 Text("Read full policies and medical disclaimer", color = DeepGreen, fontWeight = FontWeight.SemiBold)
             }
 
+            if (!(check1 && check2 && check3)) {
+                Text(
+                    "Check all three items above to continue.",
+                    color = Ink.copy(alpha = 0.55f),
+                    fontSize = 12.sp
+                )
+            }
+            if (state.authError.isNotBlank()) {
+                Text(state.authError, color = Color(0xFF8B2E2E), fontSize = 12.sp)
+            }
+
             Spacer(modifier = Modifier.height(32.dp))
         }
 
@@ -1281,15 +1292,18 @@ fun ConsentScreen(state: NirogState) {
         ) {
             Button(
                 onClick = {
+                    state.authError = ""
+                    state.authBusy = true
                     state.consentHealthData = check1
                     state.consentExpertReview = check2
                     state.consentMedicalDisclaimer = check3
                     state.repository.saveProfile(mapOf("consent" to mapOf("healthData" to check1, "expertReview" to check2, "medicalDisclaimer" to check3, "version" to "1.0"))) { result ->
+                        state.authBusy = false
                         if (result is com.nirogbhumi.app.data.CloudResult.Success) state.currentScreen = "setup_profile"
                         else state.authError = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
                     }
                 },
-                enabled = check1 && check2 && check3,
+                enabled = check1 && check2 && check3 && !state.authBusy,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(54.dp),
@@ -1299,10 +1313,14 @@ fun ConsentScreen(state: NirogState) {
                 ),
                 shape = RoundedCornerShape(27.dp)
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(text = "Agree & Continue", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Icon(imageVector = Icons.Filled.ArrowForward, contentDescription = "Proceed", tint = Color.White)
+                if (state.authBusy) {
+                    CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+                } else {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(text = "Agree & Continue", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Icon(imageVector = Icons.Filled.ArrowForward, contentDescription = "Proceed", tint = Color.White)
+                    }
                 }
             }
         }
@@ -1436,26 +1454,39 @@ fun SetupProfileScreen(state: NirogState) {
         }
 
         Box(modifier = Modifier.padding(16.dp)) {
-            Button(
-                onClick = {
-                    state.profileName = nameTemp
-                    state.profileAge = ageTemp
-                    state.profileWeight = weightTemp
-                    state.profileHeight = heightTemp
-                    state.profileCity = cityTemp
-                    state.profileLanguage = languageTemp
-                    state.repository.saveProfile(mapOf("fullName" to nameTemp, "age" to ageTemp.toIntOrNull(), "weightKg" to weightTemp.toDoubleOrNull(), "heightCm" to heightTemp.toDoubleOrNull(), "city" to cityTemp, "preferredLanguage" to languageTemp)) { result ->
-                        if (result is com.nirogbhumi.app.data.CloudResult.Success) state.currentScreen = "selection_caregiver"
-                        else state.authError = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
+            Column {
+                if (state.authError.isNotBlank()) {
+                    Text(state.authError, color = Color(0xFF8B2E2E), fontSize = 12.sp, modifier = Modifier.padding(bottom = 8.dp))
+                }
+                Button(
+                    onClick = {
+                        state.authError = ""
+                        state.authBusy = true
+                        state.profileName = nameTemp
+                        state.profileAge = ageTemp
+                        state.profileWeight = weightTemp
+                        state.profileHeight = heightTemp
+                        state.profileCity = cityTemp
+                        state.profileLanguage = languageTemp
+                        state.repository.saveProfile(mapOf("fullName" to nameTemp, "age" to ageTemp.toIntOrNull(), "weightKg" to weightTemp.toDoubleOrNull(), "heightCm" to heightTemp.toDoubleOrNull(), "city" to cityTemp, "preferredLanguage" to languageTemp)) { result ->
+                            state.authBusy = false
+                            if (result is com.nirogbhumi.app.data.CloudResult.Success) state.currentScreen = "selection_caregiver"
+                            else state.authError = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
+                        }
+                    },
+                    enabled = !state.authBusy,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(54.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = DeepGreen),
+                    shape = RoundedCornerShape(27.dp)
+                ) {
+                    if (state.authBusy) {
+                        CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+                    } else {
+                        Text("Continue", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                     }
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(54.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = DeepGreen),
-                shape = RoundedCornerShape(27.dp)
-            ) {
-                Text("Continue", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                }
             }
         }
     }
@@ -2056,8 +2087,14 @@ fun OnboardingCompleteScreen(state: NirogState) {
 
             Spacer(modifier = Modifier.height(16.dp))
 
+            if (state.authError.isNotBlank()) {
+                Text(state.authError, color = Color(0xFF8B2E2E), fontSize = 12.sp, modifier = Modifier.padding(bottom = 8.dp))
+            }
+
             Button(
                 onClick = {
+                    state.authError = ""
+                    state.authBusy = true
                     state.repository.saveProfile(mapOf(
                         "onboardingComplete" to true,
                         "trackingFor" to if (state.isTrackingForSelf) "self" else "family",
@@ -2068,17 +2105,23 @@ fun OnboardingCompleteScreen(state: NirogState) {
                         "goals" to state.selectedGoals.toList(),
                         "programActive" to state.isProgramActive
                     )) { result ->
+                        state.authBusy = false
                         if (result is com.nirogbhumi.app.data.CloudResult.Success) state.currentScreen = "dashboard"
                         else state.authError = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
                     }
                 },
+                enabled = !state.authBusy,
                 modifier = Modifier
                     .fillModifierOnboarding()
                     .height(54.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = DeepGreen),
                 shape = RoundedCornerShape(27.dp)
             ) {
-                Text("Go to Today", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                if (state.authBusy) {
+                    CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+                } else {
+                    Text("Go to Today", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                }
             }
         }
     }
