@@ -1058,6 +1058,152 @@ fun InsightDetailScreen(state: NirogState) {
 }
 
 @Composable
+fun ProfileScreen(state: NirogState) {
+    var showSignOutConfirm by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFFF8F6EF))
+            .verticalScroll(rememberScrollState())
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = { state.currentScreen = "dashboard" }) {
+                Icon(Icons.Outlined.ArrowBack, contentDescription = "Back", tint = Color(0xFF1B3221))
+            }
+            Text("Profile & Settings", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+        }
+
+        // Profile header
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier.size(56.dp).clip(CircleShape).background(Color(0xFF314936)),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    state.profileName.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?",
+                    color = Color.White, fontWeight = FontWeight.Bold, fontSize = 22.sp
+                )
+            }
+            Spacer(modifier = Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(state.profileName.ifBlank { "Your name" }, fontSize = 18.sp, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+                Text(
+                    state.userEmail.ifBlank { state.userMobile.ifBlank { "Complete your profile" } },
+                    fontSize = 13.sp, color = Color(0xFF737972)
+                )
+            }
+            TextButton(onClick = { state.currentScreen = "profile_edit" }) {
+                Text("Edit", color = Color(0xFF314936), fontWeight = FontWeight.Bold)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        SettingsSection(title = "Account") {
+            SettingsRow(Icons.Filled.Person, "Personal details") { state.currentScreen = "profile_edit" }
+            SettingsRow(Icons.Filled.FamilyRestroom, "Family profiles") { state.currentScreen = "family_profiles" }
+            SettingsRow(Icons.Filled.Devices, "Devices & sync") { state.currentScreen = "device_hub" }
+        }
+
+        SettingsSection(title = "Activity") {
+            SettingsRow(Icons.Filled.ShoppingBag, "Orders") { state.currentScreen = "orders" }
+        }
+
+        SettingsSection(title = "Notifications & Privacy") {
+            SettingsRow(Icons.Filled.Notifications, "Notification settings") { state.currentScreen = "notification_settings" }
+            SettingsRow(Icons.Filled.Shield, "Privacy & consent") { state.currentScreen = "privacy_consent" }
+            SettingsRow(Icons.Filled.DownloadForOffline, "Export or delete my data") { state.currentScreen = "data_controls" }
+        }
+
+        SettingsSection(title = "Support") {
+            SettingsRow(Icons.Filled.HelpOutline, "Help & support") { state.currentScreen = "support" }
+            SettingsRow(Icons.Filled.Description, "Legal & policies", showDivider = false) { state.currentScreen = "legal_center" }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        TextButton(
+            onClick = { showSignOutConfirm = true },
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp)
+        ) {
+            Text("Sign Out", color = Color(0xFF8B2E2E), fontWeight = FontWeight.SemiBold)
+        }
+
+        Spacer(modifier = Modifier.height(32.dp))
+    }
+
+    if (showSignOutConfirm) {
+        AlertDialog(
+            onDismissRequest = { showSignOutConfirm = false },
+            title = { Text("Sign out?", fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold) },
+            text = { Text("You'll need to sign in again to see your tracked data.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        runCatching { com.google.firebase.auth.FirebaseAuth.getInstance().signOut() }
+                        showSignOutConfirm = false
+                        state.currentScreen = "welcome"
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8B2E2E))
+                ) { Text("Sign Out", color = Color.White) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSignOutConfirm = false }) { Text("Cancel") }
+            }
+        )
+    }
+}
+
+@Composable
+private fun SettingsSection(title: String, content: @Composable ColumnScope.() -> Unit) {
+    Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
+        Text(title, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF737972), letterSpacing = 0.5.sp)
+        Spacer(modifier = Modifier.height(8.dp))
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            shape = RoundedCornerShape(16.dp),
+            border = BorderStroke(0.5.dp, Color(0xFFD8D0C0)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column { content() }
+        }
+    }
+}
+
+@Composable
+private fun SettingsRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    showDivider: Boolean = true,
+    onClick: () -> Unit
+) {
+    Column {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onClick)
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(icon, contentDescription = null, tint = Color(0xFF314936), modifier = Modifier.size(20.dp))
+            Spacer(modifier = Modifier.width(14.dp))
+            Text(label, fontSize = 14.sp, color = Color(0xFF1B3221), modifier = Modifier.weight(1f))
+            Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Color(0xFFC3C8C0))
+        }
+        if (showDivider) {
+            Divider(color = Color(0xFFF0ECE2), thickness = 1.dp, modifier = Modifier.padding(start = 50.dp))
+        }
+    }
+}
+
+@Composable
 fun ProfileEditScreen(state: NirogState) {
     var editName by remember { mutableStateOf(state.profileName) }
     var editAge by remember { mutableStateOf(state.profileAge) }

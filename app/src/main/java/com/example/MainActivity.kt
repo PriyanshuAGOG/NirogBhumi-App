@@ -271,6 +271,7 @@ fun ActiveScreenContent(state: NirogState) {
       "program_code_optional" -> ProgramCodeOptionalScreen(state)
       "onboarding_complete" -> OnboardingCompleteScreen(state)
       "dashboard" -> MainHub(state)
+      "profile" -> ProfileScreen(state)
       "profile_edit" -> ProfileEditScreen(state)
 
       // Metrics Detailed screens

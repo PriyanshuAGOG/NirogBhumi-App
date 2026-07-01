@@ -1246,7 +1246,30 @@ fun TrackModuleBox(
 // TAB 3: Insights Page
 @Composable
 fun InsightsTab(state: NirogState) {
-    var showSugarStory by remember { mutableStateOf(false) }
+    val weekRange = remember {
+        val cal = java.util.Calendar.getInstance()
+        cal.set(java.util.Calendar.DAY_OF_WEEK, cal.firstDayOfWeek)
+        val start = cal.time
+        cal.add(java.util.Calendar.DAY_OF_YEAR, 6)
+        val end = cal.time
+        val fmt = java.text.SimpleDateFormat("d MMM", java.util.Locale.getDefault())
+        "${fmt.format(start)} - ${fmt.format(end)}"
+    }
+    val hasEnoughData = state.sugarLogs.size >= 3
+    val avgFastingSugar = state.sugarLogs.filter { it.type == "Fasting" }.map { it.value }.let { if (it.isEmpty()) null else it.average().toInt() }
+    val sugarTrend = remember(state.sugarLogs.size) {
+        val values = state.sugarLogs.map { it.value }
+        if (values.size < 4) null else {
+            val half = values.size / 2
+            val recentAvg = values.take(half).average()
+            val olderAvg = values.drop(half).average()
+            when {
+                recentAvg < olderAvg - 3 -> "Improving" to Icons.Filled.TrendingDown
+                recentAvg > olderAvg + 3 -> "Rising" to Icons.Filled.TrendingUp
+                else -> "Stable" to Icons.Filled.TrendingFlat
+            }
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -1268,232 +1291,221 @@ fun InsightsTab(state: NirogState) {
                 color = Color(0xFF1B3221)
             )
             Text(
-                text = "12-18 Jun",
+                text = weekRange,
                 fontSize = 13.sp,
                 color = Color(0xFF737972)
             )
         }
 
         Text(
-            text = "Your pattern is becoming clearer.",
+            text = if (hasEnoughData) "Your pattern is becoming clearer." else "Log a few readings this week to unlock your first insight.",
             fontSize = 16.sp,
             color = Color(0xFF4B6450),
             fontWeight = FontWeight.Medium
         )
 
-        // Bento Grid Metrics items
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { state.currentScreen = "weekly_report" }
-                .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.4f), shape = RoundedCornerShape(24.dp)),
-            colors = CardDefaults.cardColors(containerColor = Color.White),
-            shape = RoundedCornerShape(24.dp)
-        ) {
-            Column(modifier = Modifier.padding(20.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+        if (!hasEnoughData) {
+            Card(
+                modifier = Modifier.fillMaxWidth().border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.4f), shape = RoundedCornerShape(24.dp)),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                shape = RoundedCornerShape(24.dp)
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(28.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
+                    Icon(Icons.Outlined.Insights, contentDescription = null, tint = Color(0xFF9CB79F), modifier = Modifier.size(36.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        "No insights yet",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp,
+                        color = Color(0xFF1B3221)
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        "Log at least 3 sugar readings this week and we'll show you real trends, not guesses.",
+                        fontSize = 13.sp,
+                        color = Color(0xFF737972),
+                        textAlign = TextAlign.Center,
+                        lineHeight = 18.sp
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Button(
+                        onClick = { state.activeTab = "Track" },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF314936)),
+                        shape = RoundedCornerShape(20.dp)
+                    ) {
+                        Text("Log a Reading", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    }
+                }
+            }
+        } else {
+            // Avg Fasting Sugar - computed from real logged readings
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { state.currentScreen = "trends_30" }
+                    .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.4f), shape = RoundedCornerShape(24.dp)),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                shape = RoundedCornerShape(24.dp)
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Filled.WaterDrop, "Sugar", tint = Color(0xFF43242A), modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("Avg Fasting Sugar", fontWeight = FontWeight.SemiBold, color = Color(0xFF434842))
                     }
-                    IconButton(onClick = { state.currentScreen = "trends_30" }) { Icon(Icons.Filled.MoreHoriz, "Options") }
-                }
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.Bottom
-                ) {
-                    Row(verticalAlignment = Alignment.Bottom) {
-                        Text("108", fontSize = 28.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("mg/dL", fontSize = 12.sp, color = Color(0xFF737972))
-                    }
+                    Spacer(modifier = Modifier.height(8.dp))
 
-                    Box(
-                        modifier = Modifier
-                            .background(Color(0xFFE5F1E2), RoundedCornerShape(12.dp))
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.Bottom
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Filled.TrendingDown, "Improving", tint = Color(0xFF426820), modifier = Modifier.size(14.dp))
+                        Row(verticalAlignment = Alignment.Bottom) {
+                            Text(avgFastingSugar?.toString() ?: "—", fontSize = 28.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Improving", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+                            Text("mg/dL", fontSize = 12.sp, color = Color(0xFF737972))
+                        }
+
+                        sugarTrend?.let { (label, icon) ->
+                            Box(
+                                modifier = Modifier
+                                    .background(Color(0xFFE5F1E2), RoundedCornerShape(12.dp))
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(icon, label, tint = Color(0xFF426820), modifier = Modifier.size(14.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(label, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+                                }
+                            }
                         }
                     }
                 }
             }
-        }
 
-        // Avg BP
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { state.currentScreen = "bp_overview" }
-                .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.4f), shape = RoundedCornerShape(24.dp)),
-            colors = CardDefaults.cardColors(containerColor = Color.White),
-            shape = RoundedCornerShape(24.dp)
-        ) {
-            Column(modifier = Modifier.padding(20.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Filled.Favorite, "BP", tint = Color(0xFFBA1A1A), modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Avg Blood Pressure", fontWeight = FontWeight.SemiBold, color = Color(0xFF434842))
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.Bottom
-                ) {
-                    Row(verticalAlignment = Alignment.Bottom) {
-                        Text("118/78", fontSize = 28.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("mmHg", fontSize = 12.sp, color = Color(0xFF737972))
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 2.dp)) {
-                        Icon(Icons.Filled.TrendingFlat, "Stable", tint = Color(0xFF737972), modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Stable", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF737972))
-                    }
-                }
-            }
-        }
-
-        // Row for Sleep and Walk averages
-        Row(modifier = Modifier.fillMaxWidth()) {
-            Box(modifier = Modifier.weight(1f).padding(end = 6.dp)) {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { state.currentScreen = "sleep_overview" }
-                        .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.4f), shape = RoundedCornerShape(24.dp)),
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
-                    shape = RoundedCornerShape(24.dp)
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Filled.Bedtime, "Sleep", tint = Color(0xFF4B6450), modifier = Modifier.size(14.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Sleep", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF434842))
-                        }
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Text("6h 15m", fontSize = 18.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Filled.Warning, "Needs attention", tint = Color(0xFFBA1A1A), modifier = Modifier.size(12.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Needs attention", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFFBA1A1A))
-                        }
-                    }
-                }
-            }
-            Box(modifier = Modifier.weight(1f).padding(start = 6.dp)) {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { state.currentScreen = "walking_overview" }
-                        .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.4f), shape = RoundedCornerShape(24.dp)),
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
-                    shape = RoundedCornerShape(24.dp)
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Filled.DirectionsWalk, "Steps", tint = Color(0xFF426820), modifier = Modifier.size(14.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Daily Walk", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF434842))
-                        }
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Text("7,240", fontSize = 18.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Filled.TrendingUp, "Improving", tint = Color(0xFF1B3221), modifier = Modifier.size(12.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Improving", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
-                        }
-                    }
-                }
-            }
-        }
-
-        // Ayurvedic recommendation box
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.2f), shape = RoundedCornerShape(24.dp)),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFFE0ECDD)),
-            shape = RoundedCornerShape(24.dp)
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Filled.Spa, "Insight", tint = Color(0xFF1B3221), modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("AYURVEDIC INSIGHT", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Text(
-                    text = "Your sleep duration was lower on several days. Try a consistent wind-down time this week. Ask your doctor before adding supplements or changing treatment.",
-                    fontSize = 13.sp,
-                    color = Color(0xFF141E15),
-                    lineHeight = 18.sp
-                )
-            }
-        }
-
-        // Share CTA
-        OutlinedButton(
-            onClick = { state.currentScreen = "share_report" },
-            modifier = Modifier.fillMaxWidth().height(48.dp),
-            shape = RoundedCornerShape(24.dp),
-            border = BorderStroke(1.dp, Color(0xFFC3C8C0)),
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF1B3221))
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Filled.Share, "Share", modifier = Modifier.size(16.dp))
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Share Report with Doctor", fontWeight = FontWeight.SemiBold)
-            }
-        }
-
-        // Expanded clickable Insight Sugar Story Block
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(Color(0xFFE5F1E2), RoundedCornerShape(16.dp))
-                .clickable { state.currentScreen = "insight_detail" }
-                .padding(16.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+            // BP - latest real reading
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { state.currentScreen = "bp_overview" }
+                    .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.4f), shape = RoundedCornerShape(24.dp)),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                shape = RoundedCornerShape(24.dp)
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Sleep correlates to Sugar peaks",
-                        fontSize = 15.sp,
-                        fontFamily = FontFamily.Serif,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF1B3221)
-                    )
-                    Text(
-                        text = "We noticed patterns connecting your rest quality to morning sugar level ranges. Select to read details.",
-                        fontSize = 12.sp,
-                        color = Color(0xFF434842),
-                        lineHeight = 16.sp,
-                        modifier = Modifier.padding(top = 4.dp)
-                    )
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Filled.Favorite, "BP", tint = Color(0xFFBA1A1A), modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Latest Blood Pressure", fontWeight = FontWeight.SemiBold, color = Color(0xFF434842))
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(verticalAlignment = Alignment.Bottom) {
+                        Text(state.latestBpReading ?: "—", fontSize = 28.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+                        if (state.latestBpReading != null) {
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("mmHg", fontSize = 12.sp, color = Color(0xFF737972))
+                        }
+                    }
                 }
-                Icon(Icons.Filled.ChevronRight, "View Insight", tint = Color(0xFF1B3221))
+            }
+
+            // Row for Sleep and Walk - real state values
+            Row(modifier = Modifier.fillMaxWidth()) {
+                Box(modifier = Modifier.weight(1f).padding(end = 6.dp)) {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { state.currentScreen = "sleep_overview" }
+                            .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.4f), shape = RoundedCornerShape(24.dp)),
+                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                        shape = RoundedCornerShape(24.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Filled.Bedtime, "Sleep", tint = Color(0xFF4B6450), modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Sleep", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF434842))
+                            }
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                if (state.sleepHours > 0 || state.sleepMinutes > 0) "${state.sleepHours}h ${state.sleepMinutes}m" else "—",
+                                fontSize = 18.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221)
+                            )
+                        }
+                    }
+                }
+                Box(modifier = Modifier.weight(1f).padding(start = 6.dp)) {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { state.currentScreen = "walking_overview" }
+                            .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.4f), shape = RoundedCornerShape(24.dp)),
+                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                        shape = RoundedCornerShape(24.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Filled.DirectionsWalk, "Steps", tint = Color(0xFF426820), modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Daily Walk", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF434842))
+                            }
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                if (state.stepsLogged > 0) String.format("%,d", state.stepsLogged) else "—",
+                                fontSize = 18.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221)
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Plain-language guidance grounded in the real average, not a fabricated correlation
+            avgFastingSugar?.let { avg ->
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.2f), shape = RoundedCornerShape(24.dp)),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFE0ECDD)),
+                    shape = RoundedCornerShape(24.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Filled.Spa, "Insight", tint = Color(0xFF1B3221), modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("THIS WEEK'S GUIDANCE", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = when {
+                                avg > 130 -> "Your average fasting sugar this week is $avg mg/dL, above the typical target range. A short walk after meals and a consistent dinner time can help. Please discuss any persistent high readings with your doctor."
+                                avg < 80 -> "Your average fasting sugar this week is $avg mg/dL, on the lower side. If you feel dizzy or shaky, eat something and tell your doctor about these readings."
+                                else -> "Your average fasting sugar this week is $avg mg/dL, within a typical range. Keep up your current routine, and keep logging so trends stay accurate."
+                            },
+                            fontSize = 13.sp,
+                            color = Color(0xFF141E15),
+                            lineHeight = 18.sp
+                        )
+                    }
+                }
+            }
+
+            // Share CTA
+            OutlinedButton(
+                onClick = { state.currentScreen = "share_report" },
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                shape = RoundedCornerShape(24.dp),
+                border = BorderStroke(1.dp, Color(0xFFC3C8C0)),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF1B3221))
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.Share, "Share", modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Share Report with Doctor", fontWeight = FontWeight.SemiBold)
+                }
             }
         }
         Spacer(modifier = Modifier.height(32.dp))
