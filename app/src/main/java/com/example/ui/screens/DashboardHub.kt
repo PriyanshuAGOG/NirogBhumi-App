@@ -515,13 +515,24 @@ fun TodayTab(state: NirogState) {
             }
         }
 
-        // Quick Vitals Header
-        Text(
-            text = "Today's Vitals",
-            fontSize = 18.sp,
-            fontWeight = FontWeight.Bold,
-            color = Color(0xFF1B3221)
-        )
+        // Quick Vitals Header with a gentle prompt into the guided check-in
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Today's Vitals",
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF1B3221)
+            )
+            TextButton(onClick = { state.currentScreen = "daily_checkin" }) {
+                Text("Log now", color = Color(0xFF314936), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                Spacer(modifier = Modifier.width(2.dp))
+                Icon(Icons.Filled.ArrowForward, contentDescription = null, tint = Color(0xFF314936), modifier = Modifier.size(15.dp))
+            }
+        }
 
         // Bento Grid of quick cards
         Row(modifier = Modifier.fillMaxWidth()) {
@@ -802,16 +813,40 @@ fun TrackTab(state: NirogState) {
                 color = Color(0xFF1B3221)
             )
             Text(
-                text = "Log your vitals in under a minute.",
+                text = "Your whole day's logging in one calm flow.",
                 fontSize = 15.sp,
                 color = Color(0xFF434842),
                 modifier = Modifier.padding(top = 4.dp)
             )
         }
 
-        // Quick Log - single-tap entry without leaving this screen
+        // Primary path: the guided daily check-in. This is the low-friction default -
+        // one tap walks the user through sugar/BP/weight without hunting around the grid.
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { state.currentScreen = "daily_checkin" }
+                .border(width = 0.5.dp, color = Color(0xFF9CB79F).copy(alpha = 0.4f), shape = RoundedCornerShape(24.dp)),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF314936)),
+            shape = RoundedCornerShape(24.dp)
+        ) {
+            Row(modifier = Modifier.padding(20.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier.size(44.dp).background(Color.White.copy(alpha = 0.15f), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) { Icon(Icons.Filled.PlaylistAddCheck, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp)) }
+                Spacer(modifier = Modifier.width(16.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Daily Check-in", fontSize = 18.sp, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color.White)
+                    Text("Sugar, BP & weight — under 2 minutes", fontSize = 13.sp, color = Color(0xFFB2CEB4))
+                }
+                Icon(Icons.Filled.ArrowForward, contentDescription = "Start", tint = Color.White)
+            }
+        }
+
+        // Quick Log - single-tap entry for logging just one thing without the full flow
         Column {
-            Text("Quick Log", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+            Text("Or log just one thing", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
             Spacer(modifier = Modifier.height(10.dp))
             Row(
                 modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),

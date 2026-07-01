@@ -287,6 +287,7 @@ fun ActiveScreenContent(state: NirogState) {
       "family_profiles" -> FamilyProfilesScreen(state)
       "orders" -> OrdersScreen(state)
       "articles" -> ArticlesScreen(state)
+      "daily_checkin" -> DailyCheckInScreen(state)
       "program_calendar" -> ProgramCalendarScreen(state)
       "announcements" -> AnnouncementsScreen(state)
       "program_chat" -> ProgramChatScreen(state)
