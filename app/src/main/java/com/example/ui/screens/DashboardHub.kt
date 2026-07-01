@@ -475,7 +475,6 @@ fun TodayTab(state: NirogState) {
                         }
                         TextButton(onClick = {
                             state.dailyRitualsCompleted.remove("Walk")
-                            state.stepsLogged -= 1500
                             state.repository.addHealthLog("checklistLogs", mapOf(
                                 "taskId" to "daily_post_dinner_walk",
                                 "title" to "Walk 15 minutes after dinner",
@@ -491,7 +490,6 @@ fun TodayTab(state: NirogState) {
                     Button(
                         onClick = {
                             state.dailyRitualsCompleted.add("Walk")
-                            state.stepsLogged += 1500
                             state.repository.addHealthLog("checklistLogs", mapOf(
                                 "taskId" to "daily_post_dinner_walk",
                                 "title" to "Walk 15 minutes after dinner",
