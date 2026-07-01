@@ -100,7 +100,7 @@ firebase-functions = { group = "com.google.firebase", name = "firebase-functions
 firebase-messaging = { group = "com.google.firebase", name = "firebase-messaging" }
 firebase-analytics = { group = "com.google.firebase", name = "firebase-analytics" }
 firebase-crashlytics = { group = "com.google.firebase", name = "firebase-crashlytics" }
-firebase-appdistribution-api = { group = "com.google.firebase", name = "firebase-appdistribution-api" }
+firebase-appdistribution-api = { group = "com.google.firebase", name = "firebase-appdistribution-api", version = "+" }
 firebase-appcheck-playintegrity = { group = "com.google.firebase", name = "firebase-appcheck-playintegrity" }
 razorpay-checkout = { group = "com.razorpay", name = "checkout", version.ref = "razorpayCheckout" }
 androidx-health-connect = { group = "androidx.health.connect", name = "connect-client", version.ref = "healthConnect" }
