@@ -128,6 +128,10 @@ private val ExplicitBackDestinations = mapOf(
     "profile_edit" to "profile"
 )
 
+// Note: "dashboard" is always rendered directly by MainHub (see MainActivity's
+// explicit `when`), never through CatalogScreen's generic back arrow, so its
+// own "Today" section falling back to "dashboard" here is unreachable rather
+// than a real self-loop like the profile/hub cases below.
 fun backDestinationFor(spec: ScreenSpec): String = ExplicitBackDestinations[spec.route] ?: when (spec.section) {
     "Today" -> "dashboard"
     "Track" -> "dashboard"

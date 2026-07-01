@@ -183,17 +183,18 @@ fun CatalogScreen(state: NirogState, route: String) {
     val readCollection = readCollectionFor(spec.route)
     DisposableEffect(spec.route, state.repository.userId) {
         val subscription = when {
-            readCollection == null || !state.repository.isCloudConfigured -> null
+            readCollection == null -> null
+            !state.repository.isCloudConfigured -> { state.cloudRecords[spec.route] = emptyList(); null }
             readCollection in setOf("contentItems", "products", "programs") -> state.repository.listenPublicCollection(readCollection) { result ->
                 when (result) {
                     is CloudResult.Success -> state.cloudRecords[spec.route] = result.value
-                    is CloudResult.Failure -> message = result.message
+                    is CloudResult.Failure -> { message = result.message; state.cloudRecords[spec.route] = emptyList() }
                 }
             }
             state.repository.userId != null -> state.repository.listenUserCollection(readCollection) { result ->
                 when (result) {
                     is CloudResult.Success -> state.cloudRecords[spec.route] = result.value
-                    is CloudResult.Failure -> message = result.message
+                    is CloudResult.Failure -> { message = result.message; state.cloudRecords[spec.route] = emptyList() }
                 }
             }
             else -> null
@@ -229,29 +230,45 @@ fun CatalogScreen(state: NirogState, route: String) {
                     Surface(color = Color(0xFFF5E7D1), shape = RoundedCornerShape(14.dp)) { Text("Do not change or stop medication without consulting your doctor.", Modifier.padding(14.dp), color = Color(0xFF624B20), fontWeight = FontWeight.Medium) }
                 }
 
-                state.cloudRecords[spec.route]?.take(5)?.takeIf { it.isNotEmpty() }?.let { records ->
+                if (readCollection != null) {
+                    val records = state.cloudRecords[spec.route]
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("Latest", fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF182219))
-                        records.forEach { record ->
-                            val recordDestination = when (readCollection) {
-                                "products" -> "product_detail"
-                                "contentItems" -> "article_detail"
-                                "orders" -> "order_detail"
-                                "profiles" -> "family_dashboard"
-                                "consultations" -> "consultation_detail"
-                                else -> null
+                        when {
+                            records == null -> Row(verticalAlignment = Alignment.CenterVertically) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Color(0xFF9CB79F))
+                                Spacer(Modifier.width(8.dp))
+                                Text("Loading...", fontSize = 13.sp, color = Color(0xFF697169))
                             }
-                            Surface(Modifier.fillMaxWidth().then(if (recordDestination != null) Modifier.clickable {
-                                state.selectedDocumentId = record.id
-                                state.selectedDocumentValues = record.values
-                                state.currentScreen = recordDestination
-                            } else Modifier), color = Color.White, shape = RoundedCornerShape(14.dp), border = BorderStroke(1.dp, Color(0xFFD8D0C0))) {
-                                Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Column(Modifier.weight(1f)) {
-                                        Text(recordTitle(readCollection.orEmpty(), record.values), fontWeight = FontWeight.SemiBold, color = Color(0xFF182219))
-                                        Text(recordSubtitle(record.values), fontSize = 12.sp, color = Color(0xFF697169), maxLines = 2)
+                            records.isEmpty() -> Surface(
+                                Modifier.fillMaxWidth(), color = Color(0xFFF1EDE6), shape = RoundedCornerShape(14.dp)
+                            ) {
+                                Text(
+                                    "No entries yet. What you log here will show up in this list.",
+                                    Modifier.padding(14.dp), fontSize = 13.sp, color = Color(0xFF697169)
+                                )
+                            }
+                            else -> records.take(5).forEach { record ->
+                                val recordDestination = when (readCollection) {
+                                    "products" -> "product_detail"
+                                    "contentItems" -> "article_detail"
+                                    "orders" -> "order_detail"
+                                    "profiles" -> "family_dashboard"
+                                    "consultations" -> "consultation_detail"
+                                    else -> null
+                                }
+                                Surface(Modifier.fillMaxWidth().then(if (recordDestination != null) Modifier.clickable {
+                                    state.selectedDocumentId = record.id
+                                    state.selectedDocumentValues = record.values
+                                    state.currentScreen = recordDestination
+                                } else Modifier), color = Color.White, shape = RoundedCornerShape(14.dp), border = BorderStroke(1.dp, Color(0xFFD8D0C0))) {
+                                    Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Column(Modifier.weight(1f)) {
+                                            Text(recordTitle(readCollection.orEmpty(), record.values), fontWeight = FontWeight.SemiBold, color = Color(0xFF182219))
+                                            Text(recordSubtitle(record.values), fontSize = 12.sp, color = Color(0xFF697169), maxLines = 2)
+                                        }
+                                        StatusBadge(record.values["status"]?.toString())
                                     }
-                                    StatusBadge(record.values["status"]?.toString())
                                 }
                             }
                         }
@@ -497,15 +514,25 @@ fun CatalogScreen(state: NirogState, route: String) {
                         modifier = Modifier.fillMaxWidth().height(50.dp),
                         shape = RoundedCornerShape(25.dp), border = BorderStroke(1.dp, Color(0xFF9B5A54))
                     ) { Text("Request account deletion", color = Color(0xFF7B332E)) }
-                    state.cloudRecords[spec.route]?.firstOrNull { it.values["status"] == "completed" && it.values["storagePath"] != null }?.let { export ->
-                        OutlinedButton(onClick = {
-                            state.repository.getPrivateDownloadUrl(export.values["storagePath"].toString()) { result ->
+                    val exportRequests = state.cloudRecords[spec.route]
+                    val completedExport = exportRequests?.firstOrNull { it.values["status"] == "completed" && it.values["storagePath"] != null }
+                    when {
+                        completedExport != null -> OutlinedButton(onClick = {
+                            state.repository.getPrivateDownloadUrl(completedExport.values["storagePath"].toString()) { result ->
                                 when (result) {
                                     is CloudResult.Success -> runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(result.value))) }.onFailure { message = "No app could open the export" }
                                     is CloudResult.Failure -> message = result.message
                                 }
                             }
                         }, Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(25.dp)) { Text("Open latest export") }
+                        exportRequests?.isNotEmpty() == true -> Text(
+                            "Your export request is being prepared. This can take a little while - check back soon.",
+                            fontSize = 13.sp, color = Color(0xFF697169)
+                        )
+                        else -> Text(
+                            "No export requested yet. Tap \"Download data\" above to request one.",
+                            fontSize = 13.sp, color = Color(0xFF697169)
+                        )
                     }
                 }
                 Text("Education and lifestyle support only. Consult your doctor before changing medication or treatment.", fontSize = 11.sp, lineHeight = 16.sp, color = Color(0xFF6B736C))

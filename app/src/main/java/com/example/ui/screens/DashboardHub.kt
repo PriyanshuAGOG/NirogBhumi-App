@@ -1957,7 +1957,7 @@ fun LearnCategoryCard(title: String, icon: androidx.compose.ui.graphics.vector.I
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .height(110.dp)
+            .heightIn(min = 110.dp)
             .clickable(onClick = onClick)
             .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.35f), shape = RoundedCornerShape(16.dp)),
         colors = CardDefaults.cardColors(containerColor = Color.White),

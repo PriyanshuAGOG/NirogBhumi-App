@@ -100,7 +100,7 @@ fun BloodSugarDetailScreen(state: NirogState) {
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Summary Card
+            // Summary Card - computed from real logged readings, not a fixed value
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -111,23 +111,29 @@ fun BloodSugarDetailScreen(state: NirogState) {
                 Column(modifier = Modifier.padding(20.dp)) {
                     Text("CURRENT AVERAGE", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF737972))
                     Spacer(modifier = Modifier.height(4.dp))
-                    Row(verticalAlignment = Alignment.Bottom) {
-                        Text("105", fontSize = 42.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("mg/dL", fontSize = 14.sp, color = Color(0xFF737972), modifier = Modifier.padding(bottom = 6.dp))
+                    if (state.sugarLogs.isEmpty()) {
+                        Text("No readings logged yet", fontSize = 16.sp, color = Color(0xFF737972), modifier = Modifier.padding(top = 8.dp))
+                    } else {
+                        val avg = state.sugarLogs.map { it.value }.average().toInt()
+                        val normalPercent = (state.sugarLogs.count { it.status == "Normal" } * 100 / state.sugarLogs.size)
+                        Row(verticalAlignment = Alignment.Bottom) {
+                            Text("$avg", fontSize = 42.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("mg/dL", fontSize = 14.sp, color = Color(0xFF737972), modifier = Modifier.padding(bottom = 6.dp))
+                        }
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            "Your readings were within a typical range $normalPercent% of the time across your last ${state.sugarLogs.size} logs.",
+                            fontSize = 13.sp,
+                            color = Color(0xFF434842),
+                            lineHeight = 18.sp
+                        )
                     }
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        "Stable: Your readings are within standard parameters 92% of the time over the past 30 days.",
-                        fontSize = 13.sp,
-                        color = Color(0xFF434842),
-                        lineHeight = 18.sp
-                    )
                 }
             }
 
-            // Custom Drawn Line Chart Simulation for last 30d
-            Text("Last 30 Days Trend", fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+            // Trend chart built from real logged readings
+            Text("Recent Trend", fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
 
             Card(
                 modifier = Modifier
@@ -137,61 +143,69 @@ fun BloodSugarDetailScreen(state: NirogState) {
                 shape = RoundedCornerShape(20.dp)
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    // Simulating a trend line graph using canvas draw
-                    Canvas(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(140.dp)
-                    ) {
-                        val points = listOf(140f, 136f, 120f, 125f, 110f, 98f, 105f)
-                        val stepX = size.width / 6
-                        val maxY = 160f
-                        val minY = 70f
-                        val heightRange = maxY - minY
-
-                        // Draw target safe corridor shaded area
-                        val safeMinY = size.height - ((100f - minY) / heightRange * size.height)
-                        val safeMaxY = size.height - ((140f - minY) / heightRange * size.height)
-
-                        drawRect(
-                            color = Color(0xFFE5F1E2).copy(alpha = 0.5f),
-                            topLeft = androidx.compose.ui.geometry.Offset(0f, safeMaxY),
-                            size = androidx.compose.ui.geometry.Size(size.width, safeMinY - safeMaxY)
+                    val points = state.sugarLogs.take(7).reversed()
+                    if (points.size < 2) {
+                        Text(
+                            "Log at least 2 readings to see a trend line here.",
+                            fontSize = 13.sp,
+                            color = Color(0xFF737972),
+                            modifier = Modifier.padding(vertical = 24.dp)
                         )
+                    } else {
+                        Canvas(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(140.dp)
+                        ) {
+                            val stepX = size.width / (points.size - 1)
+                            val maxY = (points.maxOf { it.value } + 10).toFloat()
+                            val minY = (points.minOf { it.value } - 10).coerceAtLeast(0).toFloat()
+                            val heightRange = (maxY - minY).coerceAtLeast(1f)
 
-                        // Draw trend lines
-                        var lastX = 0f
-                        var lastY = 0f
-                        points.forEachIndexed { i, pt ->
-                            val x = i * stepX
-                            val fraction = (pt - minY) / heightRange
-                            val y = size.height - (fraction * size.height)
+                            val safeMinY = size.height - ((100f - minY) / heightRange * size.height)
+                            val safeMaxY = size.height - ((140f - minY) / heightRange * size.height)
 
-                            // dot
-                            drawCircle(color = Color(0xFF1B3221), radius = 4.dp.toPx(), center = androidx.compose.ui.geometry.Offset(x, y))
+                            drawRect(
+                                color = Color(0xFFE5F1E2).copy(alpha = 0.5f),
+                                topLeft = androidx.compose.ui.geometry.Offset(0f, safeMaxY.coerceIn(0f, size.height)),
+                                size = androidx.compose.ui.geometry.Size(size.width, (safeMinY - safeMaxY).coerceIn(0f, size.height))
+                            )
 
-                            if (i > 0) {
-                                drawLine(
-                                    color = Color(0xFF1B3221),
-                                    start = androidx.compose.ui.geometry.Offset(lastX, lastY),
-                                    end = androidx.compose.ui.geometry.Offset(x, y),
-                                    strokeWidth = 2.dp.toPx()
+                            var lastX = 0f
+                            var lastY = 0f
+                            points.forEachIndexed { i, log ->
+                                val x = i * stepX
+                                val fraction = (log.value - minY) / heightRange
+                                val y = size.height - (fraction * size.height)
+
+                                drawCircle(color = Color(0xFF1B3221), radius = 4.dp.toPx(), center = androidx.compose.ui.geometry.Offset(x, y))
+
+                                if (i > 0) {
+                                    drawLine(
+                                        color = Color(0xFF1B3221),
+                                        start = androidx.compose.ui.geometry.Offset(lastX, lastY),
+                                        end = androidx.compose.ui.geometry.Offset(x, y),
+                                        strokeWidth = 2.dp.toPx()
+                                    )
+                                }
+                                lastX = x
+                                lastY = y
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            points.forEachIndexed { i, log ->
+                                Text(
+                                    log.type.take(4),
+                                    fontSize = 10.sp,
+                                    fontWeight = if (i == points.size - 1) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (i == points.size - 1) Color(0xFF1B3221) else Color(0xFF737972)
                                 )
                             }
-                            lastX = x
-                            lastY = y
                         }
-                    }
-
-                    // Labels below
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text("Week 1", fontSize = 11.sp, color = Color(0xFF737972))
-                        Text("Week 2", fontSize = 11.sp, color = Color(0xFF737972))
-                        Text("Week 3", fontSize = 11.sp, color = Color(0xFF737972))
-                        Text("Today", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
                     }
                 }
             }
@@ -363,11 +377,21 @@ fun FoodJournalScreen(state: NirogState) {
     var customMealInput by remember { mutableStateOf("") }
     var selectedMealCategory by remember { mutableStateOf("Breakfast") }
 
-    val loggedMeals = remember {
-        mutableStateListOf(
-            Triple("Breakfast", "2 Oats Roti + Dal Sabzi", "8.2 Impact (Stable)"),
-            Triple("Lunch", "1 Salad Cup + Brown Rice", "9.1 Impact (Stable)")
-        )
+    val loggedMeals = remember { mutableStateListOf<Triple<String, String, String>>() }
+
+    DisposableEffect(Unit) {
+        val subscription = state.repository.listenUserCollection("mealLogs", 30) { result ->
+            if (result is com.nirogbhumi.app.data.CloudResult.Success) {
+                val synced = result.value.mapNotNull { doc ->
+                    val desc = doc.values["description"] as? String ?: return@mapNotNull null
+                    val category = doc.values["category"] as? String ?: "Meal"
+                    Triple(category, desc, "Logged")
+                }
+                loggedMeals.clear()
+                loggedMeals.addAll(synced)
+            }
+        }
+        onDispose { subscription.cancel() }
     }
 
     Column(
@@ -411,6 +435,13 @@ fun FoodJournalScreen(state: NirogState) {
             )
 
             // Timeline rows representation
+            if (loggedMeals.isEmpty()) {
+                Text(
+                    "No meals logged yet. Add your first one below.",
+                    fontSize = 13.sp,
+                    color = Color(0xFF697169)
+                )
+            }
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 loggedMeals.forEach { (cat, desc, impact) ->
                     Card(
@@ -502,8 +533,17 @@ fun FoodJournalScreen(state: NirogState) {
                     Button(
                         onClick = {
                             if (customMealInput.isNotEmpty()) {
-                                loggedMeals.add(Triple(selectedMealCategory, customMealInput, "8.0 Impact (Stable)"))
+                                val entry = customMealInput
+                                loggedMeals.add(0, Triple(selectedMealCategory, entry, "Logged"))
                                 customMealInput = ""
+                                state.repository.addHealthLog(
+                                    "mealLogs",
+                                    mapOf(
+                                        "category" to selectedMealCategory,
+                                        "description" to entry,
+                                        "measuredAt" to com.google.firebase.firestore.FieldValue.serverTimestamp()
+                                    )
+                                ) { result -> if (result is com.nirogbhumi.app.data.CloudResult.Failure) state.cloudMessage = result.message }
                             }
                         },
                         modifier = Modifier
@@ -737,8 +777,9 @@ fun BookConsultationStepper(state: NirogState) {
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF314936)),
                 shape = RoundedCornerShape(27.dp)
             ) {
+                val consultPrice = if (state.selectedConsultType == "naturopathy") "₹650" else "₹499"
                 Text(
-                    text = if (state.consultStep == 1) "Confirm Service" else if (state.consultStep == 2) "Confirm Details & Pay (₹499)" else "Back to Hub",
+                    text = if (state.consultStep == 1) "Confirm Service" else if (state.consultStep == 2) "Confirm Details & Pay ($consultPrice)" else "Back to Hub",
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold
                 )
@@ -825,7 +866,8 @@ fun ActiveJourneyScreen(state: NirogState) {
                 fontSize = 20.sp,
                 color = Color(0xFF1B3221)
             )
-            IconButton(onClick = { }) { Icon(Icons.Filled.MoreVert, "More Options", tint = Color(0xFF1B3221)) }
+            // Balances the back button so the title stays centered - not a tappable control (no menu action exists yet)
+            Spacer(modifier = Modifier.size(48.dp))
         }
 
         Column(
@@ -965,44 +1007,30 @@ fun InsightDetailScreen(state: NirogState) {
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Text("Sleep affects Fasting Sugar levels", fontSize = 22.sp, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+            Text("How sleep can affect fasting sugar", fontSize = 22.sp, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
 
             Text(
-                "Analysis of your sleep records versus mornings where your glucose reading spikes indicates strong alignment. Deprived sleeping patterns (less than 6 hours) increases systemic cortisol levels which drives morning fasting sugar upward.",
+                "This is general guidance, not an analysis of your specific data yet: short sleep (under 6 hours) is commonly linked to higher morning cortisol, which can push fasting glucose up. Keep logging both sleep and sugar readings - once you have enough of both, we'll show your own personal comparison here instead of general guidance.",
                 fontSize = 14.sp,
                 color = Color(0xFF434842),
                 lineHeight = 20.sp
             )
 
-            // Correlation Bars
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.35f), shape = RoundedCornerShape(20.dp)),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                shape = RoundedCornerShape(20.dp)
-            ) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    Column {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("When Sleep is < 6 Hours", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = Color(0xFF141E15))
-                            Text("112 mg/dL Avg", fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFFBA1A1A))
-                        }
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Box(modifier = Modifier.fillMaxWidth().height(12.dp).background(Color(0xFFF8F6EF), RoundedCornerShape(6.dp))) {
-                            Box(modifier = Modifier.fillMaxWidth(0.85f).height(12.dp).background(Color(0xFFBA1A1A), RoundedCornerShape(6.dp)))
-                        }
-                    }
-
-                    Column {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("When Sleep is > 7 Hours", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = Color(0xFF141E15))
-                            Text("94 mg/dL Avg", fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFF426820))
-                        }
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Box(modifier = Modifier.fillMaxWidth().height(12.dp).background(Color(0xFFF8F6EF), RoundedCornerShape(6.dp))) {
-                            Box(modifier = Modifier.fillMaxWidth(0.55f).height(12.dp).background(Color(0xFF426820), RoundedCornerShape(6.dp)))
-                        }
+            if (state.sugarLogs.size < 5) {
+                Card(
+                    modifier = Modifier.fillMaxWidth().border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.35f), shape = RoundedCornerShape(20.dp)),
+                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    shape = RoundedCornerShape(20.dp)
+                ) {
+                    Column(modifier = Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Outlined.Insights, contentDescription = null, tint = Color(0xFF9CB79F), modifier = Modifier.size(28.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            "Not enough data yet for your personal comparison (${state.sugarLogs.size}/5 sugar readings logged).",
+                            fontSize = 13.sp,
+                            color = Color(0xFF737972),
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
                     }
                 }
             }
