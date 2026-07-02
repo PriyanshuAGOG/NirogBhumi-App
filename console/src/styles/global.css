@@ -1,0 +1,127 @@
+@import './tokens.css';
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--surface);
+  color: var(--ink-primary);
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  color: var(--ink-primary);
+  margin: 0;
+  line-height: 1.15;
+}
+
+button {
+  font-family: var(--font-body);
+  cursor: pointer;
+}
+
+input {
+  font-family: var(--font-body);
+}
+
+a {
+  color: inherit;
+}
+
+.overline {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--gold);
+  font-weight: 700;
+}
+
+/* ---- Buttons ---- */
+.btn {
+  border: none;
+  border-radius: var(--radius-pill);
+  font-weight: 700;
+  font-size: 13.5px;
+  padding: 10px 20px;
+  transition: transform 160ms ease-out, background 160ms ease-out, opacity 160ms ease-out;
+}
+.btn:active {
+  transform: translateY(1px);
+}
+.btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.btn-primary {
+  background: var(--gold);
+  color: var(--forest);
+}
+.btn-primary:hover:not(:disabled) {
+  background: #d49b37;
+}
+.btn-forest {
+  background: var(--forest);
+  color: var(--ink-on-accent);
+}
+.btn-forest:hover:not(:disabled) {
+  background: var(--forest-soft);
+}
+.btn-ghost {
+  background: var(--surface-sunken);
+  color: var(--ink-secondary);
+}
+.btn-ghost:hover:not(:disabled) {
+  background: #e7e2d5;
+}
+.btn-danger {
+  background: var(--terracotta);
+  color: var(--ink-on-accent);
+}
+.btn-danger:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+
+/* ---- Card ---- */
+.card {
+  background: var(--surface-card);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  padding: var(--space-6);
+}
+
+/* ---- Utility ---- */
+.stack {
+  display: flex;
+  flex-direction: column;
+}
+.row {
+  display: flex;
+  align-items: center;
+}
+.spin {
+  animation: spin 900ms linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
