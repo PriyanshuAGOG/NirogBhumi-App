@@ -23,12 +23,39 @@ function glucoseStatus(value: number, type: string) {
   return 'in_range';
 }
 
+function dayKeyIST(date = new Date()): string {
+  // en-CA formats as YYYY-MM-DD, which is exactly the sortable key we want.
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
+}
+
+// Batch Pulse (PRD v2, Care+): a PII-free "N of M checked in today" count for
+// the member's program. Deliberately does NOT expose which members checked
+// in - only an aggregate - via a functions-only marker subcollection that
+// dedupes a member logging multiple readings the same day into one count.
+async function recordBatchCheckin(uid: string) {
+  const user = await db.doc(`users/${uid}`).get();
+  if (!user.exists || user.get('programActive') !== true) return;
+  const programId = String(user.get('activeProgramId') ?? ''); if (!programId) return;
+  const day = dayKeyIST();
+  const statsRef = db.doc(`batchStats/${programId}_${day}`);
+  const markerRef = statsRef.collection('checkedInMembers').doc(uid);
+  if ((await markerRef.get()).exists) return; // already counted today
+  const memberCount = (await db.collection('programMembers').where('programId', '==', programId).count().get()).data().count;
+  await db.runTransaction(async tx => {
+    const marker = await tx.get(markerRef);
+    if (marker.exists) return;
+    tx.set(markerRef, { markedAt: FieldValue.serverTimestamp() });
+    tx.set(statsRef, { programId, dayKey: day, checkedInCount: FieldValue.increment(1), memberCount, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  });
+}
+
 export const onGlucoseReadingCreate = onDocumentCreated({ document: 'glucoseReadings/{readingId}', region }, async event => {
   const snap = event.data; if (!snap) return;
   const data = snap.data(); const value = Number(data.value); const status = glucoseStatus(value, String(data.readingType));
   await snap.ref.set({ status, categorizedAt: FieldValue.serverTimestamp() }, { merge: true });
   await db.doc(`users/${data.userId}`).set({ latestMetrics: { fastingSugar: value, glucoseStatus: status, glucoseUpdatedAt: FieldValue.serverTimestamp() }, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   if (status === 'critical') await db.collection('notifications').add({ userId: data.userId, profileId: data.profileId, title: 'Please review this reading', body: 'Repeat the measurement and contact your doctor promptly, especially if you feel unwell.', type: 'reminder', status: 'scheduled', scheduledFor: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp() });
+  await recordBatchCheckin(String(data.userId));
 });
 
 export const onBPReadingCreate = onDocumentCreated({ document: 'bpReadings/{readingId}', region }, async event => {
@@ -36,6 +63,7 @@ export const onBPReadingCreate = onDocumentCreated({ document: 'bpReadings/{read
   const critical = Number(d.systolic) >= 180 || Number(d.diastolic) >= 120;
   await snap.ref.set({ status: critical ? 'critical' : 'recorded', categorizedAt: FieldValue.serverTimestamp() }, { merge: true });
   if (critical) await db.collection('notifications').add({ userId: d.userId, profileId: d.profileId, title: 'Please review your BP reading', body: 'Repeat the measurement and seek urgent medical advice, especially if you feel unwell.', type: 'reminder', status: 'scheduled', scheduledFor: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp() });
+  await recordBatchCheckin(String(d.userId));
 });
 
 // Daily maintenance job. Runs once a day; on Mondays it also builds weekly
@@ -46,6 +74,27 @@ export const generateDailyContent = onSchedule({ schedule: '0 5 * * *', timeZone
   const day = new Date().toISOString().slice(0, 10); const batch = db.batch();
   users.docs.forEach(user => batch.set(db.doc(`dailyActions/${user.id}_${day}`), { userId: user.id, profileId: user.id, dateKey: day, title: 'Walk 15 minutes after dinner', reason: 'A short post-meal walk can support your health rhythm.', status: 'pending', createdAt: FieldValue.serverTimestamp() }, { merge: true }));
   await batch.commit();
+
+  // Batch Pulse collective goal: minutes walked together this month, per
+  // active program. Runs daily (not per-log) since a monthly total doesn't
+  // need intraday freshness, keeping this inside the existing job budget.
+  const programsSnap = await db.collection('programs').get();
+  const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
+  const monthStartTs = Timestamp.fromDate(monthStart);
+  const today = dayKeyIST();
+  for (const programDoc of programsSnap.docs) {
+    const programId = programDoc.id;
+    const membersSnap = await db.collection('programMembers').where('programId', '==', programId).get();
+    const uids = membersSnap.docs.map(m => String(m.get('uid') ?? '')).filter(Boolean);
+    if (!uids.length) continue;
+    let totalMinutes = 0;
+    for (let i = 0; i < uids.length; i += 30) {
+      const chunk = uids.slice(i, i + 30);
+      const walks = await db.collection('walkLogs').where('userId', 'in', chunk).where('createdAt', '>=', monthStartTs).get();
+      walks.docs.forEach(w => { totalMinutes += Number(w.get('minutes') ?? 0); });
+    }
+    await db.doc(`batchStats/${programId}_${today}`).set({ programId, dayKey: today, collectiveMinutes: Math.round(totalMinutes), memberCount: uids.length, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  }
 
   const weekdayIST = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', weekday: 'short' }).format(new Date());
   if (weekdayIST !== 'Mon') return;

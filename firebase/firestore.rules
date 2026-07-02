@@ -93,7 +93,12 @@ service cloud.firestore {
     // batch-level presence reaches members via batchStats, not this collection.
     match /programMembers/{id} {
       allow read: if staff() || (signedIn() && resource.data.uid == request.auth.uid);
-      allow create, update, delete: if staff();
+      // Self-enrollment: redeeming a program code writes the caller's own
+      // roster entry (id must be "{programId}_{uid}" so a member can never
+      // plant a doc claiming to be someone else or in a program they didn't
+      // redeem a code for).
+      allow create: if staff() || (signedIn() && request.resource.data.uid == request.auth.uid && id == request.resource.data.programId + '_' + request.auth.uid);
+      allow update, delete: if staff();
     }
     // Aggregated, PII-free batch counts written by Cloud Functions only. Members
     // read the stats for the program they're enrolled in (cooperative presence).

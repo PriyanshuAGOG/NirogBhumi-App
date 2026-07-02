@@ -41,6 +41,10 @@ interface HealthRepository {
     fun listenProgramChat(programId: String, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription
     fun sendProgramChatMessage(programId: String, text: String, senderName: String, done: (CloudResult<Unit>) -> Unit)
     fun reportChatMessage(messageId: String, programId: String, reportedText: String, reportedUserId: String, done: (CloudResult<Unit>) -> Unit)
+
+    // Batch Pulse: today's PII-free "N of M checked in" + collective walking
+    // minutes for the caller's program. Written only by Cloud Functions.
+    fun listenBatchPulse(programId: String, update: (CloudResult<CloudDocument?>) -> Unit): CloudSubscription
 }
 
 class FirebaseHealthRepository : HealthRepository {
@@ -166,9 +170,31 @@ class FirebaseHealthRepository : HealthRepository {
                     "programDurationDays" to durationDays,
                     "programStartedAt" to FieldValue.serverTimestamp()
                 )
-                database.collection("users").document(uid).set(enrollment, SetOptions.merge())
-                    .addOnSuccessListener { done(CloudResult.Success(enrollment)) }
-                    .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Enrollment could not be saved", it)) }
+                database.collection("users").document(uid).get()
+                    .addOnSuccessListener { userDoc ->
+                        val memberName = userDoc.getString("fullName")?.takeIf { it.isNotBlank() } ?: "Member"
+                        // Enrollment and the roster entry the coach console reads from
+                        // must land together, or the admin console shows a phantom
+                        // program with no members - a single batched commit keeps
+                        // them consistent even if one write would otherwise fail.
+                        val batch = database.batch()
+                        batch.set(database.collection("users").document(uid), enrollment, SetOptions.merge())
+                        batch.set(
+                            database.collection("programMembers").document("${programId}_$uid"),
+                            mapOf(
+                                "programId" to programId,
+                                "uid" to uid,
+                                "name" to memberName,
+                                "status" to "active",
+                                "joinedAt" to FieldValue.serverTimestamp()
+                            ),
+                            SetOptions.merge()
+                        )
+                        batch.commit()
+                            .addOnSuccessListener { done(CloudResult.Success(enrollment)) }
+                            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Enrollment could not be saved", it)) }
+                    }
+                    .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Could not read your profile", it)) }
             }
             .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Program code could not be verified", it)) }
     }
@@ -242,6 +268,21 @@ class FirebaseHealthRepository : HealthRepository {
             )
         ).addOnSuccessListener { done(CloudResult.Success(Unit)) }
             .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Report could not be submitted", it)) }
+    }
+
+    override fun listenBatchPulse(programId: String, update: (CloudResult<CloudDocument?>) -> Unit): CloudSubscription {
+        val database = db ?: run { update(CloudResult.Failure("Firebase is not configured")); return CloudSubscription {} }
+        // Doc id must match the Cloud Functions' Asia/Kolkata day bucket exactly,
+        // since that's what recordBatchCheckin() and the daily aggregation write to.
+        val dayKey = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).apply {
+            timeZone = java.util.TimeZone.getTimeZone("Asia/Kolkata")
+        }.format(java.util.Date())
+        val registration = database.collection("batchStats").document("${programId}_$dayKey")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) update(CloudResult.Failure(error.message ?: "Could not load batch pulse", error))
+                else update(CloudResult.Success(snapshot?.takeIf { it.exists() }?.let { CloudDocument(it.id, it.data.orEmpty()) }))
+            }
+        return CloudSubscription { registration.remove() }
     }
 
     override fun upsertUserRecord(collection: String, documentId: String, values: Map<String, Any?>, done: (CloudResult<Unit>) -> Unit) {

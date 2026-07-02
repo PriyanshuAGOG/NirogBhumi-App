@@ -26,8 +26,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.nirogbhumi.app.data.CloudResult
 import com.nirogbhumi.app.ui.NirogState
 import com.nirogbhumi.app.ui.SugarLog
+import com.nirogbhumi.app.ui.components.SectionLabel
+import com.nirogbhumi.app.ui.theme.NirogColor
+import com.nirogbhumi.app.ui.theme.NirogSpace
+import com.nirogbhumi.app.ui.theme.NirogType
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -1596,6 +1601,8 @@ fun CareTab(state: NirogState) {
                 }
             }
 
+            BatchPulseCard(state)
+
             CareRow(Icons.Outlined.Checklist, "Today's Checklist", "Your daily program actions") { state.currentScreen = "active_journey" }
             CareRow(Icons.Outlined.CalendarMonth, "Program Calendar", "See your full program timeline") { state.currentScreen = "program_calendar" }
             CareRow(Icons.Outlined.Campaign, "Announcements", "Updates from the Nirog Bhumi team") { state.currentScreen = "announcements" }
@@ -1603,6 +1610,76 @@ fun CareTab(state: NirogState) {
         }
 
         Spacer(modifier = Modifier.height(32.dp))
+    }
+}
+
+/**
+ * Batch Pulse (PRD v2, Care+): cooperative presence + a collective goal -
+ * deliberately never a per-member ranking. Reads a Function-aggregated,
+ * PII-free document; shows an honest "be the first" state at zero rather
+ * than fabricating activity.
+ */
+@Composable
+private fun BatchPulseCard(state: NirogState) {
+    var pulse by remember { mutableStateOf<Map<String, Any?>?>(null) }
+    var loaded by remember { mutableStateOf(false) }
+
+    DisposableEffect(state.activeProgramId) {
+        if (state.activeProgramId.isBlank()) {
+            loaded = true
+            return@DisposableEffect onDispose {}
+        }
+        val sub = state.repository.listenBatchPulse(state.activeProgramId) { result ->
+            if (result is CloudResult.Success) pulse = result.value?.values
+            loaded = true
+        }
+        onDispose { sub.cancel() }
+    }
+
+    if (!loaded) return
+    val checkedIn = (pulse?.get("checkedInCount") as? Number)?.toInt() ?: 0
+    val memberCount = (pulse?.get("memberCount") as? Number)?.toInt() ?: 0
+    val collectiveMinutes = (pulse?.get("collectiveMinutes") as? Number)?.toInt() ?: 0
+
+    Card(
+        modifier = Modifier.fillMaxWidth().border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.3f), shape = RoundedCornerShape(24.dp)),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        shape = RoundedCornerShape(24.dp)
+    ) {
+        Column(Modifier.padding(NirogSpace.xl)) {
+            SectionLabel("Batch pulse")
+            Spacer(Modifier.height(NirogSpace.sm))
+            if (memberCount == 0) {
+                Text(
+                    "Be the first in your batch to check in today.",
+                    style = NirogType.body,
+                    color = NirogColor.inkSecondary,
+                )
+            } else {
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text("$checkedIn", style = NirogType.display, color = NirogColor.forest)
+                    Text("/$memberCount", style = NirogType.cardTitle, color = NirogColor.inkMuted)
+                }
+                Text(
+                    "batchmates checked in today" + if (checkedIn > 0) " - you're one of them" else "",
+                    style = NirogType.caption,
+                    color = NirogColor.inkMuted,
+                )
+            }
+            if (collectiveMinutes > 0) {
+                Spacer(Modifier.height(NirogSpace.md))
+                Text(
+                    "Batch goal: walk together this month",
+                    style = NirogType.secondary,
+                    color = NirogColor.inkSecondary,
+                )
+                Text(
+                    "$collectiveMinutes minutes walked as a batch so far - no rankings, just the team total.",
+                    style = NirogType.caption,
+                    color = NirogColor.inkMuted,
+                )
+            }
+        }
     }
 }
 
