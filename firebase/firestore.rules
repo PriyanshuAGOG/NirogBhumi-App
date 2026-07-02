@@ -6,6 +6,11 @@ service cloud.firestore {
     function role(name) { return signedIn() && (request.auth.token.role == name || ('roles' in request.auth.token && request.auth.token.roles is list && name in request.auth.token.roles)); }
     function admin() { return role('admin') || role('super_admin'); }
     function expert() { return role('expert'); }
+    function coach() { return role('coach'); }
+    // Program-management staff: admins and coaches. Fine-grained per-batch coach
+    // scoping (a coach only manages their assigned program) is a later refinement;
+    // for now any staff member can manage program content via the console.
+    function staff() { return admin() || coach(); }
     function assigned(uid) { return expert() && exists(/databases/$(database)/documents/expertAssignments/$(request.auth.uid + '_' + uid)); }
     function ownsResource() { return owner(resource.data.userId); }
     function ownsRequest() { return owner(request.resource.data.userId); }
@@ -51,8 +56,8 @@ service cloud.firestore {
     match /contentItems/{id} { allow read: if resource.data.status == 'published' || admin(); allow write: if admin() || role('content_manager'); }
     match /programs/{id} { allow read: if signedIn(); allow write: if admin(); }
     match /announcements/{id} {
-      allow read: if programMember();
-      allow create: if admin() && request.resource.data.authorId == request.auth.uid && request.resource.data.createdAt == request.time;
+      allow read: if programMember() || staff();
+      allow create: if staff() && request.resource.data.authorId == request.auth.uid && request.resource.data.createdAt == request.time;
     }
     match /programChatMessages/{id} {
       allow read: if programMember() && ownProgram(resource.data.programId);
@@ -75,6 +80,37 @@ service cloud.firestore {
       allow create: if validCreate() && request.resource.data.status == 'open';
       allow read: if ownsResource() || admin();
       allow update: if admin();
+    }
+    // Care+ program calendar. Members read events for the program they're
+    // enrolled in; only staff (admin/coach) create or edit them.
+    match /programEvents/{id} {
+      allow read: if staff() || ownProgram(resource.data.programId);
+      allow create: if staff() && request.resource.data.createdBy == request.auth.uid;
+      allow update, delete: if staff();
+    }
+    // Batch roster. A member may read only their own membership doc (the
+    // roster itself is staff-only, so member names never leak between members);
+    // batch-level presence reaches members via batchStats, not this collection.
+    match /programMembers/{id} {
+      allow read: if staff() || (signedIn() && resource.data.uid == request.auth.uid);
+      allow create, update, delete: if staff();
+    }
+    // Aggregated, PII-free batch counts written by Cloud Functions only. Members
+    // read the stats for the program they're enrolled in (cooperative presence).
+    match /batchStats/{id} {
+      allow read: if staff() || ownProgram(resource.data.programId);
+      allow write: if false;
+    }
+    // Program access codes - sensitive, staff-managed only.
+    match /programCodes/{id} {
+      allow read, write: if staff();
+    }
+    // Private coach-to-member notes. The recipient may read their own; only
+    // staff can send.
+    match /coachMessages/{id} {
+      allow read: if staff() || (signedIn() && resource.data.toUid == request.auth.uid);
+      allow create: if staff() && request.resource.data.fromUid == request.auth.uid;
+      allow update, delete: if staff();
     }
     match /{document=**} { allow read, write: if false; }
   }

@@ -115,6 +115,22 @@ export const queueDeletionRequest = onDocumentCreated({ document: 'deletionReque
   await event.data?.ref.set({ status: 'awaiting_verification', updatedAt: FieldValue.serverTimestamp() }, { merge: true });
 });
 
+// Sets a user's role custom claim (used by the admin console's Users page).
+// Only an admin/super_admin may call it; it updates both the Auth claim (the
+// enforcement source) and the mirrored users/{uid}.role field, and audits it.
+export const setUserRole = onCall({ region }, async request => {
+  const auth = requireUser(request);
+  if (auth.token.role !== 'admin' && auth.token.role !== 'super_admin') throw new HttpsError('permission-denied', 'Admin only');
+  const uid = String(request.data?.uid ?? '');
+  const role = String(request.data?.role ?? '');
+  if (!uid || !['user', 'coach', 'admin'].includes(role)) throw new HttpsError('invalid-argument', 'A uid and a valid role (user|coach|admin) are required');
+  if (uid === auth.uid && role !== 'admin') throw new HttpsError('failed-precondition', 'You cannot remove your own admin role');
+  await getAuth().setCustomUserClaims(uid, { role });
+  await db.doc(`users/${uid}`).set({ role, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  await db.collection('auditLogs').add({ actorId: auth.uid, actorRole: auth.token.role ?? 'admin', action: 'set_role', entityType: 'user', entityId: uid, metadata: { role }, createdAt: FieldValue.serverTimestamp() });
+  return { updated: true, uid, role };
+});
+
 export const processApprovedDeletions = onSchedule({ schedule: 'every 60 minutes', timeZone: 'Asia/Kolkata', region }, async () => {
   const requests = await db.collection('deletionRequests').where('status', '==', 'approved').limit(10).get();
   const ownedCollections = ['profiles','glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','labReports','dailyCheckins','dailyActions','weeklyReports','sugarStories','consultations','userPrograms','programPlans','checklistLogs','expertNotes','notifications','deviceConnections'];

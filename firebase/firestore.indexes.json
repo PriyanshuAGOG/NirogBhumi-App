@@ -5,7 +5,13 @@
     { "collectionGroup": "notifications", "queryScope": "COLLECTION", "fields": [{"fieldPath":"status","order":"ASCENDING"},{"fieldPath":"scheduledFor","order":"ASCENDING"}] },
     { "collectionGroup": "notifications", "queryScope": "COLLECTION", "fields": [{"fieldPath":"userId","order":"ASCENDING"},{"fieldPath":"status","order":"ASCENDING"},{"fieldPath":"sentAt","order":"ASCENDING"}] },
     { "collectionGroup": "orders", "queryScope": "COLLECTION", "fields": [{"fieldPath":"userId","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}] },
-    { "collectionGroup": "programChatMessages", "queryScope": "COLLECTION", "fields": [{"fieldPath":"programId","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}] }
+    { "collectionGroup": "programChatMessages", "queryScope": "COLLECTION", "fields": [{"fieldPath":"programId","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}] },
+    { "collectionGroup": "announcements", "queryScope": "COLLECTION", "fields": [{"fieldPath":"programId","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}] },
+    { "collectionGroup": "programEvents", "queryScope": "COLLECTION", "fields": [{"fieldPath":"programId","order":"ASCENDING"},{"fieldPath":"startsAt","order":"ASCENDING"}] },
+    { "collectionGroup": "programMembers", "queryScope": "COLLECTION", "fields": [{"fieldPath":"programId","order":"ASCENDING"},{"fieldPath":"joinedAt","order":"ASCENDING"}] },
+    { "collectionGroup": "coachMessages", "queryScope": "COLLECTION", "fields": [{"fieldPath":"toUid","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}] },
+    { "collectionGroup": "reportedMessages", "queryScope": "COLLECTION", "fields": [{"fieldPath":"status","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}] },
+    { "collectionGroup": "supportRequests", "queryScope": "COLLECTION", "fields": [{"fieldPath":"status","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}] }
   ],
   "fieldOverrides": []
 }
