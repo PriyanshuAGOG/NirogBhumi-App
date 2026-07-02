@@ -1,6 +1,7 @@
 import { initializeApp, type FirebaseApp } from 'firebase/app'
 import { getAuth, type Auth } from 'firebase/auth'
 import { getFirestore, type Firestore } from 'firebase/firestore'
+import { getFunctions, type Functions } from 'firebase/functions'
 
 /**
  * Firebase config is read from Vite env vars (VITE_FIREBASE_*). Copy
@@ -27,3 +28,6 @@ if (!firebaseConfig.apiKey || !firebaseConfig.appId) {
 export const app: FirebaseApp = initializeApp(firebaseConfig)
 export const auth: Auth = getAuth(app)
 export const db: Firestore = getFirestore(app)
+// Callable Cloud Functions live in the same region as the rest of the project
+// (asia-south1). Used e.g. for the super-admin `setUserRole` callable.
+export const functions: Functions = getFunctions(app, 'asia-south1')

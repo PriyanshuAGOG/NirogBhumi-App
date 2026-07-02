@@ -1,0 +1,47 @@
+.composer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.composer-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: var(--space-1);
+}
+
+.ann-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.ann-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.ann-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.ann-title {
+  font-size: 19px;
+}
+.ann-time {
+  font-size: 12.5px;
+  color: var(--ink-muted);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.ann-body {
+  margin: 0;
+  color: var(--ink-secondary);
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+.ann-author {
+  font-size: 12.5px;
+  color: var(--ink-muted);
+  font-weight: 600;
+}

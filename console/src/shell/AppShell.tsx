@@ -6,15 +6,21 @@ interface NavItem {
   to: string
   label: string
   icon: string
+  /** If set, only these roles see the item. Otherwise all staff do. */
+  adminOnly?: boolean
 }
 
 const NAV: NavItem[] = [
+  { to: '/dashboard', label: 'Overview', icon: '🏠' },
   { to: '/moderation', label: 'Moderation', icon: '🛡️' },
   { to: '/batches', label: 'Batches', icon: '👥' },
   { to: '/announcements', label: 'Announcements', icon: '📣' },
   { to: '/calendar', label: 'Calendar', icon: '🗓️' },
   { to: '/programs', label: 'Programs', icon: '🌱' },
-  { to: '/content', label: 'Content', icon: '📚' },
+  { to: '/content', label: 'Content', icon: '📚', adminOnly: true },
+  { to: '/consultations', label: 'Consultations', icon: '🩺' },
+  { to: '/support', label: 'Support', icon: '💬' },
+  { to: '/users', label: 'Users & Roles', icon: '🧑‍🤝‍🧑', adminOnly: true },
   { to: '/settings', label: 'Settings', icon: '⚙️' },
 ]
 
@@ -33,6 +39,8 @@ function roleLabel(role: string | null): string {
 
 export default function AppShell() {
   const { user, role, signOut } = useAuth()
+  const isAdmin = role === 'admin' || role === 'super_admin'
+  const nav = NAV.filter((item) => !item.adminOnly || isAdmin)
 
   return (
     <div className="shell">
@@ -43,7 +51,7 @@ export default function AppShell() {
         </div>
 
         <nav className="sidebar-nav">
-          {NAV.map((item) => (
+          {nav.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}

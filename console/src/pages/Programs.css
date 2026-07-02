@@ -1,0 +1,62 @@
+.section-h {
+  font-size: 20px;
+}
+
+.prog-list,
+.code-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.prog-row,
+.code-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-6);
+}
+.prog-main,
+.code-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.prog-name {
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--ink-primary);
+}
+.prog-sub,
+.code-sub {
+  font-size: 12.5px;
+  color: var(--ink-muted);
+}
+.prog-meta,
+.code-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.prog-members {
+  font-size: 12.5px;
+  color: var(--ink-secondary);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.code-text {
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--ink-primary);
+}
+
+.prog-modal {
+  max-width: 520px;
+  max-height: 88vh;
+  overflow-y: auto;
+}
