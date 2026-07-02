@@ -106,7 +106,7 @@ fun BodyReportScreen(state: NirogState) {
       title = "Health File updated",
       subtitle = "Always ready to show any doctor",
       trailing = "Open",
-      onClick = { state.currentScreen = "dashboard" },
+      onClick = { state.currentScreen = "health_file" },
     )
 
     Spacer(Modifier.size(NirogSpace.md))

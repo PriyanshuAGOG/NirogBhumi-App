@@ -296,6 +296,7 @@ fun ActiveScreenContent(state: NirogState) {
       "daily_checkin" -> DailyCheckInScreen(state)
       "body_report" -> BodyReportScreen(state)
       "rhythm" -> RhythmScreen(state)
+      "health_file" -> HealthFileScreen(state)
       "bp_overview" -> BpOverviewScreen(state)
       "sleep_overview" -> SleepOverviewScreen(state)
       "walking_overview" -> WalkingActivityScreen(state)

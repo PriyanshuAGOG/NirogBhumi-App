@@ -727,6 +727,33 @@ fun TodayTab(state: NirogState) {
                 }
             }
         }
+
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { state.currentScreen = "health_file" }
+                .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.3f), shape = RoundedCornerShape(24.dp)),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            shape = RoundedCornerShape(24.dp)
+        ) {
+            Row(
+                modifier = Modifier.padding(16.dp).fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier.size(36.dp).clip(RoundedCornerShape(12.dp)).background(Color(0xFFEBF7E8)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Filled.Description, "Health File", tint = Color(0xFF1B3221), modifier = Modifier.size(18.dp))
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Health File", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B2219))
+                    Text("Always ready to show any doctor", fontSize = 11.5.sp, color = Color(0xFF8B9285))
+                }
+                Text("Open", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+            }
+        }
         Spacer(modifier = Modifier.height(24.dp))
     }
 }
