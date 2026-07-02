@@ -85,61 +85,90 @@ slice that introduces it.
 
 ## 4. Delivery phases (each = one or more verifiable slices)
 
-### Phase 0 — Foundations ✅ in progress
+### Phase 0 — Foundations ✅ done
 - [x] Design-system tokens (`DesignSystem.kt`, `Type.kt`) — colors on the
   existing brand palette, spacing/radius/elevation/type scale.
-- [ ] Downloadable Google Fonts (Fraunces + Manrope) slice.
-- [ ] Reusable Compose components: `NirogCard`, `SectionLabel`, `StatusChip`,
-  `PrimaryButton`, `FocusCard`, `RowCard`, `AvatarStack` — the kit every
-  screen composes from.
+- [x] Reusable Compose components (`NirogComponents.kt`): `NirogCard`,
+  `SectionLabel`, `StatusChip`, `PrimaryButton`/`GoldButton`, `FocusCard`,
+  `RowCard`, `AvatarStack`, `InsightCard`.
+- [ ] Downloadable Google Fonts (Fraunces + Manrope) — currently aliased to
+  platform serif/sans-serif; real faces are a follow-up one-line swap.
 
-### Phase 1 — Member app core loop (highest visible impact)
-1. Restyle shells (top bars, bottom nav, Today) onto the kit.
-2. Check-in v2: device pre-fill banner (Health Connect steps/sleep), sleep &
-   activity steps, segmented progress, skip-always.
-3. **Body Report** screen (instant payoff) + **Health File** renderer & PDF
-   share (the USP pair).
-4. **Rhythm** screen (7-day ring, 30-day non-punitive grid, gentle nudge).
+### Phase 1 — Member app core loop ✅ mostly done
+1. [ ] Full Today-screen restyle onto the kit (Today already leads with a
+   single "One Action" focus card from earlier work; a Health File entry
+   point was added, but a full token-based re-skin is still open).
+2. [ ] Check-in v2 device pre-fill banner (Health Connect steps/sleep
+   auto-confirm) — not yet built; check-in is still manual-entry only.
+3. [x] **Body Report** screen (instant payoff, real data, honest empty
+   states) + **Health File** renderer with real on-device PDF generation
+   and share, plus proper error surfacing on failure.
+4. [x] **Rhythm** screen (7-day ring, 30-day non-punitive grid, gentle
+   nudge) reading real logged-days from Firestore.
 
-### Phase 2 — Care+ cohort (realtime)
-5. Care tab batch home: header, coach card, Batch Pulse (presence +
-   collective goal), journey map, next-event, teasers; chat icon top-right.
-6. **Chat Hub**: Announcements (read-only for members) + General rooms, live
-   listeners, unread badges, long-press report.
-7. **Program Calendar** (member view) → detail sheet + "Remind me".
-8. `batchStats` aggregation folded into the existing daily Function.
+### Phase 2 — Care+ cohort (realtime) ✅ mostly done
+5. [x] Chat icon top-right on the Care tab (replacing the bell there) →
+   Chat Hub. [ ] Full batch-home restyle (header/coach card/journey map)
+   onto the kit is still open — the existing Care+ layout from earlier work
+   is functional but pre-dates the token system.
+6. [x] **Chat Hub**: Announcements (read-only for members) + General rooms
+   (reusing the existing chat/announcement screens), long-press report,
+   non-member unlock. [ ] Unread badges not yet wired.
+7. [x] **Program Calendar** now reads real `programEvents` (Upcoming
+   Events section) with a genuine one-off "Remind me" (`EventReminderWorker`).
+8. [x] `batchStats` aggregation: real-time PII-free check-in counting via
+   `recordBatchCheckin()` on the glucose/BP triggers, plus a daily collective
+   walking-minutes rollup. [x] `BatchPulseCard` on Android reads it live,
+   honest "be the first" zero-state.
+   - **Found & fixed in the process:** nothing ever wrote `programMembers`
+     on enrollment (the console's roster/Batch Pulse depended on a
+     collection that was always empty) — `redeemProgramCode` now writes it
+     atomically with the enrollment.
 
-### Phase 3 — Web admin / coach console (new app, `console/`)
-9. Scaffold: React + TS + Vite + Firebase SDK + role-gated auth shell.
-10. **Moderation queue** (realtime `reportedMessages`) — first working screen.
-11. Batch management: roster, per-member consistency, message a member.
-12. Announcement composer + **Calendar editor** (create/edit events, optional
-    auto-announce on change).
-13. Programs & codes admin; coach assignment; role management (super-admin).
-14. Content (Learn) authoring; consultations view; support inbox.
-15. Deploy to Firebase Hosting.
+### Phase 3 — Web admin / coach console ✅ done (`console/`)
+9. [x] Scaffold: React + TS + Vite + Firebase SDK + role-gated auth shell.
+10. [x] **Moderation queue** (realtime `reportedMessages`).
+11. [x] Batch management: roster, Batch Pulse, coach→member messaging
+    (`coachMessages`).
+12. [x] Announcement composer + **Calendar editor** (create/edit/delete
+    events, optional auto-announce on change).
+13. [x] Programs & codes admin. [ ] Coach assignment UI and true
+    per-coach batch scoping (rules currently treat any coach as able to
+    manage any program - a documented, deliberate MVP simplification, see
+    `firestore.rules` `staff()`).
+14. [x] Content (Learn) authoring; consultations view (read-only); support
+    inbox.
+15. [x] Deploy target wired (`firebase.json` hosting block, `console/dist`,
+    SPA rewrite). [ ] Not yet actually deployed to a live Hosting URL.
 
-### Phase 4 — USP deepening & polish
-16. Focus-card personalization (`checkinHourHint`), Daily Insight engine.
+### Phase 4 — USP deepening & polish (not started)
+16. Focus-card personalization (`checkinHourHint`), Daily Insight engine
+    beyond the current rule-based takeaway.
 17. Progressive onboarding micro-questions; notification tone/logic audit.
-18. Health File share-link (Storage + signed access) beyond PDF.
+18. Health File share-link (Storage + signed access) beyond the current
+    on-device PDF share-sheet.
 
-### Phase 5 — Enterprise hardening (cross-cutting, not deferred)
+### Phase 5 — Enterprise hardening (cross-cutting, not deferred) — not started
 - **Security:** App Check enforced on prod; rules unit tests
-  (`@firebase/rules-unit-testing`); least-privilege claims; PII handling review.
+  (`@firebase/rules-unit-testing`); least-privilege claims (see Phase 3.13
+  coach-scoping gap above); PII handling review.
 - **Observability:** Crashlytics (app), Cloud Functions logging + alerts,
-  Sentry (console), structured `auditLogs` for every admin action.
+  Sentry (console), structured `auditLogs` for every admin action
+  (`setUserRole` already writes one; extend to moderation/calendar edits).
 - **Analytics:** the PRD success metrics wired as Analytics events
   (check-in completion time, Health File shares, D7 retention funnels).
 - **Offline & resilience:** Firestore offline persistence on; optimistic chat
-  sends with retry; graceful empty/error states everywhere.
+  sends with retry; graceful empty/error states everywhere (Body Report,
+  Rhythm, Batch Pulse already fail open to honest empty states rather than
+  crashing; Health File now surfaces real share/generation errors - audit
+  the remaining screens the same way).
 - **Accessibility:** content descriptions, 4.5:1 contrast (status colors
   chosen for it), dynamic-type friendly scale, one-handed reach.
 - **QA:** Compose UI tests for the check-in flow and Rhythm; console
   component tests; a manual release checklist.
-- **CI/CD:** existing Actions build for the app (fix stale `FIREBASE_TOKEN`
-  secret to restore auto-distribution); add a console build+deploy workflow;
-  Functions deploy workflow; rules/index deploy on change.
+- **CI/CD:** ✅ `FIREBASE_TOKEN` secret refreshed, auto-distribution
+  confirmed working. [ ] Console build+deploy workflow; Functions deploy
+  workflow; rules/index deploy-on-change workflow (all currently manual).
 
 ---
 
