@@ -31,16 +31,25 @@ interface HealthRepository {
     fun requestAccountDeletion(done: (CloudResult<Unit>) -> Unit)
     fun createPaymentOrder(kind: String, entityId: String, done: (CloudResult<Map<String, Any?>>) -> Unit)
     fun upsertUserRecord(collection: String, documentId: String, values: Map<String, Any?>, done: (CloudResult<Unit>) -> Unit = {})
+    fun deleteUserRecord(collection: String, documentId: String, done: (CloudResult<Unit>) -> Unit)
     fun getPrivateDownloadUrl(storagePath: String, done: (CloudResult<String>) -> Unit)
     fun redeemProgramCode(code: String, done: (CloudResult<Map<String, Any?>>) -> Unit)
 
     // Care+ (program members only): one shared announcement feed, plus one chat room
     // per program so members only see conversation relevant to the program they joined.
-    fun listenAnnouncements(update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription
-    fun postAnnouncement(title: String, body: String, done: (CloudResult<Unit>) -> Unit)
+    fun listenAnnouncements(programId: String, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription
+    fun postAnnouncement(programId: String, title: String, body: String, done: (CloudResult<Unit>) -> Unit)
     fun listenProgramChat(programId: String, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription
     fun sendProgramChatMessage(programId: String, text: String, senderName: String, done: (CloudResult<Unit>) -> Unit)
     fun reportChatMessage(messageId: String, programId: String, reportedText: String, reportedUserId: String, done: (CloudResult<Unit>) -> Unit)
+
+    // Batch Pulse: today's PII-free "N of M checked in" + collective walking
+    // minutes for the caller's program. Written only by Cloud Functions.
+    fun listenBatchPulse(programId: String, update: (CloudResult<CloudDocument?>) -> Unit): CloudSubscription
+
+    // Program calendar events (created/edited by staff in the admin console).
+    // Members only ever read these - editing is console-only, per the PRD.
+    fun listenProgramEvents(programId: String, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription
 }
 
 class FirebaseHealthRepository : HealthRepository {
@@ -166,16 +175,41 @@ class FirebaseHealthRepository : HealthRepository {
                     "programDurationDays" to durationDays,
                     "programStartedAt" to FieldValue.serverTimestamp()
                 )
-                database.collection("users").document(uid).set(enrollment, SetOptions.merge())
-                    .addOnSuccessListener { done(CloudResult.Success(enrollment)) }
-                    .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Enrollment could not be saved", it)) }
+                database.collection("users").document(uid).get()
+                    .addOnSuccessListener { userDoc ->
+                        val memberName = userDoc.getString("fullName")?.takeIf { it.isNotBlank() } ?: "Member"
+                        // Enrollment and the roster entry the coach console reads from
+                        // must land together, or the admin console shows a phantom
+                        // program with no members - a single batched commit keeps
+                        // them consistent even if one write would otherwise fail.
+                        val batch = database.batch()
+                        batch.set(database.collection("users").document(uid), enrollment, SetOptions.merge())
+                        batch.set(
+                            database.collection("programMembers").document("${programId}_$uid"),
+                            mapOf(
+                                "programId" to programId,
+                                "uid" to uid,
+                                "name" to memberName,
+                                "status" to "active",
+                                "joinedAt" to FieldValue.serverTimestamp()
+                            ),
+                            SetOptions.merge()
+                        )
+                        batch.commit()
+                            .addOnSuccessListener { done(CloudResult.Success(enrollment)) }
+                            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Enrollment could not be saved", it)) }
+                    }
+                    .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Could not read your profile", it)) }
             }
             .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Program code could not be verified", it)) }
     }
 
-    override fun listenAnnouncements(update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription {
+    override fun listenAnnouncements(programId: String, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription {
         val database = db ?: run { update(CloudResult.Failure("Firebase is not configured")); return CloudSubscription {} }
+        // Scoped to the caller's own program - without this filter, members of
+        // different programs would see each other's announcements mixed together.
         val registration = database.collection("announcements")
+            .whereEqualTo("programId", programId)
             .orderBy("createdAt", com.google.firebase.firestore.Query.Direction.DESCENDING)
             .limit(50)
             .addSnapshotListener { snapshot, error ->
@@ -185,11 +219,12 @@ class FirebaseHealthRepository : HealthRepository {
         return CloudSubscription { registration.remove() }
     }
 
-    override fun postAnnouncement(title: String, body: String, done: (CloudResult<Unit>) -> Unit) {
+    override fun postAnnouncement(programId: String, title: String, body: String, done: (CloudResult<Unit>) -> Unit) {
         val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
         val database = db ?: return done(CloudResult.Failure("Firebase is not configured"))
         database.collection("announcements").add(
             mapOf(
+                "programId" to programId,
                 "title" to title,
                 "body" to body,
                 "authorId" to uid,
@@ -244,13 +279,56 @@ class FirebaseHealthRepository : HealthRepository {
             .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Report could not be submitted", it)) }
     }
 
+    override fun listenBatchPulse(programId: String, update: (CloudResult<CloudDocument?>) -> Unit): CloudSubscription {
+        val database = db ?: run { update(CloudResult.Failure("Firebase is not configured")); return CloudSubscription {} }
+        // Doc id must match the Cloud Functions' Asia/Kolkata day bucket exactly,
+        // since that's what recordBatchCheckin() and the daily aggregation write to.
+        val dayKey = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).apply {
+            timeZone = java.util.TimeZone.getTimeZone("Asia/Kolkata")
+        }.format(java.util.Date())
+        val registration = database.collection("batchStats").document("${programId}_$dayKey")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) update(CloudResult.Failure(error.message ?: "Could not load batch pulse", error))
+                else update(CloudResult.Success(snapshot?.takeIf { it.exists() }?.let { CloudDocument(it.id, it.data.orEmpty()) }))
+            }
+        return CloudSubscription { registration.remove() }
+    }
+
+    override fun listenProgramEvents(programId: String, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription {
+        val database = db ?: run { update(CloudResult.Failure("Firebase is not configured")); return CloudSubscription {} }
+        val registration = database.collection("programEvents")
+            .whereEqualTo("programId", programId)
+            .orderBy("startsAt", com.google.firebase.firestore.Query.Direction.ASCENDING)
+            .limit(50)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) update(CloudResult.Failure(error.message ?: "Could not load the program calendar", error))
+                else update(CloudResult.Success(snapshot?.documents.orEmpty().map { CloudDocument(it.id, it.data.orEmpty()) }))
+            }
+        return CloudSubscription { registration.remove() }
+    }
+
     override fun upsertUserRecord(collection: String, documentId: String, values: Map<String, Any?>, done: (CloudResult<Unit>) -> Unit) {
-        val allowed = setOf("glucoseReadings", "bpReadings", "sleepLogs", "walkLogs", "weightLogs", "deviceConnections")
+        val allowed = setOf("glucoseReadings", "bpReadings", "sleepLogs", "walkLogs", "weightLogs", "deviceConnections", "checklistLogs")
         if (collection !in allowed) return done(CloudResult.Failure("Unsupported synced record"))
         val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
         val normalizedId = documentId.replace(Regex("[^A-Za-z0-9_-]"), "_").take(120)
-        val safeId = if (collection == "deviceConnections") "${uid}_$normalizedId" else normalizedId
+        // Always uid-prefixed: the id is otherwise just a caller-chosen string
+        // (e.g. a stable per-day key), and without this prefix two different
+        // users' upserts with the same id would silently overwrite each other
+        // in the same document, since Firestore document ids aren't implicitly
+        // scoped per user the way the userId field is.
+        val safeId = "${uid}_$normalizedId"
         db?.collection(collection)?.document(safeId)?.set(values + mapOf("userId" to uid, "profileId" to (values["profileId"] ?: uid), "createdAt" to FieldValue.serverTimestamp(), "updatedAt" to FieldValue.serverTimestamp()), SetOptions.merge())
+            ?.addOnSuccessListener { done(CloudResult.Success(Unit)) }
+            ?.addOnFailureListener { done(CloudResult.Failure(it.message ?: "Synced record could not be saved", it)) }
+            ?: done(CloudResult.Failure("Firebase is not configured"))
+    }
+
+    override fun deleteUserRecord(collection: String, documentId: String, done: (CloudResult<Unit>) -> Unit) {
+        val allowed = setOf("profiles", "labReports", "walkLogs")
+        if (collection !in allowed) return done(CloudResult.Failure("Unsupported record"))
+        if (userId == null) return done(CloudResult.Failure("Sign in is required"))
+        db?.collection(collection)?.document(documentId)?.delete()
             ?.addOnSuccessListener { done(CloudResult.Success(Unit)) }
             ?.addOnFailureListener { done(CloudResult.Failure(it.message ?: "Synced record could not be saved", it)) }
             ?: done(CloudResult.Failure("Firebase is not configured"))

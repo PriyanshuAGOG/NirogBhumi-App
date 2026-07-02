@@ -1,0 +1,37 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.page-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.page-head h1 {
+  font-size: 30px;
+}
+
+.placeholder-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-items: flex-start;
+  background: var(--surface-card);
+}
+
+.placeholder-lede {
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 600;
+  margin: 0;
+  color: var(--ink-primary);
+}
+
+.placeholder-sub {
+  margin: 0;
+  color: var(--ink-secondary);
+  max-width: 46ch;
+}

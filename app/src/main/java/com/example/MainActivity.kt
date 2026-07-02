@@ -61,7 +61,13 @@ class MainActivity : ComponentActivity(), com.razorpay.PaymentResultListener {
         val state = nirogState
 
         Scaffold(
-          modifier = Modifier.fillMaxSize()
+          modifier = Modifier.fillMaxSize(),
+          // This shell has no topBar/bottomBar of its own - every real screen underneath
+          // (MainHub's Scaffold + bottom nav bar, CatalogScreen's Scaffold, etc.) already
+          // reserves status/navigation-bar insets itself. Letting this outer Scaffold also
+          // default to WindowInsets.safeDrawing double-reserves the bottom inset, which is
+          // what was pushing the bottom nav bar up and leaving an empty gap beneath it.
+          contentWindowInsets = WindowInsets(0, 0, 0, 0)
         ) { innerPadding ->
           Column(
             modifier = Modifier
@@ -288,16 +294,25 @@ fun ActiveScreenContent(state: NirogState) {
       "orders" -> OrdersScreen(state)
       "articles" -> ArticlesScreen(state)
       "daily_checkin" -> DailyCheckInScreen(state)
+      "body_report" -> BodyReportScreen(state)
+      "rhythm" -> RhythmScreen(state)
+      "health_file" -> HealthFileScreen(state)
       "bp_overview" -> BpOverviewScreen(state)
       "sleep_overview" -> SleepOverviewScreen(state)
       "walking_overview" -> WalkingActivityScreen(state)
       "program_calendar" -> ProgramCalendarScreen(state)
       "announcements" -> AnnouncementsScreen(state)
       "program_chat" -> ProgramChatScreen(state)
+      "chat_hub" -> ChatHubScreen(state)
 
       // Metrics Detailed screens
       "sugar_detail" -> BloodSugarDetailScreen(state)
       "coming_soon" -> ComingSoonScreen(state)
+      "lab_reports" -> LabReportsScreen(state)
+      "family_member_detail" -> FamilyMemberDetailScreen(state)
+      "data_controls" -> DataControlsScreen(state)
+      "privacy_consent" -> PrivacyConsentScreen(state)
+      "support" -> SupportScreen(state)
       "consult_stepper" -> BookConsultationStepper(state)
       "active_journey" -> ActiveJourneyScreen(state)
       "insight_detail" -> InsightDetailScreen(state)

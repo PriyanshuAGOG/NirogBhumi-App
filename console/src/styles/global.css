@@ -1,0 +1,336 @@
+@import './tokens.css';
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--surface);
+  color: var(--ink-primary);
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  color: var(--ink-primary);
+  margin: 0;
+  line-height: 1.15;
+}
+
+button {
+  font-family: var(--font-body);
+  cursor: pointer;
+}
+
+input {
+  font-family: var(--font-body);
+}
+
+a {
+  color: inherit;
+}
+
+.overline {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--gold);
+  font-weight: 700;
+}
+
+/* ---- Buttons ---- */
+.btn {
+  border: none;
+  border-radius: var(--radius-pill);
+  font-weight: 700;
+  font-size: 13.5px;
+  padding: 10px 20px;
+  transition: transform 160ms ease-out, background 160ms ease-out, opacity 160ms ease-out;
+}
+.btn:active {
+  transform: translateY(1px);
+}
+.btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.btn-primary {
+  background: var(--gold);
+  color: var(--forest);
+}
+.btn-primary:hover:not(:disabled) {
+  background: #d49b37;
+}
+.btn-forest {
+  background: var(--forest);
+  color: var(--ink-on-accent);
+}
+.btn-forest:hover:not(:disabled) {
+  background: var(--forest-soft);
+}
+.btn-ghost {
+  background: var(--surface-sunken);
+  color: var(--ink-secondary);
+}
+.btn-ghost:hover:not(:disabled) {
+  background: #e7e2d5;
+}
+.btn-danger {
+  background: var(--terracotta);
+  color: var(--ink-on-accent);
+}
+.btn-danger:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+.btn-sm {
+  padding: 7px 14px;
+  font-size: 12.5px;
+}
+
+/* ---- Card ---- */
+.card {
+  background: var(--surface-card);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  padding: var(--space-6);
+}
+
+/* ---- Modal / dialog ---- */
+.modal-scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(27, 34, 25, 0.42);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6);
+  z-index: 50;
+}
+.modal {
+  box-shadow: var(--shadow-float);
+  width: 100%;
+  max-width: 440px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.modal-title {
+  font-size: 22px;
+}
+.modal-note {
+  margin: 0;
+  color: var(--ink-secondary);
+  font-size: 13px;
+}
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  padding-top: var(--space-1);
+}
+
+/* ---- Page scaffold (shared by every console page) ---- */
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+.page-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.page-head h1 {
+  font-size: 30px;
+}
+.page-lede {
+  margin: var(--space-1) 0 0;
+  color: var(--ink-secondary);
+  max-width: 62ch;
+}
+
+/* ---- Banners ---- */
+.banner {
+  border-radius: var(--radius-md);
+  padding: 12px 16px;
+  font-weight: 600;
+  font-size: 13.5px;
+}
+.banner-error {
+  background: #f7e3dd;
+  color: var(--status-critical);
+}
+.banner-info {
+  background: var(--surface-sunken);
+  color: var(--ink-secondary);
+}
+.banner-success {
+  background: #dcece2;
+  color: var(--status-in-range);
+}
+
+/* ---- Toolbar / selector row ---- */
+.toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+.toolbar-spacer {
+  flex: 1;
+}
+
+/* ---- Form controls ---- */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.field > .field-label {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--ink-secondary);
+}
+.input,
+.textarea,
+.select {
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--ink-primary);
+  background: var(--surface-card);
+  border: 1.5px solid var(--surface-sunken);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  width: 100%;
+  transition: border-color 160ms ease-out;
+}
+.input:focus,
+.textarea:focus,
+.select:focus {
+  outline: none;
+  border-color: var(--forest-soft);
+}
+.textarea {
+  resize: vertical;
+  min-height: 88px;
+  line-height: 1.5;
+}
+.field-row {
+  display: flex;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+.field-row > .field {
+  flex: 1;
+  min-width: 160px;
+}
+.check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 13.5px;
+  color: var(--ink-secondary);
+  font-weight: 600;
+  cursor: pointer;
+}
+.check input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--forest);
+}
+
+/* ---- Status tags ---- */
+.tag {
+  display: inline-block;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-sunken);
+  color: var(--ink-secondary);
+}
+.tag-good {
+  background: #dcece2;
+  color: var(--status-in-range);
+}
+.tag-warn {
+  background: var(--gold-soft);
+  color: #6d5212;
+}
+.tag-bad {
+  background: #f7e3dd;
+  color: var(--status-critical);
+}
+.tag-neutral {
+  background: var(--surface-sunken);
+  color: var(--ink-muted);
+}
+
+/* ---- Empty & loading states ---- */
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  text-align: center;
+  padding: var(--space-12) var(--space-6);
+  color: var(--ink-secondary);
+}
+.empty-mark {
+  font-size: 34px;
+}
+.empty-title {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--ink-primary);
+  margin: 0;
+}
+.empty-sub {
+  margin: 0;
+  color: var(--ink-muted);
+  max-width: 46ch;
+}
+
+/* ---- Utility ---- */
+.stack {
+  display: flex;
+  flex-direction: column;
+}
+.row {
+  display: flex;
+  align-items: center;
+}
+.spin {
+  animation: spin 900ms linear infinite;
+}
+.spinner {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 3px solid var(--surface-sunken);
+  border-top-color: var(--forest-soft);
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

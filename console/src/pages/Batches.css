@@ -1,0 +1,140 @@
+.back-btn {
+  align-self: flex-start;
+}
+
+/* ---- Program list ---- */
+.batch-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.batch-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  text-align: left;
+  border: none;
+  cursor: pointer;
+  transition: transform 160ms ease-out, box-shadow 160ms ease-out;
+}
+.batch-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-float);
+}
+.batch-main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.batch-name {
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 600;
+  color: var(--ink-primary);
+}
+.batch-sub {
+  font-size: 13px;
+  color: var(--ink-secondary);
+}
+.batch-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+.batch-count {
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 600;
+  color: var(--forest);
+}
+.batch-count-cap {
+  font-size: 11.5px;
+  color: var(--ink-muted);
+  font-weight: 600;
+}
+
+/* ---- Roster ---- */
+.roster {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.pulse-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.pulse-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+.pulse-big {
+  font-family: var(--font-display);
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--ink-primary);
+}
+.pulse-cap {
+  color: var(--ink-secondary);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.pulse-bar {
+  height: 8px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-sunken);
+  overflow: hidden;
+}
+.pulse-bar span {
+  display: block;
+  height: 100%;
+  background: var(--status-in-range);
+  border-radius: var(--radius-pill);
+  transition: width 200ms ease-out;
+}
+.pulse-note {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--ink-muted);
+}
+
+.member-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.member-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-6);
+}
+.member-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.member-name {
+  font-weight: 700;
+  color: var(--ink-primary);
+  font-size: 14.5px;
+}
+.member-sub {
+  font-size: 12.5px;
+  color: var(--ink-muted);
+}
+.member-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.member-km {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--forest-soft);
+}

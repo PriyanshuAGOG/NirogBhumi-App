@@ -20,6 +20,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import com.google.firebase.Timestamp
+import com.nirogbhumi.app.data.CloudResult
+import com.nirogbhumi.app.notifications.EventReminderWorker
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -35,10 +38,6 @@ import kotlinx.coroutines.launch
 // Screen 1: Sugar Metric detailed deepdive
 @Composable
 fun BloodSugarDetailScreen(state: NirogState) {
-    var selectedLogType by remember { mutableStateOf("Fasting") } // "Fasting" or "Post-meal"
-    var sugarInputText by remember { mutableStateOf("") }
-    var isRecordingDialogueOpen by remember { mutableStateOf(false) }
-
     DisposableEffect(Unit) {
         val subscription = state.repository.listenUserCollection("glucoseReadings", 30) { result ->
             when (result) {
@@ -93,7 +92,7 @@ fun BloodSugarDetailScreen(state: NirogState) {
                 fontSize = 20.sp,
                 color = Color(0xFF1B3221)
             )
-            IconButton(onClick = { isRecordingDialogueOpen = true }) {
+            IconButton(onClick = { state.checkinStartStep = 0; state.currentScreen = "daily_checkin" }) {
                 Icon(Icons.Filled.Add, "Log Reading", tint = Color(0xFF1B3221))
             }
         }
@@ -226,117 +225,6 @@ fun BloodSugarDetailScreen(state: NirogState) {
             }
 
             Spacer(modifier = Modifier.height(32.dp))
-        }
-
-        // Add Dialog Modal
-        if (isRecordingDialogueOpen) {
-            AlertDialog(
-                onDismissRequest = { isRecordingDialogueOpen = false },
-                title = { Text("Log New Reading", fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221)) },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            if (selectedLogType == "HbA1c") {
-                                val percentValue = sugarInputText.toDoubleOrNull()
-                                if (percentValue == null) return@Button
-                                state.repository.addHealthLog(
-                                    "glucoseReadings",
-                                    mapOf(
-                                        "value" to percentValue,
-                                        "unit" to "%",
-                                        "readingType" to "hba1c",
-                                        "measuredAt" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
-                                        "source" to "manual"
-                                    )
-                                ) { result ->
-                                    state.cloudMessage = when (result) {
-                                        is com.nirogbhumi.app.data.CloudResult.Success -> "Synced securely"
-                                        is com.nirogbhumi.app.data.CloudResult.Failure -> result.message
-                                    }
-                                }
-                            } else {
-                                val sugarInt = sugarInputText.toIntOrNull() ?: return@Button
-                                val status = if (sugarInt > 130) "High" else if (sugarInt < 80) "Low" else "Normal"
-                                state.sugarLogs.add(
-                                    0,
-                                    SugarLog(
-                                        state.sugarLogs.size + 1,
-                                        sugarInt,
-                                        selectedLogType,
-                                        "Today, Just Now",
-                                        status
-                                    )
-                                )
-                                state.fastingSugarValue = sugarInt
-                                state.repository.addHealthLog(
-                                    "glucoseReadings",
-                                    mapOf(
-                                        "value" to sugarInt,
-                                        "unit" to "mg/dL",
-                                        "readingType" to if (selectedLogType == "Fasting") "fasting" else "post_meal",
-                                        "measuredAt" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
-                                        "source" to "manual"
-                                    )
-                                ) { result ->
-                                    state.cloudMessage = when (result) {
-                                        is com.nirogbhumi.app.data.CloudResult.Success -> "Synced securely"
-                                        is com.nirogbhumi.app.data.CloudResult.Failure -> result.message
-                                    }
-                                }
-                            }
-                            isRecordingDialogueOpen = false
-                            sugarInputText = ""
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF314936))
-                    ) {
-                        Text("Save Record", color = Color.White)
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { isRecordingDialogueOpen = false }) {
-                        Text("Cancel", color = Color(0xFF737972))
-                    }
-                },
-                text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            listOf("Fasting", "Post-meal", "HbA1c").forEach { type ->
-                                Surface(
-                                    shape = RoundedCornerShape(12.dp),
-                                    color = if (selectedLogType == type) Color(0xFF314936) else Color(0xFFEBF7E8),
-                                    modifier = Modifier.clickable { selectedLogType = type; sugarInputText = "" }.padding(4.dp)
-                                ) {
-                                    Text(type, color = if (selectedLogType == type) Color.White else Color(0xFF1B3221), fontSize = 13.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
-                                }
-                            }
-                        }
-
-                        OutlinedTextField(
-                            value = sugarInputText,
-                            onValueChange = { value ->
-                                sugarInputText = if (selectedLogType == "HbA1c") {
-                                    value.filter { it.isDigit() || it == '.' }.let { candidate -> if (candidate.count { c -> c == '.' } <= 1) candidate else sugarInputText }
-                                } else value.filter(Char::isDigit)
-                            },
-                            placeholder = { Text(if (selectedLogType == "HbA1c") "Value in % (e.g. 5.8)" else "Value in mg/dL (e.g. 105)", color = Color(0xFFC3C8C0)) },
-                            keyboardOptions = KeyboardOptions(keyboardType = if (selectedLogType == "HbA1c") KeyboardType.Decimal else KeyboardType.Number),
-                            shape = RoundedCornerShape(12.dp),
-                            singleLine = true,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedContainerColor = Color(0xFFF8F6EF),
-                                unfocusedContainerColor = Color(0xFFF8F6EF),
-                                focusedBorderColor = Color(0xFF314936),
-                                unfocusedBorderColor = Color.Transparent
-                            )
-                        )
-                    }
-                },
-                containerColor = Color.White,
-                shape = RoundedCornerShape(20.dp)
-            )
         }
     }
 }
@@ -1663,6 +1551,7 @@ fun EmptyStateCard(icon: androidx.compose.ui.graphics.vector.ImageVector, messag
 @Composable
 fun FamilyProfilesScreen(state: NirogState) {
     var records by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>?>(null) }
+    var showAdd by remember { mutableStateOf(false) }
     DisposableEffect(Unit) {
         val subscription = state.repository.listenUserCollection("profiles", 30) { result ->
             records = when (result) {
@@ -1736,7 +1625,7 @@ fun FamilyProfilesScreen(state: NirogState) {
                         modifier = Modifier.fillMaxWidth().clickable {
                             state.selectedDocumentId = record.id
                             state.selectedDocumentValues = record.values
-                            state.currentScreen = "family_dashboard"
+                            state.currentScreen = "family_member_detail"
                         },
                         colors = CardDefaults.cardColors(containerColor = Color.White),
                         shape = RoundedCornerShape(16.dp),
@@ -1768,7 +1657,7 @@ fun FamilyProfilesScreen(state: NirogState) {
 
         Spacer(modifier = Modifier.height(20.dp))
         Button(
-            onClick = { state.currentScreen = "add_family" },
+            onClick = { showAdd = true },
             modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).height(52.dp),
             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF314936)),
             shape = RoundedCornerShape(26.dp)
@@ -1778,6 +1667,141 @@ fun FamilyProfilesScreen(state: NirogState) {
             Text("Add family member", color = Color.White, fontWeight = FontWeight.Bold)
         }
         Spacer(modifier = Modifier.height(32.dp))
+    }
+
+    if (showAdd) {
+        var name by remember { mutableStateOf("") }
+        var relationship by remember { mutableStateOf("") }
+        var age by remember { mutableStateOf("") }
+        var city by remember { mutableStateOf("") }
+        var diabetesStatus by remember { mutableStateOf("Not sure") }
+        var consented by remember { mutableStateOf(false) }
+        var saving by remember { mutableStateOf(false) }
+        AlertDialog(
+            onDismissRequest = { if (!saving) showAdd = false },
+            title = { Text("Add family member", fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedTextField(name, { name = it }, label = { Text("Full name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(relationship, { relationship = it }, label = { Text("Relationship") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        OutlinedTextField(age, { age = it.filter(Char::isDigit) }, label = { Text("Age") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f))
+                        OutlinedTextField(city, { city = it }, label = { Text("City") }, modifier = Modifier.weight(1f))
+                    }
+                    Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("No diabetes", "Prediabetes", "Type 2 diabetes", "Type 1 diabetes", "Not sure").forEach { t ->
+                            Surface(shape = RoundedCornerShape(12.dp), color = if (diabetesStatus == t) Color(0xFF314936) else Color(0xFFEBF7E8), modifier = Modifier.clickable { diabetesStatus = t }) {
+                                Text(t, color = if (diabetesStatus == t) Color.White else Color(0xFF1B3221), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
+                            }
+                        }
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { consented = !consented }) {
+                        Checkbox(checked = consented, onCheckedChange = { consented = it }, colors = CheckboxDefaults.colors(checkedColor = Color(0xFF314936)))
+                        Text("I have permission to manage this profile", fontSize = 12.5.sp, color = Color(0xFF434842))
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    enabled = !saving && name.isNotBlank() && consented,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF314936)),
+                    onClick = {
+                        saving = true
+                        state.repository.addHealthLog("profiles", mapOf(
+                            "name" to name.trim(),
+                            "relationship" to relationship.trim().ifBlank { null },
+                            "age" to age.toIntOrNull(),
+                            "city" to city.trim().ifBlank { null },
+                            "selection" to diabetesStatus
+                        )) { result ->
+                            saving = false
+                            if (result is com.nirogbhumi.app.data.CloudResult.Success) showAdd = false
+                            else state.cloudMessage = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
+                        }
+                    }
+                ) { Text(if (saving) "Saving..." else "Save", color = Color.White) }
+            },
+            dismissButton = { TextButton(onClick = { showAdd = false }) { Text("Cancel", color = Color(0xFF737972)) } }
+        )
+    }
+}
+
+// A focused detail view for one family member's profile - not a full app-clone
+// dashboard (that would need a parallel data model per profile, out of scope
+// here), just their basics with an edit-free summary and a way to remove them.
+@Composable
+fun FamilyMemberDetailScreen(state: NirogState) {
+    val values = state.selectedDocumentValues
+    val name = values["name"]?.toString() ?: values["fullName"]?.toString() ?: "Family member"
+    val relationship = values["relationship"]?.toString()?.ifBlank { null }
+    val age = values["age"]?.toString()?.ifBlank { null }
+    val city = values["city"]?.toString()?.ifBlank { null }
+    val status = values["selection"]?.toString()?.ifBlank { null }
+    var confirmingRemove by remember { mutableStateOf(false) }
+
+    Column(modifier = Modifier.fillMaxSize().background(Color(0xFFF8F6EF))) {
+        DetailScreenHeader(name, onBack = { state.currentScreen = "family_profiles" })
+        Column(modifier = Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                shape = RoundedCornerShape(20.dp),
+                border = BorderStroke(0.5.dp, Color(0xFFD8D0C0))
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Box(
+                        modifier = Modifier.size(56.dp).clip(CircleShape).background(Color(0xFF9CB79F)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(name.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(name, fontFamily = FontFamily.Serif, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+                    Text(relationship ?: "Family member", fontSize = 13.sp, color = Color(0xFF697169))
+                    Spacer(modifier = Modifier.height(16.dp))
+                    listOfNotNull(
+                        age?.let { "Age" to it },
+                        city?.let { "City" to it },
+                        status?.let { "Diabetes status" to it.replace('_', ' ') }
+                    ).forEach { (label, value) ->
+                        Row(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(label, fontSize = 13.sp, color = Color(0xFF697169))
+                            Text(value, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF1B2219))
+                        }
+                    }
+                }
+            }
+            Text(
+                "This person's own health logs stay separate from yours. Full tracking under their own profile is coming soon.",
+                fontSize = 12.5.sp, color = Color(0xFF8B9285), lineHeight = 18.sp
+            )
+            OutlinedButton(
+                onClick = { confirmingRemove = true },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFB4472F))
+            ) { Text("Remove from family profiles") }
+        }
+    }
+
+    if (confirmingRemove) {
+        AlertDialog(
+            onDismissRequest = { confirmingRemove = false },
+            title = { Text("Remove $name?", fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221)) },
+            text = { Text("This removes them from your family profiles. This can't be undone.", fontSize = 13.sp, color = Color(0xFF434842)) },
+            confirmButton = {
+                Button(
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB4472F)),
+                    onClick = {
+                        state.repository.deleteUserRecord("profiles", state.selectedDocumentId) { result ->
+                            confirmingRemove = false
+                            if (result is com.nirogbhumi.app.data.CloudResult.Success) state.currentScreen = "family_profiles"
+                            else state.cloudMessage = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
+                        }
+                    }
+                ) { Text("Remove", color = Color.White) }
+            },
+            dismissButton = { TextButton(onClick = { confirmingRemove = false }) { Text("Cancel", color = Color(0xFF737972)) } }
+        )
     }
 }
 
@@ -1954,6 +1978,223 @@ fun relativeTimeLabel(date: java.util.Date): String {
     }
 }
 
+// Data export & account deletion - both real, backed by the same Cloud
+// Functions/Firestore request-queue path (requestDataExport/
+// requestAccountDeletion -> dataExportRequests/deletionRequests, processed by
+// existing scheduled Functions) rather than a generic form that goes nowhere.
+@Composable
+fun DataControlsScreen(state: NirogState) {
+    var exporting by remember { mutableStateOf(false) }
+    var exportRequested by remember { mutableStateOf(false) }
+    var confirmingDelete by remember { mutableStateOf(false) }
+    var deleting by remember { mutableStateOf(false) }
+    var deletionRequested by remember { mutableStateOf(false) }
+
+    Column(modifier = Modifier.fillMaxSize().background(Color(0xFFF8F6EF))) {
+        DetailScreenHeader("Export or delete my data", onBack = { state.currentScreen = "profile" })
+        Column(modifier = Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                shape = RoundedCornerShape(20.dp),
+                border = BorderStroke(0.5.dp, Color(0xFFD8D0C0))
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Icon(Icons.Filled.DownloadForOffline, contentDescription = null, tint = Color(0xFF1B3221))
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("Export your data", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF1B3221))
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        "A copy of everything you've logged - readings, reports, program activity - as a file you can keep or share with a doctor.",
+                        fontSize = 13.sp, color = Color(0xFF697169), lineHeight = 18.sp
+                    )
+                    Spacer(modifier = Modifier.height(14.dp))
+                    if (exportRequested) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = Color(0xFF3F7D58), modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Requested - you'll get a notification when it's ready.", fontSize = 13.sp, color = Color(0xFF3F7D58), fontWeight = FontWeight.SemiBold)
+                        }
+                    } else {
+                        Button(
+                            enabled = !exporting,
+                            onClick = {
+                                exporting = true
+                                state.repository.requestDataExport { result ->
+                                    exporting = false
+                                    if (result is com.nirogbhumi.app.data.CloudResult.Success) exportRequested = true
+                                    else state.cloudMessage = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF314936)),
+                            shape = RoundedCornerShape(20.dp)
+                        ) { Text(if (exporting) "Requesting..." else "Request my data", color = Color.White, fontWeight = FontWeight.Bold) }
+                    }
+                }
+            }
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFF5DFD6)),
+                shape = RoundedCornerShape(20.dp)
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Icon(Icons.Filled.DeleteForever, contentDescription = null, tint = Color(0xFFB4472F))
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("Delete my account", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF7B332E))
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        "Permanently removes your logs, reports, and program activity after identity verification. This can't be undone.",
+                        fontSize = 13.sp, color = Color(0xFF7B332E), lineHeight = 18.sp
+                    )
+                    Spacer(modifier = Modifier.height(14.dp))
+                    if (deletionRequested) {
+                        Text("Deletion requested - pending approval and identity verification.", fontSize = 13.sp, color = Color(0xFF7B332E), fontWeight = FontWeight.SemiBold)
+                    } else {
+                        OutlinedButton(
+                            enabled = !deleting,
+                            onClick = { confirmingDelete = true },
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFB4472F))
+                        ) { Text("Request account deletion") }
+                    }
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(32.dp))
+    }
+
+    if (confirmingDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmingDelete = false },
+            title = { Text("Delete your account?", fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221)) },
+            text = { Text("All your health logs and reports will be permanently deleted after verification. This can't be undone.", fontSize = 13.sp, color = Color(0xFF434842)) },
+            confirmButton = {
+                Button(
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB4472F)),
+                    onClick = {
+                        deleting = true
+                        state.repository.requestAccountDeletion { result ->
+                            deleting = false
+                            confirmingDelete = false
+                            if (result is com.nirogbhumi.app.data.CloudResult.Success) deletionRequested = true
+                            else state.cloudMessage = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
+                        }
+                    }
+                ) { Text("Delete my account", color = Color.White) }
+            },
+            dismissButton = { TextButton(onClick = { confirmingDelete = false }) { Text("Cancel", color = Color(0xFF737972)) } }
+        )
+    }
+}
+
+// Read-only summary of onboarding consent - matches Legal Center's promise
+// that optional consent can be reviewed/withdrawn here. Required consent
+// (health data storage, medical disclaimer) can't be withdrawn without
+// deleting the account, since the app can't function without it.
+@Composable
+fun PrivacyConsentScreen(state: NirogState) {
+    Column(modifier = Modifier.fillMaxSize().background(Color(0xFFF8F6EF))) {
+        DetailScreenHeader("Privacy & consent", onBack = { state.currentScreen = "profile" })
+        Column(modifier = Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("What you've agreed to, and what's optional.", fontSize = 13.sp, color = Color(0xFF697169))
+            ConsentRow("Health data storage", "Required to track your readings and reports.", state.consentHealthData, required = true)
+            ConsentRow("Expert review", "Lets an assigned expert see your logs when you book care or join a program.", state.consentExpertReview, required = false)
+            ConsentRow("Medical disclaimer acknowledgement", "You understand this app doesn't replace medical advice.", state.consentMedicalDisclaimer, required = true)
+            Spacer(modifier = Modifier.height(4.dp))
+            TextButton(onClick = { state.legalReturnRoute = "privacy_consent"; state.currentScreen = "legal_center" }) {
+                Text("Read the full privacy policy", color = Color(0xFF314936), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            }
+        }
+        Spacer(modifier = Modifier.height(32.dp))
+    }
+}
+
+@Composable
+private fun ConsentRow(title: String, description: String, granted: Boolean, required: Boolean) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(0.5.dp, Color(0xFFD8D0C0))
+    ) {
+        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                if (granted) Icons.Filled.CheckCircle else Icons.Filled.RadioButtonUnchecked,
+                contentDescription = null,
+                tint = if (granted) Color(0xFF3F7D58) else Color(0xFF9CB79F),
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(title, fontWeight = FontWeight.Bold, fontSize = 13.5.sp, color = Color(0xFF1B2219))
+                    if (required) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Surface(color = Color(0xFFEBF7E8), shape = RoundedCornerShape(8.dp)) {
+                            Text("REQUIRED", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFF426820), modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                        }
+                    }
+                }
+                Text(description, fontSize = 12.sp, color = Color(0xFF8B9285), lineHeight = 16.sp)
+            }
+        }
+    }
+}
+
+// Contact support - writes a real supportRequests doc (rules already permit
+// self-scoped create/read) instead of a generic form with no clear outcome.
+@Composable
+fun SupportScreen(state: NirogState) {
+    var subject by remember { mutableStateOf("") }
+    var message by remember { mutableStateOf("") }
+    var sending by remember { mutableStateOf(false) }
+    var sent by remember { mutableStateOf(false) }
+
+    Column(modifier = Modifier.fillMaxSize().background(Color(0xFFF8F6EF))) {
+        DetailScreenHeader("Help & support", onBack = { state.currentScreen = "profile" })
+        Column(modifier = Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            if (sent) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFEBF7E8)),
+                    shape = RoundedCornerShape(20.dp)
+                ) {
+                    Column(modifier = Modifier.padding(20.dp)) {
+                        Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = Color(0xFF3F7D58))
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Message sent", fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text("We'll get back to you as soon as we can.", fontSize = 13.sp, color = Color(0xFF4B6450))
+                    }
+                }
+            } else {
+                Text("What can we help with?", fontSize = 13.sp, color = Color(0xFF697169))
+                OutlinedTextField(subject, { subject = it }, label = { Text("Subject") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(message, { message = it }, label = { Text("Message") }, minLines = 5, modifier = Modifier.fillMaxWidth())
+                Button(
+                    enabled = !sending && subject.isNotBlank() && message.isNotBlank(),
+                    onClick = {
+                        sending = true
+                        state.repository.addHealthLog("supportRequests", mapOf(
+                            "subject" to subject.trim(),
+                            "message" to message.trim(),
+                            "status" to "open"
+                        )) { result ->
+                            sending = false
+                            if (result is com.nirogbhumi.app.data.CloudResult.Success) sent = true
+                            else state.cloudMessage = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF314936)),
+                    shape = RoundedCornerShape(20.dp)
+                ) { Text(if (sending) "Sending..." else "Send message", color = Color.White, fontWeight = FontWeight.Bold) }
+            }
+        }
+        Spacer(modifier = Modifier.height(32.dp))
+    }
+}
+
 // Notification Settings - custom Switch-based screen replacing the generic
 // checklist form. Health reminders are real, on-device WorkManager schedules
 // (see ReminderScheduler/ReminderWorker) so they fire even without connectivity;
@@ -2118,13 +2359,82 @@ private fun ReminderToggleRow(label: String, checked: Boolean, showDivider: Bool
 // specific calendar date; today is highlighted so members always know where they are.
 @Composable
 fun ProgramCalendarScreen(state: NirogState) {
+    val context = LocalContext.current
     val totalDays = state.programDurationDays.toInt().coerceAtLeast(1)
     val startMillis = state.programStartedAtMillis.takeIf { it > 0 } ?: System.currentTimeMillis()
     val todayIndex = (((System.currentTimeMillis() - startMillis) / (1000L * 60 * 60 * 24)) + 1).toInt().coerceIn(1, totalDays)
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = (todayIndex - 3).coerceAtLeast(0))
 
+    var events by remember { mutableStateOf<List<Map<String, Any?>>>(emptyList()) }
+    DisposableEffect(state.activeProgramId) {
+        if (state.activeProgramId.isBlank()) return@DisposableEffect onDispose {}
+        val sub = state.repository.listenProgramEvents(state.activeProgramId) { result ->
+            if (result is CloudResult.Success) events = result.value.map { it.values }
+        }
+        onDispose { sub.cancel() }
+    }
+    val upcoming = events.filter { ((it["startsAt"] as? Timestamp)?.toDate()?.time ?: 0L) >= System.currentTimeMillis() }
+
     Column(modifier = Modifier.fillMaxSize().background(Color(0xFFF8F6EF))) {
         DetailScreenHeader(state.activeProgramName.ifBlank { "Program Calendar" }, onBack = { state.currentScreen = "dashboard" })
+
+        if (upcoming.isNotEmpty()) {
+            Text(
+                "UPCOMING EVENTS", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFFC7902F),
+                letterSpacing = 1.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
+            )
+            Column(modifier = Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                upcoming.forEach { event ->
+                    val title = event["title"] as? String ?: "Program event"
+                    val type = event["type"] as? String
+                    val description = event["description"] as? String
+                    val startsAt = (event["startsAt"] as? Timestamp)?.toDate()
+                    val location = event["location"] as? String
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                        shape = RoundedCornerShape(18.dp)
+                    ) {
+                        Column(Modifier.padding(16.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(title, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFF1B2219), modifier = Modifier.weight(1f))
+                                if (type != null) {
+                                    Surface(color = Color(0xFFF4E9D3), shape = RoundedCornerShape(20.dp)) {
+                                        Text(type.uppercase(), fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFFB9832B), modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp))
+                                    }
+                                }
+                            }
+                            if (startsAt != null) {
+                                Text(
+                                    java.text.SimpleDateFormat("EEE, d MMM · h:mm a", java.util.Locale.getDefault()).format(startsAt),
+                                    fontSize = 12.sp, color = Color(0xFF697169), modifier = Modifier.padding(top = 4.dp)
+                                )
+                            }
+                            if (!location.isNullOrBlank()) {
+                                Text(location, fontSize = 12.sp, color = Color(0xFF697169))
+                            }
+                            if (!description.isNullOrBlank()) {
+                                Text(description, fontSize = 12.5.sp, color = Color(0xFF434842), modifier = Modifier.padding(top = 6.dp))
+                            }
+                            if (startsAt != null) {
+                                TextButton(
+                                    onClick = {
+                                        EventReminderWorker.schedule(context, "${title}_${startsAt.time}", title, "Starting now - $title", startsAt.time)
+                                    },
+                                    modifier = Modifier.padding(top = 4.dp)
+                                ) {
+                                    Icon(Icons.Filled.NotificationsActive, contentDescription = null, modifier = Modifier.size(14.dp), tint = Color(0xFF314936))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Remind me", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF314936))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+        }
+
         Text(
             "Day $todayIndex of $totalDays", fontSize = 13.sp, color = Color(0xFF697169),
             modifier = Modifier.padding(horizontal = 20.dp)
@@ -2184,8 +2494,9 @@ fun AnnouncementsScreen(state: NirogState) {
     var composeBody by remember { mutableStateOf("") }
     var posting by remember { mutableStateOf(false) }
 
-    DisposableEffect(Unit) {
-        val subscription = state.repository.listenAnnouncements { result ->
+    DisposableEffect(state.activeProgramId) {
+        if (state.activeProgramId.isBlank()) { records = emptyList(); return@DisposableEffect onDispose {} }
+        val subscription = state.repository.listenAnnouncements(state.activeProgramId) { result ->
             records = when (result) {
                 is com.nirogbhumi.app.data.CloudResult.Success -> result.value
                 is com.nirogbhumi.app.data.CloudResult.Failure -> emptyList()
@@ -2255,7 +2566,7 @@ fun AnnouncementsScreen(state: NirogState) {
                     enabled = !posting && composeTitle.isNotBlank() && composeBody.isNotBlank(),
                     onClick = {
                         posting = true
-                        state.repository.postAnnouncement(composeTitle.trim(), composeBody.trim()) { result ->
+                        state.repository.postAnnouncement(state.activeProgramId, composeTitle.trim(), composeBody.trim()) { result ->
                             posting = false
                             if (result is com.nirogbhumi.app.data.CloudResult.Success) {
                                 composeTitle = ""; composeBody = ""; showComposer = false

@@ -1,0 +1,960 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Nirog Bhumi — UX Prototype v2</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    /* ===== DESIGN TOKENS ===== */
+    --surface: #F8F6EF;
+    --surface-alt: #EFEAE0;
+    --surface-card: #FFFFFF;
+    --surface-sunken: #F1EDE3;
+
+    --ink-primary: #1B2219;
+    --ink-secondary: #56604F;
+    --ink-muted: #8B9285;
+    --ink-on-accent: #FBF8F0;
+
+    --accent-forest: #1B3221;
+    --accent-forest-soft: #314936;
+    --accent-gold: #C7902F;
+    --accent-gold-soft: #EAD6A9;
+    --accent-terracotta: #B4592F;
+
+    --status-in-range: #3F7D58;
+    --status-in-range-bg: #E4EFE4;
+    --status-attention: #B9832B;
+    --status-attention-bg: #F4E9D3;
+    --status-critical: #B4472F;
+    --status-critical-bg: #F5DFD6;
+    --status-neutral: #C7C2B4;
+    --status-neutral-bg: #EDEAE0;
+
+    --font-display: 'Fraunces', serif;
+    --font-body: 'Manrope', sans-serif;
+
+    --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px;
+    --space-5: 24px; --space-6: 32px; --space-7: 48px;
+
+    --radius-sm: 10px; --radius-md: 16px; --radius-lg: 24px; --radius-pill: 999px;
+
+    --shadow-card: 0 1px 2px rgba(27,34,25,0.04), 0 8px 24px rgba(27,34,25,0.06);
+    --shadow-float: 0 4px 12px rgba(27,34,25,0.10), 0 16px 40px rgba(27,34,25,0.10);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body { font-family: var(--font-body); background: #E9E4D6; color: var(--ink-primary); min-height: 100vh; }
+
+  /* ===== PROTOTYPE SHELL ===== */
+  .shell-header { padding: var(--space-6) var(--space-5) var(--space-4); text-align: center; }
+  .shell-header .eyebrow { font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent-gold); font-weight: 700; }
+  .shell-header h1 { font-family: var(--font-display); font-weight: 600; font-size: 32px; margin: var(--space-2) 0; color: var(--accent-forest); }
+  .shell-header p { max-width: 600px; margin: 0 auto; color: var(--ink-secondary); font-size: 14.5px; line-height: 1.55; }
+
+  .tabs { display: flex; justify-content: center; flex-wrap: wrap; gap: var(--space-2); padding: var(--space-4); max-width: 720px; margin: 0 auto; }
+  .tab-btn {
+    font-family: var(--font-body); font-weight: 700; font-size: 13px;
+    border: 1px solid rgba(27,50,33,0.15); background: var(--surface-card); color: var(--ink-secondary);
+    padding: 10px 16px; border-radius: var(--radius-pill); cursor: pointer; transition: all 0.18s ease;
+  }
+  .tab-btn:hover { border-color: var(--accent-forest); color: var(--accent-forest); }
+  .tab-btn.active { background: var(--accent-forest); border-color: var(--accent-forest); color: var(--ink-on-accent); }
+
+  .stage { display: flex; justify-content: center; padding: var(--space-5) var(--space-4) var(--space-7); }
+
+  /* ===== PHONE FRAME ===== */
+  .phone {
+    width: 390px; max-width: 100%; height: 844px;
+    background: var(--surface); border-radius: 46px; border: 10px solid #14180F;
+    box-shadow: var(--shadow-float); overflow: hidden; position: relative;
+    display: flex; flex-direction: column;
+  }
+  .notch { position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 120px; height: 26px; background: #14180F; border-radius: 0 0 16px 16px; z-index: 5; }
+  .screen { display: none; flex-direction: column; height: 100%; animation: fadein 0.25s ease; }
+  .screen.active { display: flex; }
+  @keyframes fadein { from { opacity: 0; transform: translateY(6px);} to { opacity: 1; transform: translateY(0);} }
+
+  .status-bar { height: 40px; flex-shrink: 0; }
+
+  .topbar { padding: var(--space-2) var(--space-4) var(--space-3); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+  .topbar .greeting { font-family: var(--font-display); font-size: 20px; font-weight: 600; color: var(--accent-forest); }
+  .topbar .date { font-size: 12px; color: var(--ink-muted); margin-top: 2px; }
+  .icon-btn {
+    width: 38px; height: 38px; border-radius: var(--radius-pill); background: var(--surface-card);
+    display: flex; align-items: center; justify-content: center; box-shadow: var(--shadow-card);
+    border: none; cursor: pointer; position: relative;
+  }
+  .icon-btn .badge {
+    position: absolute; top: -2px; right: -2px; min-width: 17px; height: 17px; padding: 0 4px;
+    background: var(--accent-terracotta); color: #fff; border-radius: var(--radius-pill);
+    font-size: 10px; font-weight: 800; display: flex; align-items: center; justify-content: center;
+    border: 2px solid var(--surface);
+  }
+
+  .content { flex: 1; overflow-y: auto; padding: 0 var(--space-4) var(--space-4); }
+  .content::-webkit-scrollbar { display: none; }
+
+  /* ===== BOTTOM NAV ===== */
+  .bottomnav {
+    flex-shrink: 0; display: flex; justify-content: space-around; align-items: center;
+    padding: 10px 8px 14px; background: var(--surface-card); box-shadow: 0 -2px 12px rgba(27,34,25,0.06);
+  }
+  .navitem { display: flex; flex-direction: column; align-items: center; gap: 3px; color: var(--ink-muted); font-size: 10.5px; font-weight: 700; background: none; border: none; cursor: pointer; }
+  .navitem.active { color: var(--accent-forest); }
+  .navitem svg { stroke: currentColor; }
+
+  /* ===== CARDS ===== */
+  .card { background: var(--surface-card); border-radius: var(--radius-lg); box-shadow: var(--shadow-card); padding: var(--space-5); }
+  .section-label { font-size: 11px; font-weight: 800; letter-spacing: 0.09em; text-transform: uppercase; color: var(--accent-gold); margin-bottom: var(--space-2); }
+
+  /* ===== TODAY ===== */
+  .focus-card {
+    background: linear-gradient(155deg, var(--accent-forest) 0%, var(--accent-forest-soft) 100%);
+    border-radius: var(--radius-lg); padding: var(--space-5); color: var(--ink-on-accent);
+    box-shadow: var(--shadow-card); margin-bottom: var(--space-4);
+  }
+  .focus-card .section-label { color: var(--accent-gold-soft); }
+  .focus-row { display: flex; align-items: center; gap: var(--space-4); }
+  .focus-icon { width: 52px; height: 52px; border-radius: var(--radius-md); background: rgba(255,255,255,0.12); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .focus-card h2 { font-family: var(--font-display); font-weight: 600; font-size: 21px; margin: 0 0 4px; }
+  .focus-card .sub { font-size: 12.5px; opacity: 0.75; }
+  .focus-cta { margin-top: var(--space-4); width: 100%; background: var(--accent-gold); color: #241706; border: none; border-radius: var(--radius-pill); padding: 13px; font-family: var(--font-body); font-weight: 800; font-size: 14.5px; cursor: pointer; }
+
+  .insight-card { background: var(--surface-sunken); border-radius: var(--radius-lg); padding: var(--space-4) var(--space-5); margin-bottom: var(--space-4); display: flex; gap: var(--space-3); align-items: flex-start; }
+  .insight-card .bulb { flex-shrink: 0; margin-top: 2px; }
+  .insight-card p { margin: 0; font-size: 13.5px; line-height: 1.5; color: var(--ink-secondary); }
+  .insight-card strong { color: var(--ink-primary); }
+  .sparkline { margin-top: var(--space-2); }
+
+  .demoted-row { display: flex; gap: var(--space-2); margin-bottom: var(--space-3); flex-wrap: wrap; }
+  .pill { display: flex; align-items: center; gap: 6px; background: var(--surface-card); border: 1px solid rgba(27,34,25,0.08); border-radius: var(--radius-pill); padding: 8px 13px; font-size: 12px; font-weight: 600; color: var(--ink-secondary); }
+
+  .row-card {
+    display: flex; align-items: center; gap: var(--space-3); background: var(--surface-card);
+    border-radius: var(--radius-lg); padding: var(--space-3) var(--space-4);
+    box-shadow: var(--shadow-card); margin-bottom: var(--space-3); cursor: pointer;
+  }
+  .row-card .ric { width: 36px; height: 36px; border-radius: var(--radius-sm); background: var(--surface-sunken); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .row-card .txt { flex: 1; }
+  .row-card .txt strong { display: block; font-size: 13px; }
+  .row-card .txt span { font-size: 11.5px; color: var(--ink-muted); }
+  .row-card .action { font-size: 12px; font-weight: 800; color: var(--accent-forest); }
+
+  .batch-strip {
+    display: flex; align-items: center; gap: var(--space-2);
+    background: var(--status-in-range-bg); border-radius: var(--radius-md);
+    padding: 10px var(--space-4); margin-bottom: var(--space-3);
+    font-size: 12.5px; font-weight: 700; color: var(--status-in-range);
+  }
+
+  .avatar-stack { display: flex; }
+  .avatar-stack span { width: 28px; height: 28px; border-radius: 50%; border: 2px solid var(--surface-card); background: var(--accent-gold-soft); margin-left: -8px; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 800; color: var(--accent-forest); }
+  .avatar-stack span:first-child { margin-left: 0; }
+
+  /* ===== CHECK-IN ===== */
+  .progressbar { display: flex; gap: 6px; padding: 0 var(--space-4); margin-bottom: var(--space-4); }
+  .progressbar .seg { flex: 1; height: 4px; border-radius: 2px; background: var(--surface-sunken); }
+  .progressbar .seg.done { background: var(--accent-gold); }
+
+  .sync-banner {
+    display: flex; gap: var(--space-3); align-items: center;
+    background: var(--status-in-range-bg); border-radius: var(--radius-md);
+    padding: 10px var(--space-4); margin: 0 var(--space-2) var(--space-4);
+    font-size: 12px; font-weight: 700; color: var(--status-in-range); line-height: 1.4;
+  }
+
+  .checkin-body { padding: 0 var(--space-2); text-align: left; display: flex; flex-direction: column; }
+  .checkin-body h2 { font-family: var(--font-display); font-size: 24px; font-weight: 600; margin: 0 0 6px; }
+  .checkin-body .hint { font-size: 13px; color: var(--ink-muted); margin-bottom: var(--space-4); }
+
+  .stepper { display: flex; align-items: center; justify-content: center; gap: var(--space-5); margin: var(--space-4) 0; }
+  .stepper button { width: 46px; height: 46px; border-radius: 50%; border: 1.5px solid rgba(27,34,25,0.15); background: var(--surface-card); font-size: 20px; font-weight: 700; color: var(--accent-forest); cursor: pointer; }
+  .stepper .value { font-family: var(--font-display); font-size: 44px; font-weight: 600; min-width: 110px; text-align: center; }
+  .stepper .unit { font-size: 13px; color: var(--ink-muted); display: block; margin-top: -6px; text-align: center; }
+
+  .chip-row { display: flex; gap: var(--space-2); justify-content: center; margin-bottom: var(--space-4); flex-wrap: wrap; }
+  .chip { padding: 9px 16px; border-radius: var(--radius-pill); border: 1.5px solid rgba(27,34,25,0.14); background: var(--surface-card); font-size: 12.5px; font-weight: 700; color: var(--ink-secondary); cursor: pointer; }
+  .chip.selected { background: var(--accent-forest); border-color: var(--accent-forest); color: var(--ink-on-accent); }
+
+  .checkin-actions { margin-top: auto; padding-top: var(--space-4); }
+  .btn-primary { width: 100%; padding: 14px; border-radius: var(--radius-pill); background: var(--accent-forest); color: var(--ink-on-accent); border: none; font-family: var(--font-body); font-weight: 800; font-size: 14.5px; cursor: pointer; }
+  .btn-skip { display: block; text-align: center; margin-top: var(--space-3); background: none; border: none; color: var(--ink-muted); font-size: 12.5px; font-weight: 700; cursor: pointer; width: 100%; }
+  .reassure { text-align: center; font-size: 11.5px; color: var(--ink-muted); margin-top: var(--space-2); }
+
+  /* ===== BODY REPORT ===== */
+  .report-hero { text-align: center; padding: var(--space-4) 0 var(--space-2); }
+  .report-hero .tick { width: 56px; height: 56px; border-radius: 50%; background: var(--status-in-range-bg); display: flex; align-items: center; justify-content: center; margin: 0 auto var(--space-3); }
+  .report-hero h2 { font-family: var(--font-display); font-size: 24px; font-weight: 600; margin: 0 0 4px; color: var(--accent-forest); }
+  .report-hero .sub { font-size: 12.5px; color: var(--ink-muted); }
+
+  .metric-row { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) 0; border-bottom: 1px solid rgba(27,34,25,0.06); }
+  .metric-row:last-child { border-bottom: none; }
+  .metric-row .mname { flex: 1; font-size: 13.5px; font-weight: 700; }
+  .metric-row .mval { font-family: var(--font-display); font-size: 17px; font-weight: 600; }
+  .status-chip { font-size: 10.5px; font-weight: 800; padding: 4px 10px; border-radius: var(--radius-pill); text-transform: uppercase; letter-spacing: 0.04em; }
+  .status-chip.ok { background: var(--status-in-range-bg); color: var(--status-in-range); }
+  .status-chip.watch { background: var(--status-attention-bg); color: var(--status-attention); }
+  .status-chip.synced { background: var(--surface-sunken); color: var(--ink-muted); }
+
+  .healthfile-cta {
+    display: flex; align-items: center; gap: var(--space-3);
+    background: linear-gradient(155deg, var(--accent-forest) 0%, var(--accent-forest-soft) 100%);
+    border-radius: var(--radius-lg); padding: var(--space-4) var(--space-5);
+    color: var(--ink-on-accent); margin-top: var(--space-4); cursor: pointer;
+  }
+  .healthfile-cta .txt { flex: 1; }
+  .healthfile-cta .txt strong { display: block; font-size: 14px; }
+  .healthfile-cta .txt span { font-size: 11.5px; opacity: 0.75; }
+  .healthfile-cta .share { background: var(--accent-gold); color: #241706; font-weight: 800; font-size: 12px; padding: 8px 16px; border-radius: var(--radius-pill); border: none; cursor: pointer; }
+
+  /* ===== RHYTHM ===== */
+  .rhythm-card { text-align: center; padding: var(--space-6) var(--space-5); }
+  .ring-wrap { position: relative; width: 168px; height: 168px; margin: var(--space-4) auto; }
+  .ring-label { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  .ring-label .big { font-family: var(--font-display); font-size: 34px; font-weight: 600; color: var(--accent-forest); }
+  .ring-label .small { font-size: 11px; color: var(--ink-muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
+
+  .month-grid { display: grid; grid-template-columns: repeat(10, 1fr); gap: 5px; margin: var(--space-5) 0; }
+  .month-grid .cell { aspect-ratio: 1; border-radius: 5px; background: var(--status-neutral-bg); }
+  .month-grid .cell.logged { background: var(--status-in-range); }
+  .month-grid .cell.future { background: transparent; border: 1.5px dashed rgba(27,34,25,0.10); }
+
+  .warmcopy { background: var(--surface-sunken); border-radius: var(--radius-md); padding: var(--space-4); font-size: 13.5px; line-height: 1.55; color: var(--ink-secondary); text-align: left; margin-top: var(--space-4); }
+  .warmcopy strong { color: var(--ink-primary); }
+
+  .nudge-card { background: var(--status-attention-bg); border-radius: var(--radius-lg); padding: var(--space-4) var(--space-5); margin-top: var(--space-4); text-align: left; }
+  .nudge-card .section-label { color: var(--status-attention); }
+  .nudge-card p { margin: 4px 0 var(--space-3); font-size: 13.5px; color: var(--ink-secondary); line-height: 1.5; }
+  .nudge-card button { background: var(--accent-forest); color: var(--ink-on-accent); border: none; padding: 10px 18px; border-radius: var(--radius-pill); font-weight: 800; font-size: 13px; cursor: pointer; }
+
+  /* ===== CARE+ ===== */
+  .batch-header { background: linear-gradient(155deg, var(--accent-forest) 0%, var(--accent-forest-soft) 100%); border-radius: var(--radius-lg); padding: var(--space-5); color: var(--ink-on-accent); margin-bottom: var(--space-4); }
+  .batch-header .section-label { color: var(--accent-gold-soft); }
+  .batch-header h2 { font-family: var(--font-display); font-size: 19px; font-weight: 600; margin: 4px 0 var(--space-3); }
+  .batch-avatars { display: flex; align-items: center; gap: var(--space-2); }
+  .batch-avatars .stack { display: flex; }
+  .batch-avatars .stack span { width: 30px; height: 30px; border-radius: 50%; background: rgba(255,255,255,0.15); border: 2px solid var(--accent-forest-soft); margin-left: -9px; display: flex; align-items: center; justify-content: center; font-size: 10.5px; font-weight: 800; }
+  .batch-avatars .stack span:first-child { margin-left: 0; }
+  .batch-avatars .count { font-size: 12px; opacity: 0.8; }
+
+  .coach-card { display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-4); }
+  .coach-photo { width: 52px; height: 52px; border-radius: 50%; background: var(--accent-gold-soft); display: flex; align-items: center; justify-content: center; font-family: var(--font-display); font-weight: 700; font-size: 18px; color: var(--accent-forest); flex-shrink: 0; }
+  .coach-card .name { font-weight: 800; font-size: 14px; }
+  .coach-card .role { font-size: 12px; color: var(--ink-muted); }
+  .coach-msg-btn { margin-left: auto; background: var(--surface-sunken); border: none; padding: 8px 14px; border-radius: var(--radius-pill); font-size: 12px; font-weight: 800; color: var(--accent-forest); cursor: pointer; }
+
+  .pulse-card { margin-bottom: var(--space-4); }
+  .pulse-row { display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-3); }
+  .pulse-row .pnum { font-family: var(--font-display); font-size: 26px; font-weight: 600; color: var(--status-in-range); }
+  .pulse-row .ptxt { font-size: 13px; color: var(--ink-secondary); line-height: 1.4; }
+  .goalbar { height: 10px; border-radius: 5px; background: var(--surface-sunken); overflow: hidden; margin: 8px 0 6px; }
+  .goalbar .fill { height: 100%; width: 73%; background: linear-gradient(90deg, var(--status-in-range), var(--accent-gold)); border-radius: 5px; }
+  .goal-caption { font-size: 12px; color: var(--ink-muted); }
+  .goal-caption strong { color: var(--ink-primary); }
+
+  .journey { display: flex; flex-direction: column; }
+  .journey .stop { display: flex; gap: var(--space-3); position: relative; }
+  .journey .stop .track { display: flex; flex-direction: column; align-items: center; }
+  .journey .stop .dot { width: 20px; height: 20px; border-radius: 50%; background: var(--surface-sunken); border: 2px solid rgba(27,34,25,0.12); flex-shrink: 0; }
+  .journey .stop.done .dot { background: var(--status-in-range); border-color: var(--status-in-range); }
+  .journey .stop.current .dot { background: var(--accent-gold); border-color: var(--accent-gold); box-shadow: 0 0 0 4px var(--accent-gold-soft); }
+  .journey .stop .line { width: 2px; flex: 1; background: rgba(27,34,25,0.12); min-height: 28px; }
+  .journey .stop.done .line { background: var(--status-in-range); }
+  .journey .stop .info { padding-bottom: var(--space-4); }
+  .journey .stop .info .wk { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-muted); }
+  .journey .stop .info .ttl { font-weight: 700; font-size: 13.5px; margin-top: 2px; }
+  .journey .stop.current .info .ttl { color: var(--accent-forest); }
+
+  .event-card { display: flex; gap: var(--space-3); align-items: center; background: var(--surface-card); border-radius: var(--radius-lg); padding: var(--space-3) var(--space-4); box-shadow: var(--shadow-card); margin-bottom: var(--space-3); cursor: pointer; }
+  .datechip { width: 46px; flex-shrink: 0; text-align: center; background: var(--surface-sunken); border-radius: var(--radius-sm); padding: 6px 0; }
+  .datechip .d { font-family: var(--font-display); font-size: 18px; font-weight: 700; color: var(--accent-forest); line-height: 1; }
+  .datechip .m { font-size: 9.5px; font-weight: 800; text-transform: uppercase; color: var(--ink-muted); }
+  .event-card .etxt { flex: 1; }
+  .event-card .etxt strong { display: block; font-size: 13px; }
+  .event-card .etxt span { font-size: 11.5px; color: var(--ink-muted); }
+
+  /* ===== CHAT ===== */
+  .room-card { display: flex; align-items: center; gap: var(--space-3); background: var(--surface-card); border-radius: var(--radius-lg); padding: var(--space-4); box-shadow: var(--shadow-card); margin-bottom: var(--space-3); cursor: pointer; }
+  .room-icon { width: 44px; height: 44px; border-radius: var(--radius-md); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .room-icon.announce { background: var(--status-attention-bg); }
+  .room-icon.general { background: var(--status-in-range-bg); }
+  .room-card .rtxt { flex: 1; min-width: 0; }
+  .room-card .rtxt .rname { font-weight: 800; font-size: 13.5px; display: flex; align-items: center; gap: 6px; }
+  .room-card .rtxt .rpreview { font-size: 12px; color: var(--ink-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+  .lock-tag { font-size: 9px; font-weight: 800; text-transform: uppercase; background: var(--surface-sunken); color: var(--ink-muted); padding: 2px 7px; border-radius: var(--radius-pill); letter-spacing: 0.05em; }
+  .unread-dot { min-width: 19px; height: 19px; padding: 0 5px; border-radius: var(--radius-pill); background: var(--accent-terracotta); color: #fff; font-size: 10.5px; font-weight: 800; display: flex; align-items: center; justify-content: center; }
+  .rtime { font-size: 10.5px; color: var(--ink-muted); align-self: flex-start; margin-top: 2px; }
+
+  .chat-safety { text-align: center; font-size: 11px; color: var(--ink-muted); padding: var(--space-3) var(--space-5); line-height: 1.5; }
+
+  .msg { max-width: 78%; margin-bottom: var(--space-3); }
+  .msg .who { font-size: 10.5px; font-weight: 800; color: var(--ink-muted); margin: 0 0 3px 6px; }
+  .msg .bubble { padding: 10px 14px; border-radius: 18px; font-size: 13px; line-height: 1.45; }
+  .msg.theirs .bubble { background: var(--surface-card); box-shadow: var(--shadow-card); border-bottom-left-radius: 6px; color: var(--ink-primary); }
+  .msg.mine { margin-left: auto; }
+  .msg.mine .bubble { background: var(--accent-forest); color: var(--ink-on-accent); border-bottom-right-radius: 6px; }
+  .msg.coach .who { color: var(--accent-gold); }
+  .msg.announce-post .bubble { background: var(--status-attention-bg); border-bottom-left-radius: 6px; color: var(--ink-primary); }
+
+  .composer { display: flex; gap: var(--space-2); padding: var(--space-3) var(--space-4); background: var(--surface-card); box-shadow: 0 -2px 12px rgba(27,34,25,0.06); flex-shrink: 0; align-items: center; }
+  .composer input { flex: 1; border: none; background: var(--surface-sunken); border-radius: var(--radius-pill); padding: 11px 16px; font-family: var(--font-body); font-size: 13px; outline: none; color: var(--ink-primary); }
+  .composer .send { width: 40px; height: 40px; border-radius: 50%; background: var(--accent-forest); border: none; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; }
+  .readonly-note { text-align: center; font-size: 11.5px; font-weight: 700; color: var(--ink-muted); padding: var(--space-4); background: var(--surface-card); box-shadow: 0 -2px 12px rgba(27,34,25,0.06); flex-shrink: 0; }
+
+  .seg-control { display: flex; background: var(--surface-sunken); border-radius: var(--radius-pill); padding: 3px; margin: 0 var(--space-4) var(--space-3); flex-shrink: 0; }
+  .seg-control button { flex: 1; border: none; background: none; padding: 8px; border-radius: var(--radius-pill); font-family: var(--font-body); font-weight: 800; font-size: 12px; color: var(--ink-muted); cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 5px; }
+  .seg-control button.on { background: var(--surface-card); color: var(--accent-forest); box-shadow: var(--shadow-card); }
+
+  /* ===== CALENDAR ===== */
+  .weekstrip { display: flex; gap: 6px; padding: 0 var(--space-4) var(--space-4); flex-shrink: 0; }
+  .day { flex: 1; text-align: center; padding: 8px 0 6px; border-radius: var(--radius-md); cursor: pointer; }
+  .day .dw { font-size: 9.5px; font-weight: 800; text-transform: uppercase; color: var(--ink-muted); }
+  .day .dn { font-family: var(--font-display); font-size: 16px; font-weight: 600; margin-top: 2px; }
+  .day.today { background: var(--accent-forest); color: var(--ink-on-accent); }
+  .day.today .dw { color: var(--accent-gold-soft); }
+  .day .evdot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent-gold); margin: 4px auto 0; }
+  .day .evdot.none { background: transparent; }
+
+  .agenda-event { background: var(--surface-card); border-radius: var(--radius-lg); box-shadow: var(--shadow-card); padding: var(--space-4); margin-bottom: var(--space-3); display: flex; gap: var(--space-3); }
+  .agenda-event .etxt { flex: 1; }
+  .agenda-event .etxt .ename { font-weight: 800; font-size: 13.5px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .agenda-event .etxt .etime { font-size: 11.5px; color: var(--ink-muted); margin-top: 2px; }
+  .type-tag { font-size: 9px; font-weight: 800; text-transform: uppercase; padding: 2px 8px; border-radius: var(--radius-pill); letter-spacing: 0.05em; }
+  .type-tag.live { background: var(--status-attention-bg); color: var(--status-attention); }
+  .type-tag.walk { background: var(--status-in-range-bg); color: var(--status-in-range); }
+  .type-tag.lab { background: var(--status-critical-bg); color: var(--status-critical); }
+  .edit-pencil { background: none; border: none; cursor: pointer; align-self: flex-start; padding: 2px; }
+
+  .event-detail { border-left: 3px solid var(--accent-gold); margin-top: var(--space-3); padding: var(--space-2) 0 var(--space-2) var(--space-3); }
+  .event-detail p { margin: 0 0 var(--space-2); font-size: 12.5px; color: var(--ink-secondary); line-height: 1.5; }
+  .event-detail .meta { font-size: 11.5px; color: var(--ink-muted); font-weight: 700; }
+  .remind-btn { margin-top: var(--space-2); background: var(--surface-sunken); border: none; padding: 8px 16px; border-radius: var(--radius-pill); font-size: 12px; font-weight: 800; color: var(--accent-forest); cursor: pointer; }
+
+  .admin-bar { display: flex; align-items: center; justify-content: space-between; background: var(--accent-gold-soft); border-radius: var(--radius-md); padding: 10px var(--space-4); margin-bottom: var(--space-4); }
+  .admin-bar .lbl { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; color: var(--accent-forest); }
+  .admin-bar button { background: var(--accent-forest); color: var(--ink-on-accent); border: none; padding: 7px 14px; border-radius: var(--radius-pill); font-weight: 800; font-size: 11.5px; cursor: pointer; }
+
+  /* ===== STYLE GUIDE ===== */
+  .styleguide-wrap { padding: var(--space-5) var(--space-4); overflow-y: auto; }
+  .styleguide-wrap h3 { font-family: var(--font-display); font-size: 15px; margin: var(--space-5) 0 var(--space-3); color: var(--accent-forest); }
+  .styleguide-wrap h3:first-child { margin-top: 0; }
+  .swatch-row { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+  .swatch { width: 74px; text-align: center; font-size: 10px; font-weight: 700; color: var(--ink-secondary); }
+  .swatch .block { height: 52px; border-radius: var(--radius-sm); margin-bottom: 5px; border: 1px solid rgba(0,0,0,0.06); }
+  .type-row { display: flex; flex-direction: column; gap: var(--space-3); }
+  .type-row .display { font-family: var(--font-display); font-size: 26px; font-weight: 600; }
+  .type-row .heading { font-family: var(--font-display); font-size: 19px; font-weight: 600; }
+  .type-row .body { font-size: 14px; }
+  .type-row .caption { font-size: 11.5px; color: var(--ink-muted); }
+  .space-row { display: flex; align-items: flex-end; gap: var(--space-2); }
+  .space-row .bar { background: var(--accent-gold); width: 18px; }
+
+  .footer-note { text-align: center; padding: var(--space-6) var(--space-4) var(--space-7); color: var(--ink-muted); font-size: 12px; max-width: 520px; margin: 0 auto; line-height: 1.6; }
+</style>
+</head>
+<body>
+
+  <div class="shell-header">
+    <div class="eyebrow">Prototype v2 — not the live app</div>
+    <h1>Nirog Bhumi, end to end</h1>
+    <p>The full plan, visually: design system → 2-minute synced check-in → Body Report & Health File (the USP) → non-punitive Rhythm → Care+ batch with coach, Batch Pulse, admin calendar, and the dedicated chat section (Announcements + General). Everything is tappable.</p>
+  </div>
+
+  <div class="tabs">
+    <button class="tab-btn active" data-screen="styleguide">Design System</button>
+    <button class="tab-btn" data-screen="today">Today</button>
+    <button class="tab-btn" data-screen="checkin">Check-in</button>
+    <button class="tab-btn" data-screen="report">Body Report</button>
+    <button class="tab-btn" data-screen="rhythm">Rhythm</button>
+    <button class="tab-btn" data-screen="care">Care+</button>
+    <button class="tab-btn" data-screen="chat">Chat</button>
+    <button class="tab-btn" data-screen="calendar">Calendar</button>
+  </div>
+
+  <div class="stage">
+    <div class="phone">
+      <div class="notch"></div>
+
+      <!-- ============ STYLE GUIDE ============ -->
+      <div class="screen active" id="screen-styleguide">
+        <div class="status-bar"></div>
+        <div class="styleguide-wrap">
+          <h3>Color — semantic roles, not raw hex</h3>
+          <div class="swatch-row">
+            <div class="swatch"><div class="block" style="background:var(--surface)"></div>Surface</div>
+            <div class="swatch"><div class="block" style="background:var(--surface-alt)"></div>Surface Alt</div>
+            <div class="swatch"><div class="block" style="background:var(--accent-forest)"></div>Ink / Forest</div>
+            <div class="swatch"><div class="block" style="background:var(--accent-gold)"></div>Accent Gold</div>
+            <div class="swatch"><div class="block" style="background:var(--status-in-range)"></div>In range</div>
+            <div class="swatch"><div class="block" style="background:var(--status-attention)"></div>Attention</div>
+            <div class="swatch"><div class="block" style="background:var(--status-critical)"></div>Critical</div>
+            <div class="swatch"><div class="block" style="background:var(--status-neutral)"></div>Neutral</div>
+          </div>
+          <h3>Type — one display face, one body face</h3>
+          <div class="type-row">
+            <div class="display">Fraunces — Display &amp; headings</div>
+            <div class="heading">Section heading, 19px</div>
+            <div class="body">Manrope — body copy sits underneath, quiet and readable at 14px.</div>
+            <div class="caption">Caption / metadata, 11.5px, muted ink</div>
+          </div>
+          <h3>Spacing scale (4 / 8 / 12 / 16 / 24 / 32 / 48)</h3>
+          <div class="space-row">
+            <div class="bar" style="height:4px"></div><div class="bar" style="height:8px"></div>
+            <div class="bar" style="height:12px"></div><div class="bar" style="height:16px"></div>
+            <div class="bar" style="height:24px"></div><div class="bar" style="height:32px"></div>
+            <div class="bar" style="height:48px"></div>
+          </div>
+          <h3>Card language</h3>
+          <div class="card" style="margin-bottom:12px;">
+            <div class="section-label">Standard card</div>
+            Radius 24px, soft two-layer shadow, no harsh borders.
+          </div>
+          <h3>Status chips — the only way clinical state is shown</h3>
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <span class="status-chip ok">In range</span>
+            <span class="status-chip watch">Worth watching</span>
+            <span class="status-chip synced">Synced ⌚</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ TODAY ============ -->
+      <div class="screen" id="screen-today">
+        <div class="status-bar"></div>
+        <div class="topbar">
+          <div>
+            <div class="greeting">Good morning, Meera</div>
+            <div class="date">Thursday, 2 July</div>
+          </div>
+          <button class="icon-btn" aria-label="Notifications">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#1B3221" stroke-width="2" stroke-linecap="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+          </button>
+        </div>
+        <div class="content">
+          <div class="focus-card">
+            <div class="section-label">Today's one thing</div>
+            <div class="focus-row">
+              <div class="focus-icon">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#FBF8F0" stroke-width="2"><path d="M12 2s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11z"/></svg>
+              </div>
+              <div>
+                <h2>Log your fasting sugar</h2>
+                <div class="sub">You usually log this around 7:30 AM</div>
+              </div>
+            </div>
+            <button class="focus-cta" onclick="go('checkin')">Start check-in — under 2 minutes</button>
+          </div>
+
+          <div class="insight-card">
+            <div class="bulb">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#B9832B" stroke-width="2"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.2 1 2.3h6c0-1.1.4-1.8 1-2.3A7 7 0 0 0 12 2z"/></svg>
+            </div>
+            <div>
+              <p><strong>Steadier than last week.</strong> 3 of your last 4 fasting readings were in range — up from 2 the week before.</p>
+              <svg class="sparkline" width="160" height="28" viewBox="0 0 160 28">
+                <polyline points="0,20 30,14 60,18 90,10 120,12 150,6" fill="none" stroke="#3F7D58" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </div>
+          </div>
+
+          <div class="batch-strip" onclick="go('care')">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#3F7D58" stroke-width="2.5"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/><circle cx="9" cy="7" r="4"/></svg>
+            9 of 12 batchmates checked in today →
+          </div>
+
+          <div class="section-label" style="margin-left:4px;">Also today</div>
+          <div class="demoted-row">
+            <div class="pill">Blood pressure</div>
+            <div class="pill">Weight</div>
+            <div class="pill">Walk &amp; activity</div>
+          </div>
+
+          <div class="row-card" onclick="go('report')">
+            <div class="ric">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#1B3221" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 13h6M9 17h6"/></svg>
+            </div>
+            <div class="txt">
+              <strong>Health File</strong>
+              <span>Updated today · ready for any doctor</span>
+            </div>
+            <div class="action">Share</div>
+          </div>
+
+          <div class="row-card">
+            <div class="avatar-stack"><span>R</span><span>A</span></div>
+            <div class="txt">
+              <strong>Share this week with family</strong>
+              <span>Rohan and Amma follow your progress</span>
+            </div>
+          </div>
+        </div>
+        <div class="bottomnav">
+          <div class="navitem active"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="3"/><path d="M8 2v4M16 2v4M3 10h18"/></svg>Today</div>
+          <div class="navitem" onclick="go('checkin')"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 3"/></svg>Track</div>
+          <div class="navitem"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M3 17l5-5 4 4 8-9"/></svg>Insights</div>
+          <div class="navitem" onclick="go('care')"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M12 21s-7-4.5-9.5-9A5.5 5.5 0 0112 5a5.5 5.5 0 019.5 7c-2.5 4.5-9.5 9-9.5 9z"/></svg>Care</div>
+          <div class="navitem"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M4 19V5a2 2 0 012-2h11l3 3v13a2 2 0 01-2 2H6a2 2 0 01-2-2z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>Learn</div>
+        </div>
+      </div>
+
+      <!-- ============ CHECK-IN ============ -->
+      <div class="screen" id="screen-checkin">
+        <div class="status-bar"></div>
+        <div class="topbar" style="justify-content:flex-start; gap:10px;">
+          <button class="icon-btn" aria-label="Back" onclick="go('today')"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#1B3221" stroke-width="2.2"><path d="M15 18l-6-6 6-6"/></svg></button>
+          <div style="font-weight:800; font-size:13px; color:var(--ink-secondary);">Daily check-in</div>
+        </div>
+        <div class="progressbar">
+          <div class="seg done"></div><div class="seg done"></div><div class="seg"></div><div class="seg"></div><div class="seg"></div>
+        </div>
+        <div class="sync-banner">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#3F7D58" stroke-width="2" style="flex-shrink:0;"><circle cx="12" cy="12" r="7"/><path d="M12 9v3l2 2M9 2h6M9 22h6"/></svg>
+          6,240 steps &amp; 7 h 12 m sleep already synced from your watch — only 2 steps left.
+        </div>
+        <div class="content checkin-body">
+          <h2>How's your fasting sugar today?</h2>
+          <div class="hint">Step 2 of 5 — every step is optional</div>
+
+          <div class="stepper">
+            <button onclick="stepVal(-1)">–</button>
+            <div>
+              <div class="value" id="sugarval">96</div>
+              <span class="unit">mg/dL</span>
+            </div>
+            <button onclick="stepVal(1)">+</button>
+          </div>
+
+          <div class="chip-row">
+            <div class="chip selected">Fasting</div>
+            <div class="chip">Post-meal</div>
+            <div class="chip">HbA1c</div>
+          </div>
+
+          <div class="checkin-actions">
+            <button class="btn-primary" onclick="go('report')">Continue</button>
+            <button class="btn-skip" onclick="go('report')">Skip this step</button>
+            <div class="reassure">Nothing is graded here — log what's true today.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ BODY REPORT ============ -->
+      <div class="screen" id="screen-report">
+        <div class="status-bar"></div>
+        <div class="topbar" style="justify-content:flex-start; gap:10px;">
+          <button class="icon-btn" aria-label="Close" onclick="go('today')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#1B3221" stroke-width="2.2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+          <div style="font-weight:800; font-size:13px; color:var(--ink-secondary);">Check-in complete</div>
+        </div>
+        <div class="content">
+          <div class="report-hero">
+            <div class="tick">
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#3F7D58" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+            </div>
+            <h2>Your Body Report</h2>
+            <div class="sub">Thursday, 2 July · done in 1 m 40 s</div>
+          </div>
+
+          <div class="card" style="margin-bottom:16px; padding: 8px 24px;">
+            <div class="metric-row">
+              <div class="mname">Fasting sugar</div>
+              <div class="mval">96</div>
+              <span class="status-chip ok">In range</span>
+            </div>
+            <div class="metric-row">
+              <div class="mname">Blood pressure</div>
+              <div class="mval">124/82</div>
+              <span class="status-chip ok">Steady</span>
+            </div>
+            <div class="metric-row">
+              <div class="mname">Sleep</div>
+              <div class="mval">7 h 12 m</div>
+              <span class="status-chip synced">Synced ⌚</span>
+            </div>
+            <div class="metric-row">
+              <div class="mname">Steps so far</div>
+              <div class="mval">6,240</div>
+              <span class="status-chip synced">Synced ⌚</span>
+            </div>
+          </div>
+
+          <div class="insight-card">
+            <div class="bulb">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#B9832B" stroke-width="2"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.2 1 2.3h6c0-1.1.4-1.8 1-2.3A7 7 0 0 0 12 2z"/></svg>
+            </div>
+            <p><strong>A steady morning.</strong> Your readings look balanced today — a good day for a 15-minute walk after lunch.</p>
+          </div>
+
+          <div class="healthfile-cta">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#FBF8F0" stroke-width="2" style="flex-shrink:0;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 13h6M9 17h6"/></svg>
+            <div class="txt">
+              <strong>Health File updated</strong>
+              <span>Always ready to show any doctor — or send to family</span>
+            </div>
+            <button class="share">Share</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ RHYTHM ============ -->
+      <div class="screen" id="screen-rhythm">
+        <div class="status-bar"></div>
+        <div class="topbar">
+          <div>
+            <div class="greeting" style="font-size:18px;">Your rhythm</div>
+            <div class="date">Not a streak. A pattern.</div>
+          </div>
+        </div>
+        <div class="content">
+          <div class="card rhythm-card">
+            <div class="section-label">Last 7 days</div>
+            <div class="ring-wrap">
+              <svg width="168" height="168" viewBox="0 0 168 168">
+                <circle cx="84" cy="84" r="70" fill="none" stroke="#EDEAE0" stroke-width="14"/>
+                <circle cx="84" cy="84" r="70" fill="none" stroke="#3F7D58" stroke-width="14" stroke-linecap="round"
+                  stroke-dasharray="439.8" stroke-dashoffset="125.6" transform="rotate(-90 84 84)"/>
+              </svg>
+              <div class="ring-label">
+                <div class="big">4/7</div>
+                <div class="small">days logged</div>
+              </div>
+            </div>
+            <div class="section-label" style="text-align:left; margin-top:8px;">Last 30 days</div>
+            <div class="month-grid" id="monthgrid"></div>
+            <div class="warmcopy">
+              You checked in <strong>4 of the last 7 days</strong> — that's steady progress. Every entry helps your care team see the full picture, and there's no penalty for a quiet week.
+            </div>
+          </div>
+          <div class="nudge-card">
+            <div class="section-label">Gentle nudge</div>
+            <p>It's been 2 days since your last check-in. No worries — let's pick it back up today.</p>
+            <button onclick="go('checkin')">Log now</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ CARE+ ============ -->
+      <div class="screen" id="screen-care">
+        <div class="status-bar"></div>
+        <div class="topbar">
+          <div>
+            <div class="greeting" style="font-size:18px;">Care+</div>
+            <div class="date">Diabetes Reversal Program</div>
+          </div>
+          <button class="icon-btn" aria-label="Batch messages" onclick="go('chat')">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#1B3221" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+            <span class="badge">6</span>
+          </button>
+        </div>
+        <div class="content">
+          <div class="batch-header">
+            <div class="section-label">Your batch — July 2026</div>
+            <h2>You're not doing this alone</h2>
+            <div class="batch-avatars">
+              <div class="stack"><span>M</span><span>R</span><span>S</span><span>+9</span></div>
+              <div class="count">12 people on this journey with you</div>
+            </div>
+          </div>
+
+          <div class="card coach-card">
+            <div class="coach-photo">AV</div>
+            <div>
+              <div class="name">Dr. Ansh Verma</div>
+              <div class="role">Your program coach</div>
+            </div>
+            <button class="coach-msg-btn">Message</button>
+          </div>
+
+          <div class="card pulse-card">
+            <div class="section-label">Batch pulse</div>
+            <div class="pulse-row">
+              <div class="pnum">9<span style="font-size:15px; color:var(--ink-muted);">/12</span></div>
+              <div class="ptxt">batchmates checked in today — you're one of them ✓</div>
+            </div>
+            <div class="goal-caption"><strong>Batch goal:</strong> walk 250 km together this month</div>
+            <div class="goalbar"><div class="fill"></div></div>
+            <div class="goal-caption">182 km done — no rankings, just the team total</div>
+          </div>
+
+          <div class="section-label" style="margin:6px 0 10px 4px;">Your journey</div>
+          <div class="card" style="text-align:left; padding: 20px 20px 8px; margin-bottom:16px;">
+            <div class="journey">
+              <div class="stop done">
+                <div class="track"><div class="dot"></div><div class="line"></div></div>
+                <div class="info"><div class="wk">Week 1–2</div><div class="ttl">Foundations &amp; baseline</div></div>
+              </div>
+              <div class="stop current">
+                <div class="track"><div class="dot"></div><div class="line"></div></div>
+                <div class="info"><div class="wk">Week 3–6 · You are here</div><div class="ttl">Building daily rhythm</div></div>
+              </div>
+              <div class="stop">
+                <div class="track"><div class="dot"></div><div class="line"></div></div>
+                <div class="info"><div class="wk">Week 7–12</div><div class="ttl">Metabolic reset</div></div>
+              </div>
+              <div class="stop">
+                <div class="track"><div class="dot"></div></div>
+                <div class="info"><div class="wk">Week 13–24</div><div class="ttl">Sustain &amp; graduate</div></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="section-label" style="margin:0 0 10px 4px;">Next up</div>
+          <div class="event-card" onclick="go('calendar')">
+            <div class="datechip"><div class="d">4</div><div class="m">Jul</div></div>
+            <div class="etxt">
+              <strong>Live cooking session</strong>
+              <span>Saturday · 6:00 PM · with Dr. Ansh</span>
+            </div>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8B9285" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+          </div>
+        </div>
+        <div class="bottomnav">
+          <div class="navitem" onclick="go('today')"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="3"/><path d="M8 2v4M16 2v4M3 10h18"/></svg>Today</div>
+          <div class="navitem" onclick="go('checkin')"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 3"/></svg>Track</div>
+          <div class="navitem"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M3 17l5-5 4 4 8-9"/></svg>Insights</div>
+          <div class="navitem active"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M12 21s-7-4.5-9.5-9A5.5 5.5 0 0112 5a5.5 5.5 0 019.5 7c-2.5 4.5-9.5 9-9.5 9z"/></svg>Care</div>
+          <div class="navitem"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M4 19V5a2 2 0 012-2h11l3 3v13a2 2 0 01-2 2H6a2 2 0 01-2-2z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>Learn</div>
+        </div>
+      </div>
+
+      <!-- ============ CHAT ============ -->
+      <div class="screen" id="screen-chat">
+        <div class="status-bar"></div>
+
+        <!-- HUB VIEW -->
+        <div id="chat-hub" style="display:flex; flex-direction:column; height:100%;">
+          <div class="topbar" style="justify-content:flex-start; gap:10px;">
+            <button class="icon-btn" aria-label="Back" onclick="go('care')"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#1B3221" stroke-width="2.2"><path d="M15 18l-6-6 6-6"/></svg></button>
+            <div>
+              <div style="font-weight:800; font-size:15px;">Batch messages</div>
+              <div style="font-size:11px; color:var(--ink-muted);">Diabetes Reversal · July 2026</div>
+            </div>
+          </div>
+          <div class="content" style="padding-top:8px;">
+            <div class="room-card" onclick="openRoom('announce')">
+              <div class="room-icon announce">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#B9832B" stroke-width="2"><path d="M3 11l18-5v12L3 14v-3z"/><path d="M7 14v5a2 2 0 002 2h1"/></svg>
+              </div>
+              <div class="rtxt">
+                <div class="rname">Announcements <span class="lock-tag">Coach only</span></div>
+                <div class="rpreview">Dr. Ansh: Live cooking session this Saturday, 6pm…</div>
+              </div>
+              <div style="display:flex; flex-direction:column; align-items:flex-end; gap:5px;">
+                <span class="rtime">2h</span>
+                <span class="unread-dot">1</span>
+              </div>
+            </div>
+
+            <div class="room-card" onclick="openRoom('general')">
+              <div class="room-icon general">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#3F7D58" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/><circle cx="9" cy="7" r="4"/></svg>
+              </div>
+              <div class="rtxt">
+                <div class="rname">General · Your batch</div>
+                <div class="rpreview">Sunita: Same here! The methi water tip is working…</div>
+              </div>
+              <div style="display:flex; flex-direction:column; align-items:flex-end; gap:5px;">
+                <span class="rtime">14m</span>
+                <span class="unread-dot">5</span>
+              </div>
+            </div>
+
+            <div class="chat-safety">
+              Long-press any message to report it.<br/>Your coach reviews reports within 24 hours.
+            </div>
+          </div>
+        </div>
+
+        <!-- ROOM VIEW -->
+        <div id="chat-room" style="display:none; flex-direction:column; height:100%;">
+          <div class="topbar" style="justify-content:flex-start; gap:10px;">
+            <button class="icon-btn" aria-label="Back" onclick="closeRoom()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#1B3221" stroke-width="2.2"><path d="M15 18l-6-6 6-6"/></svg></button>
+            <div>
+              <div style="font-weight:800; font-size:14px;" id="room-title">General · Your batch</div>
+              <div style="font-size:11px; color:var(--ink-muted);" id="room-sub">12 members · long-press a message to report it</div>
+            </div>
+          </div>
+
+          <!-- General room messages -->
+          <div class="content" id="room-general" style="padding-top:8px;">
+            <div class="msg theirs">
+              <div class="who">Ravi</div>
+              <div class="bubble">Morning walk done 🌿 anyone else finding evenings harder than mornings?</div>
+            </div>
+            <div class="msg theirs">
+              <div class="who">Sunita</div>
+              <div class="bubble">Same here! The methi water tip from week 2 is working for me though.</div>
+            </div>
+            <div class="msg mine">
+              <div class="bubble">Evenings are my weak spot too. I've started keeping my walking shoes by the door — small thing but it helps.</div>
+            </div>
+            <div class="msg theirs coach">
+              <div class="who">Dr. Ansh · Coach</div>
+              <div class="bubble">Love this thread. Evening dips are completely normal — we'll cover exactly this in Saturday's session. 🌱</div>
+            </div>
+          </div>
+
+          <!-- Announcements room messages -->
+          <div class="content" id="room-announce" style="display:none; padding-top:8px;">
+            <div class="msg theirs coach announce-post">
+              <div class="who">Dr. Ansh · Coach · Mon</div>
+              <div class="bubble"><strong>Week 3 begins!</strong> This week we focus on building your daily rhythm. One check-in a day is the only goal.</div>
+            </div>
+            <div class="msg theirs coach announce-post">
+              <div class="who">Dr. Ansh · Coach · 2h ago</div>
+              <div class="bubble"><strong>Live cooking session</strong> this Saturday, 6 PM. Bring one question about your week. Join link is on the calendar. 🍲</div>
+            </div>
+          </div>
+
+          <!-- Composer (general) -->
+          <div class="composer" id="composer-general">
+            <input type="text" placeholder="Message your batch…" />
+            <button class="send">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#FBF8F0" stroke-width="2"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+            </button>
+          </div>
+          <!-- Read-only note (announcements) -->
+          <div class="readonly-note" id="composer-announce" style="display:none;">
+            Only your coach posts here — replies happen in General.
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ CALENDAR ============ -->
+      <div class="screen" id="screen-calendar">
+        <div class="status-bar"></div>
+        <div class="topbar" style="justify-content:flex-start; gap:10px;">
+          <button class="icon-btn" aria-label="Back" onclick="go('care')"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#1B3221" stroke-width="2.2"><path d="M15 18l-6-6 6-6"/></svg></button>
+          <div>
+            <div style="font-weight:800; font-size:15px;">Program calendar</div>
+            <div style="font-size:11px; color:var(--ink-muted);">July 2026 · Diabetes Reversal batch</div>
+          </div>
+        </div>
+
+        <div class="weekstrip">
+          <div class="day"><div class="dw">Mon</div><div class="dn">29</div><div class="evdot none"></div></div>
+          <div class="day"><div class="dw">Tue</div><div class="dn">30</div><div class="evdot none"></div></div>
+          <div class="day"><div class="dw">Wed</div><div class="dn">1</div><div class="evdot"></div></div>
+          <div class="day today"><div class="dw">Thu</div><div class="dn">2</div><div class="evdot none"></div></div>
+          <div class="day"><div class="dw">Fri</div><div class="dn">3</div><div class="evdot none"></div></div>
+          <div class="day"><div class="dw">Sat</div><div class="dn">4</div><div class="evdot"></div></div>
+          <div class="day"><div class="dw">Sun</div><div class="dn">5</div><div class="evdot"></div></div>
+        </div>
+
+        <div class="content">
+          <!-- Admin-only bar: members never see this -->
+          <div class="admin-bar">
+            <span class="lbl">Admin view</span>
+            <button>+ Add event</button>
+          </div>
+
+          <div class="agenda-event">
+            <div class="datechip"><div class="d">4</div><div class="m">Jul</div></div>
+            <div class="etxt">
+              <div class="ename">Live cooking session <span class="type-tag live">Live session</span></div>
+              <div class="etime">Saturday · 6:00 – 7:00 PM · Google Meet</div>
+              <div class="event-detail">
+                <p>Low-oil festive cooking with Dr. Ansh. We'll make two dinner recipes together and cover the "evening dip" everyone's been discussing.</p>
+                <div class="meta">Bring: one question about your week</div>
+                <button class="remind-btn">🔔 Remind me</button>
+              </div>
+            </div>
+            <button class="edit-pencil" title="Edit (admin only)">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#8B9285" stroke-width="2"><path d="M17 3a2.83 2.83 0 114 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
+            </button>
+          </div>
+
+          <div class="agenda-event">
+            <div class="datechip"><div class="d">5</div><div class="m">Jul</div></div>
+            <div class="etxt">
+              <div class="ename">Batch morning walk <span class="type-tag walk">Group walk</span></div>
+              <div class="etime">Sunday · 6:30 AM · your neighbourhood, together apart</div>
+            </div>
+            <button class="edit-pencil" title="Edit (admin only)">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#8B9285" stroke-width="2"><path d="M17 3a2.83 2.83 0 114 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
+            </button>
+          </div>
+
+          <div class="agenda-event">
+            <div class="datechip"><div class="d">8</div><div class="m">Jul</div></div>
+            <div class="etxt">
+              <div class="ename">Lab review week begins <span class="type-tag lab">Lab week</span></div>
+              <div class="etime">Upload your latest reports · coach reviews 1-on-1</div>
+            </div>
+            <button class="edit-pencil" title="Edit (admin only)">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#8B9285" stroke-width="2"><path d="M17 3a2.83 2.83 0 114 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
+            </button>
+          </div>
+
+          <div class="chat-safety">
+            Members see this calendar without the admin bar or edit pencils.<br/>
+            When an admin edits an event, an announcement can be auto-posted so schedule changes are never silent.
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="footer-note">
+    Prototype v2 covers the full PRD: design tokens · Today's One Thing + Daily Insight · ≤2-minute synced check-in · Body Report &amp; shareable Health File (USP) · non-punitive Rhythm · Care+ batch home with coach card, Batch Pulse and collective goal · dedicated Chat (Announcements + General) via the top-right chat icon on Care+ · admin-managed Program Calendar. Real implementation ports these exact tokens into Jetpack Compose.
+  </div>
+
+<script>
+  // Tab / screen switching
+  function go(name) {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.screen === name));
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+    document.getElementById('screen-' + name).classList.add('active');
+    if (name === 'chat') closeRoom();
+  }
+  document.querySelectorAll('.tab-btn').forEach(btn => btn.addEventListener('click', () => go(btn.dataset.screen)));
+
+  // Chat hub <-> room
+  function openRoom(kind) {
+    document.getElementById('chat-hub').style.display = 'none';
+    document.getElementById('chat-room').style.display = 'flex';
+    const isAnnounce = kind === 'announce';
+    document.getElementById('room-general').style.display = isAnnounce ? 'none' : 'block';
+    document.getElementById('room-announce').style.display = isAnnounce ? 'block' : 'none';
+    document.getElementById('composer-general').style.display = isAnnounce ? 'none' : 'flex';
+    document.getElementById('composer-announce').style.display = isAnnounce ? 'block' : 'none';
+    document.getElementById('room-title').textContent = isAnnounce ? 'Announcements' : 'General · Your batch';
+    document.getElementById('room-sub').textContent = isAnnounce ? 'Coach updates · read-only' : '12 members · long-press a message to report it';
+  }
+  function closeRoom() {
+    document.getElementById('chat-room').style.display = 'none';
+    document.getElementById('chat-hub').style.display = 'flex';
+  }
+
+  // Check-in chips
+  document.querySelectorAll('.chip-row .chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      chip.parentElement.querySelectorAll('.chip').forEach(c => c.classList.remove('selected'));
+      chip.classList.add('selected');
+    });
+  });
+
+  // Stepper
+  let sugar = 96;
+  function stepVal(delta) {
+    sugar = Math.max(40, Math.min(400, sugar + delta));
+    document.getElementById('sugarval').textContent = sugar;
+  }
+
+  // 30-day grid: logged / neutral-missed / dashed-future — never red
+  const grid = document.getElementById('monthgrid');
+  const pattern = [1,1,1,0,1,1,0, 1,0,1,1,1,0,1, 1,1,0,0,1,1,1, 1,1,1,0,0, 2,2,2,2];
+  pattern.forEach(v => {
+    const cell = document.createElement('div');
+    cell.className = 'cell' + (v === 1 ? ' logged' : v === 2 ? ' future' : '');
+    grid.appendChild(cell);
+  });
+</script>
+</body>
+</html>

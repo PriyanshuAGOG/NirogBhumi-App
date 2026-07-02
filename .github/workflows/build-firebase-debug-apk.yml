@@ -39,7 +39,13 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           path: app/build/outputs/apk/debug/*.apk
+      # Distribution is best-effort: its job is to deliver the APK to testers, not
+      # to gate the build. It depends on FIREBASE_TOKEN, an owner-rotated secret
+      # that expires; when it's stale this step warns but must NOT fail the run,
+      # otherwise a perfectly good compile shows up as a red build. The "Build
+      # debug APK" step above is the real compile gate.
       - name: Distribute to Firebase App Distribution testers
+        continue-on-error: true
         env:
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
           APP_DISTRIBUTION_TESTERS: ${{ secrets.APP_DISTRIBUTION_TESTERS }}
@@ -50,8 +56,12 @@ jobs:
             exit 0
           fi
           APK_PATH="$(find app/build/outputs/apk/debug -name '*.apk' | head -n1)"
-          npx --yes firebase-tools@15.22.3 appdistribution:distribute "$APK_PATH" \
+          if npx --yes firebase-tools@15.22.3 appdistribution:distribute "$APK_PATH" \
             --app 1:126409331898:android:b4e478566dcbeeb7009e83 \
             --project nirog-bhumi-app \
             --testers "$APP_DISTRIBUTION_TESTERS" \
-            --release-notes "Automated debug build - commit ${{ github.sha }}"
+            --release-notes "Automated debug build - commit ${{ github.sha }}"; then
+            echo "Distributed to testers."
+          else
+            echo "::warning::App Distribution upload failed (likely an expired FIREBASE_TOKEN). The APK built fine and is attached as a workflow artifact. Rotate the secret via 'firebase login:ci'."
+          fi

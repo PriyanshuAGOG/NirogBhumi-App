@@ -1,0 +1,198 @@
+import { useEffect, useMemo, useState } from 'react'
+import { collection, onSnapshot, query } from 'firebase/firestore'
+import { httpsCallable, type HttpsCallableResult } from 'firebase/functions'
+import { FirebaseError } from 'firebase/app'
+import { db, functions } from '../lib/firebase'
+import { errText } from '../lib/errors'
+import './Users.css'
+
+interface UserRow {
+  id: string
+  userId?: string
+  name?: string
+  email?: string
+  phone?: string
+  role?: string
+  status?: string
+  programActive?: boolean
+}
+
+type AssignableRole = 'user' | 'coach' | 'admin'
+const ROLE_OPTIONS: AssignableRole[] = ['user', 'coach', 'admin']
+
+// A callable's "not deployed" surfaces as one of these codes.
+const NOT_DEPLOYED = new Set(['functions/not-found', 'functions/unavailable', 'functions/internal'])
+
+interface RowState {
+  saving: boolean
+  message: string | null
+  error: string | null
+}
+
+function roleTagClass(role: string | undefined): string {
+  switch (role) {
+    case 'admin':
+    case 'super_admin':
+      return 'tag-good'
+    case 'coach':
+      return 'tag-warn'
+    default:
+      return 'tag-neutral'
+  }
+}
+
+export default function Users() {
+  const [users, setUsers] = useState<UserRow[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
+  const [pending, setPending] = useState<Record<string, AssignableRole>>({})
+  const [rowState, setRowState] = useState<Record<string, RowState>>({})
+
+  useEffect(() => {
+    const unsub = onSnapshot(
+      query(collection(db, 'users')),
+      (snap) => {
+        const next = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<UserRow, 'id'>) }))
+        next.sort((a, b) => (a.name ?? a.email ?? '').localeCompare(b.name ?? b.email ?? ''))
+        setUsers(next)
+        setLoading(false)
+        setError(null)
+      },
+      (err) => {
+        setLoading(false)
+        setError(errText(err, 'Could not load users'))
+      },
+    )
+    return unsub
+  }, [])
+
+  const visible = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    if (!q) return users
+    return users.filter((u) =>
+      [u.name, u.email, u.phone, u.id].some((v) => v?.toLowerCase().includes(q)),
+    )
+  }, [users, search])
+
+  async function apply(u: UserRow) {
+    const nextRole = pending[u.id] ?? (u.role as AssignableRole) ?? 'user'
+    setRowState((prev) => ({ ...prev, [u.id]: { saving: true, message: null, error: null } }))
+    try {
+      const setUserRole = httpsCallable<{ uid: string; role: string }, unknown>(
+        functions,
+        'setUserRole',
+      )
+      const res: HttpsCallableResult<unknown> = await setUserRole({
+        uid: u.userId ?? u.id,
+        role: nextRole,
+      })
+      void res
+      setRowState((prev) => ({
+        ...prev,
+        [u.id]: { saving: false, message: `Role set to ${nextRole}.`, error: null },
+      }))
+    } catch (err) {
+      const notDeployed = err instanceof FirebaseError && NOT_DEPLOYED.has(err.code)
+      setRowState((prev) => ({
+        ...prev,
+        [u.id]: {
+          saving: false,
+          message: null,
+          error: notDeployed
+            ? 'Role service not deployed yet.'
+            : errText(err, 'Could not set role'),
+        },
+      }))
+    }
+  }
+
+  return (
+    <section className="page">
+      <header className="page-head">
+        <span className="overline">Users &amp; roles</span>
+        <h1>Users &amp; roles</h1>
+        <p className="page-lede">
+          Everyone on the platform. Change a person's role — this calls a secured
+          function that updates their access.
+        </p>
+      </header>
+
+      <div className="toolbar">
+        <input
+          className="input user-search"
+          placeholder="Search by name, email or phone…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+      </div>
+
+      {error && (
+        <div className="banner banner-error" role="alert">
+          {error}
+        </div>
+      )}
+
+      {loading ? (
+        <div className="card empty">
+          <div className="spin spinner" aria-hidden />
+          <p>Loading users…</p>
+        </div>
+      ) : visible.length === 0 ? (
+        <div className="card empty">
+          <div className="empty-mark" aria-hidden>🧑‍🤝‍🧑</div>
+          <p className="empty-title">No users found</p>
+          <p className="empty-sub">
+            {search ? 'Try a different search.' : 'Users will appear here as people sign up.'}
+          </p>
+        </div>
+      ) : (
+        <div className="user-list">
+          {visible.map((u) => {
+            const current = (u.role as AssignableRole) ?? 'user'
+            const selected = pending[u.id] ?? current
+            const state = rowState[u.id]
+            const changed = selected !== current
+            return (
+              <div key={u.id} className="card user-row">
+                <div className="user-main">
+                  <span className="user-name">{u.name ?? '(no name)'}</span>
+                  <span className="user-sub">
+                    {u.email ?? '—'}
+                    {u.phone ? ` · ${u.phone}` : ''}
+                  </span>
+                  {state?.message && <span className="user-ok">{state.message}</span>}
+                  {state?.error && <span className="user-err">{state.error}</span>}
+                </div>
+                <div className="user-meta">
+                  {u.programActive && <span className="tag tag-good">Care+</span>}
+                  <span className={`tag ${roleTagClass(u.role)}`}>{u.role ?? 'user'}</span>
+                  <select
+                    className="select user-role-select"
+                    value={selected}
+                    onChange={(e) =>
+                      setPending((prev) => ({ ...prev, [u.id]: e.target.value as AssignableRole }))
+                    }
+                  >
+                    {ROLE_OPTIONS.map((r) => (
+                      <option key={r} value={r}>
+                        {r}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    className="btn btn-forest btn-sm"
+                    disabled={!changed || state?.saving}
+                    onClick={() => void apply(u)}
+                  >
+                    {state?.saving ? 'Saving…' : 'Set role'}
+                  </button>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </section>
+  )
+}

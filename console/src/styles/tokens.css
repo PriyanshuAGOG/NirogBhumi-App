@@ -1,0 +1,52 @@
+/*
+ * Nirog Bhumi design tokens — mirrors the member (Android) app so the two
+ * surfaces feel like one product. Values are authoritative and must not drift
+ * from docs/prototype.html / DesignSystem.kt.
+ */
+:root {
+  /* Surfaces */
+  --surface: #F8F6EF;
+  --surface-card: #FFFFFF;
+  --surface-sunken: #F1EDE3;
+
+  /* Ink */
+  --ink-primary: #1B2219;
+  --ink-secondary: #56604F;
+  --ink-muted: #8B9285;
+  --ink-on-accent: #F8F6EF;
+
+  /* Brand accents */
+  --forest: #1B3221;
+  --forest-soft: #314936;
+  --gold: #C7902F;
+  --gold-soft: #EAD6A9;
+  --terracotta: #B4592F;
+
+  /* Status roles */
+  --status-in-range: #3F7D58;
+  --status-attention: #B9832B;
+  --status-critical: #B4472F;
+
+  /* Spacing scale: 4 / 8 / 12 / 16 / 24 / 32 / 48 */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+
+  /* Radius */
+  --radius-sm: 10px;
+  --radius-md: 16px;
+  --radius-card: 24px;
+  --radius-pill: 999px;
+
+  /* Elevation — two-layer soft shadow, no hard borders on cards */
+  --shadow-card: 0 1px 2px rgba(27, 34, 25, 0.04), 0 12px 28px rgba(27, 34, 25, 0.07);
+  --shadow-float: 0 4px 10px rgba(27, 34, 25, 0.08), 0 24px 48px rgba(27, 34, 25, 0.14);
+
+  /* Type families */
+  --font-display: 'Fraunces', Georgia, 'Times New Roman', serif;
+  --font-body: 'Manrope', -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
