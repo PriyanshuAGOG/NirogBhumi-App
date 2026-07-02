@@ -65,6 +65,45 @@ That publishes the console to the project's default Hosting URL
 (e.g. `admin.nirogbhumi.app`) can be added later in the Firebase console
 under Hosting → Add custom domain.
 
+## Deploying to Vercel (recommended for easy access anywhere)
+
+`console/vercel.json` is already configured (build command, output dir,
+SPA rewrite so client-side routes don't 404 on refresh). Since the console
+lives in a subdirectory of this repo, Vercel needs to be told that.
+
+**Via the Vercel dashboard (one-time setup, auto-redeploys on every push):**
+1. [vercel.com/new](https://vercel.com/new) → import the `NirogBhumi-App`
+   GitHub repo.
+2. Under **Root Directory**, click *Edit* and select `console`.
+3. Framework preset should auto-detect as **Vite** — leave build command/
+   output directory as default (picked up from `vercel.json`).
+4. Under **Environment Variables**, add all six (values from
+   `.env.example`, `VITE_FIREBASE_API_KEY`/`VITE_FIREBASE_APP_ID` from your
+   Firebase Web App registration):
+   ```
+   VITE_FIREBASE_API_KEY=<your web apiKey>
+   VITE_FIREBASE_AUTH_DOMAIN=nirog-bhumi-app.firebaseapp.com
+   VITE_FIREBASE_PROJECT_ID=nirog-bhumi-app
+   VITE_FIREBASE_STORAGE_BUCKET=nirog-bhumi-app.firebasestorage.app
+   VITE_FIREBASE_MESSAGING_SENDER_ID=126409331898
+   VITE_FIREBASE_APP_ID=<your web appId>
+   ```
+5. Deploy. Every future push to this branch/repo auto-redeploys.
+
+**Via the Vercel CLI (deploy right now, no GitHub connection needed):**
+```sh
+cd console
+npx vercel          # first run: log in, link/create project, confirm root dir
+npx vercel --prod   # promote to the production URL
+```
+The CLI prompts for env vars on first deploy if `.env` isn't picked up
+automatically — paste the same six values.
+
+**Important:** since this is a private admin tool, don't rely on the
+Vercel URL being secret — access is enforced by the app's own role check
+(only `admin`/`coach`/`super_admin` custom claims get past the sign-in
+gate), not by hiding the URL.
+
 ## Design tokens
 
 `src/styles/tokens.css` mirrors the member app's palette and type (Fraunces +
