@@ -36,8 +36,8 @@ interface HealthRepository {
 
     // Care+ (program members only): one shared announcement feed, plus one chat room
     // per program so members only see conversation relevant to the program they joined.
-    fun listenAnnouncements(update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription
-    fun postAnnouncement(title: String, body: String, done: (CloudResult<Unit>) -> Unit)
+    fun listenAnnouncements(programId: String, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription
+    fun postAnnouncement(programId: String, title: String, body: String, done: (CloudResult<Unit>) -> Unit)
     fun listenProgramChat(programId: String, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription
     fun sendProgramChatMessage(programId: String, text: String, senderName: String, done: (CloudResult<Unit>) -> Unit)
     fun reportChatMessage(messageId: String, programId: String, reportedText: String, reportedUserId: String, done: (CloudResult<Unit>) -> Unit)
@@ -203,9 +203,12 @@ class FirebaseHealthRepository : HealthRepository {
             .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Program code could not be verified", it)) }
     }
 
-    override fun listenAnnouncements(update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription {
+    override fun listenAnnouncements(programId: String, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription {
         val database = db ?: run { update(CloudResult.Failure("Firebase is not configured")); return CloudSubscription {} }
+        // Scoped to the caller's own program - without this filter, members of
+        // different programs would see each other's announcements mixed together.
         val registration = database.collection("announcements")
+            .whereEqualTo("programId", programId)
             .orderBy("createdAt", com.google.firebase.firestore.Query.Direction.DESCENDING)
             .limit(50)
             .addSnapshotListener { snapshot, error ->
@@ -215,11 +218,12 @@ class FirebaseHealthRepository : HealthRepository {
         return CloudSubscription { registration.remove() }
     }
 
-    override fun postAnnouncement(title: String, body: String, done: (CloudResult<Unit>) -> Unit) {
+    override fun postAnnouncement(programId: String, title: String, body: String, done: (CloudResult<Unit>) -> Unit) {
         val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
         val database = db ?: return done(CloudResult.Failure("Firebase is not configured"))
         database.collection("announcements").add(
             mapOf(
+                "programId" to programId,
                 "title" to title,
                 "body" to body,
                 "authorId" to uid,

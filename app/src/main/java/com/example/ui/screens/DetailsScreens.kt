@@ -2141,8 +2141,9 @@ fun AnnouncementsScreen(state: NirogState) {
     var composeBody by remember { mutableStateOf("") }
     var posting by remember { mutableStateOf(false) }
 
-    DisposableEffect(Unit) {
-        val subscription = state.repository.listenAnnouncements { result ->
+    DisposableEffect(state.activeProgramId) {
+        if (state.activeProgramId.isBlank()) { records = emptyList(); return@DisposableEffect onDispose {} }
+        val subscription = state.repository.listenAnnouncements(state.activeProgramId) { result ->
             records = when (result) {
                 is com.nirogbhumi.app.data.CloudResult.Success -> result.value
                 is com.nirogbhumi.app.data.CloudResult.Failure -> emptyList()
@@ -2212,7 +2213,7 @@ fun AnnouncementsScreen(state: NirogState) {
                     enabled = !posting && composeTitle.isNotBlank() && composeBody.isNotBlank(),
                     onClick = {
                         posting = true
-                        state.repository.postAnnouncement(composeTitle.trim(), composeBody.trim()) { result ->
+                        state.repository.postAnnouncement(state.activeProgramId, composeTitle.trim(), composeBody.trim()) { result ->
                             posting = false
                             if (result is com.nirogbhumi.app.data.CloudResult.Success) {
                                 composeTitle = ""; composeBody = ""; showComposer = false

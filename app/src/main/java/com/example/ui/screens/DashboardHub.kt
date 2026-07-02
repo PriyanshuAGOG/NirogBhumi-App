@@ -118,16 +118,6 @@ private fun markTourSeen(context: android.content.Context) {
         .edit().putBoolean("onboarding_tour_seen", true).apply()
 }
 
-// Consultation booking now happens on nirogbhumi.com rather than the in-app
-// stepper, so entry points open the website instead of navigating further.
-private fun openNirogBhumiWebsite(context: android.content.Context) {
-    runCatching {
-        context.startActivity(
-            android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://nirogbhumi.com"))
-        )
-    }
-}
-
 @Composable
 fun OnboardingTourOverlay(state: NirogState) {
     val context = LocalContext.current
@@ -1401,7 +1391,6 @@ fun InsightsTab(state: NirogState) {
 // TAB 4: Care Team & Consultations
 @Composable
 fun CareTab(state: NirogState) {
-    val context = LocalContext.current
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1418,75 +1407,35 @@ fun CareTab(state: NirogState) {
                 color = Color(0xFF1B3221)
             )
             Text(
-                text = "Your expert consultations and program community.",
+                text = if (state.isProgramActive) "Your program, your batch, your coach." else "A guided program with a real coach and a community on the same path.",
                 fontSize = 15.sp,
                 color = Color(0xFF434842),
                 modifier = Modifier.padding(top = 4.dp)
             )
         }
 
-        // Consultation booking - real, functional, redirects to the site
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { openNirogBhumiWebsite(context) }
-                .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.3f), shape = RoundedCornerShape(24.dp)),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFFEEE8DC)),
-            shape = RoundedCornerShape(24.dp)
-        ) {
-            Column(modifier = Modifier.padding(20.dp)) {
-                Text(
-                    text = "Your Care Team",
-                    fontSize = 22.sp,
-                    fontFamily = FontFamily.Serif,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF1B3221)
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "Schedule video consultations or follow-ups with qualified experts and metabolic coaches on nirogbhumi.com.",
-                    fontSize = 14.sp,
-                    color = Color(0xFF434842),
-                    lineHeight = 18.sp
-                )
-                Spacer(modifier = Modifier.height(18.dp))
-                Button(
-                    onClick = { openNirogBhumiWebsite(context) },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF314936)),
-                    shape = RoundedCornerShape(20.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Filled.CalendarMonth, "Book Class", modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Book Consultation on nirogbhumi.com", fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-        }
-
         if (!state.isProgramActive) {
             // Care+'s calendar/community layer is a second tier only for enrolled
-            // program members - a locked upsell replaces the old bento grid of
-            // mostly-empty program screens for everyone else.
+            // program members. Rather than a single thin locked card, show what's
+            // actually inside so the upsell isn't just an empty-feeling wall.
             Card(
                 modifier = Modifier.fillMaxWidth().border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.3f), shape = RoundedCornerShape(24.dp)),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF314936)),
                 shape = RoundedCornerShape(24.dp)
             ) {
                 Column(modifier = Modifier.padding(20.dp)) {
                     Box(
-                        modifier = Modifier.size(40.dp).background(Color(0xFFEBF7E8), CircleShape),
+                        modifier = Modifier.size(40.dp).background(Color.White.copy(alpha = 0.14f), CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(Icons.Filled.Lock, "Locked", tint = Color(0xFF1B3221), modifier = Modifier.size(20.dp))
+                        Icon(Icons.Filled.Lock, "Locked", tint = Color.White, modifier = Modifier.size(20.dp))
                     }
                     Spacer(modifier = Modifier.height(12.dp))
-                    Text("Unlock Care+", fontSize = 18.sp, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+                    Text("You're not doing this alone", fontSize = 20.sp, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color.White)
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        "Members enrolled in a Nirog Bhumi program get a day-by-day program calendar, admin announcements, and a community chat with fellow members.",
-                        fontSize = 13.sp, color = Color(0xFF434842), lineHeight = 18.sp
+                        "Join a Nirog Bhumi program to unlock a coach, a batch of people on the same journey, and a program calendar.",
+                        fontSize = 13.sp, color = Color(0xFFB2CEB4), lineHeight = 18.sp
                     )
                     Spacer(modifier = Modifier.height(16.dp))
                     Button(
@@ -1495,11 +1444,15 @@ fun CareTab(state: NirogState) {
                             state.currentScreen = "program_code_optional"
                         },
                         modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF314936)),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC7902F)),
                         shape = RoundedCornerShape(20.dp)
-                    ) { Text("Enter program code", fontWeight = FontWeight.Bold) }
+                    ) { Text("Enter program code", fontWeight = FontWeight.Bold, color = Color(0xFF241706)) }
                 }
             }
+
+            CareRow(Icons.Outlined.Groups, "A coach, not a chatbot", "A named program coach who checks in on your batch and answers questions.") {}
+            CareRow(Icons.Outlined.Forum, "A batch on the same path", "Group chat and a coach announcements channel with people doing this with you.") {}
+            CareRow(Icons.Outlined.CalendarMonth, "A real program calendar", "Live sessions, group walks, and lab-review weeks - never a silent schedule change.") {}
         } else {
             val dayNumber = if (state.programStartedAtMillis > 0) {
                 (((System.currentTimeMillis() - state.programStartedAtMillis) / (1000L * 60 * 60 * 24)) + 1).coerceAtLeast(1)
@@ -1520,14 +1473,60 @@ fun CareTab(state: NirogState) {
             }
 
             BatchPulseCard(state)
+            PinnedAnnouncementCard(state)
 
             CareRow(Icons.Outlined.Checklist, "Today's Checklist", "Your daily program actions") { state.currentScreen = "active_journey" }
-            CareRow(Icons.Outlined.CalendarMonth, "Program Calendar", "See your full program timeline") { state.currentScreen = "program_calendar" }
-            CareRow(Icons.Outlined.Campaign, "Announcements", "Updates from the Nirog Bhumi team") { state.currentScreen = "announcements" }
-            CareRow(Icons.Outlined.Forum, "Community Chat", "Talk with others in your program") { state.currentScreen = "program_chat" }
+            CareRow(Icons.Outlined.CalendarMonth, "Program Calendar", "Live sessions, group walks, and lab weeks") { state.currentScreen = "program_calendar" }
         }
 
         Spacer(modifier = Modifier.height(32.dp))
+    }
+}
+
+/**
+ * Latest announcement, pinned on the Care+ home so a coach's most recent update
+ * is never missed behind a nav tap. Full history lives in the Chat Hub's
+ * Announcements room (top-right chat icon) - this is a preview, not a duplicate
+ * surface, so tapping it opens that same room rather than a third screen.
+ */
+@Composable
+private fun PinnedAnnouncementCard(state: NirogState) {
+    var latest by remember { mutableStateOf<Map<String, Any?>?>(null) }
+    DisposableEffect(state.activeProgramId) {
+        if (state.activeProgramId.isBlank()) return@DisposableEffect onDispose {}
+        val sub = state.repository.listenAnnouncements(state.activeProgramId) { result ->
+            if (result is CloudResult.Success) latest = result.value.firstOrNull()?.values
+        }
+        onDispose { sub.cancel() }
+    }
+    val announcement = latest ?: return
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { state.currentScreen = "announcements" }
+            .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.3f), shape = RoundedCornerShape(20.dp)),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFFF4E9D3)),
+        shape = RoundedCornerShape(20.dp)
+    ) {
+        Row(modifier = Modifier.padding(16.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier.size(36.dp).background(Color(0xFFB9832B).copy(alpha = 0.16f), CircleShape),
+                contentAlignment = Alignment.Center
+            ) { Icon(Icons.Filled.Campaign, contentDescription = null, tint = Color(0xFFB9832B), modifier = Modifier.size(18.dp)) }
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    announcement["title"]?.toString() ?: "From your coach",
+                    fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B2219),
+                    maxLines = 1, overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    announcement["body"]?.toString().orEmpty(),
+                    fontSize = 12.sp, color = Color(0xFF4B6450),
+                    maxLines = 1, overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
     }
 }
 
