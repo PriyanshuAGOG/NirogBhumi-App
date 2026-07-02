@@ -41,6 +41,10 @@ fun MainHub(state: NirogState) {
                 },
                 onNotificationClick = {
                     state.currentScreen = "notifications"
+                },
+                activeTab = state.activeTab,
+                onChatClick = {
+                    state.currentScreen = "chat_hub"
                 }
             )
         },
@@ -239,7 +243,13 @@ fun OnboardingTourOverlay(state: NirogState) {
 
 // Custom Top App Bar matching Nirog Bhumi layout
 @Composable
-fun NirogTopAppBar(profileName: String, onProfileClick: () -> Unit, onNotificationClick: () -> Unit) {
+fun NirogTopAppBar(
+    profileName: String,
+    onProfileClick: () -> Unit,
+    onNotificationClick: () -> Unit,
+    activeTab: String = "Today",
+    onChatClick: () -> Unit = {},
+) {
     Surface(
         color = Color(0xFFF1FDEE),
         modifier = Modifier
@@ -285,13 +295,24 @@ fun NirogTopAppBar(profileName: String, onProfileClick: () -> Unit, onNotificati
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
-
-                IconButton(onClick = onNotificationClick) {
-                    Icon(
-                        imageVector = Icons.Filled.Notifications,
-                        contentDescription = "Notifications",
-                        tint = Color(0xFF1B3221)
-                    )
+                // On the Care+ tab the top-right control is the batch chat hub
+                // (Announcements + General), not the notification bell.
+                if (activeTab == "Care") {
+                    IconButton(onClick = onChatClick) {
+                        Icon(
+                            imageVector = Icons.Filled.Forum,
+                            contentDescription = "Batch messages",
+                            tint = Color(0xFF1B3221)
+                        )
+                    }
+                } else {
+                    IconButton(onClick = onNotificationClick) {
+                        Icon(
+                            imageVector = Icons.Filled.Notifications,
+                            contentDescription = "Notifications",
+                            tint = Color(0xFF1B3221)
+                        )
+                    }
                 }
             }
         }
