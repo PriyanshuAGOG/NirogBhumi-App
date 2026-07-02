@@ -61,7 +61,13 @@ class MainActivity : ComponentActivity(), com.razorpay.PaymentResultListener {
         val state = nirogState
 
         Scaffold(
-          modifier = Modifier.fillMaxSize()
+          modifier = Modifier.fillMaxSize(),
+          // This shell has no topBar/bottomBar of its own - every real screen underneath
+          // (MainHub's Scaffold + bottom nav bar, CatalogScreen's Scaffold, etc.) already
+          // reserves status/navigation-bar insets itself. Letting this outer Scaffold also
+          // default to WindowInsets.safeDrawing double-reserves the bottom inset, which is
+          // what was pushing the bottom nav bar up and leaving an empty gap beneath it.
+          contentWindowInsets = WindowInsets(0, 0, 0, 0)
         ) { innerPadding ->
           Column(
             modifier = Modifier
