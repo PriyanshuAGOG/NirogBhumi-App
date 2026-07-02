@@ -45,6 +45,10 @@ interface HealthRepository {
     // Batch Pulse: today's PII-free "N of M checked in" + collective walking
     // minutes for the caller's program. Written only by Cloud Functions.
     fun listenBatchPulse(programId: String, update: (CloudResult<CloudDocument?>) -> Unit): CloudSubscription
+
+    // Program calendar events (created/edited by staff in the admin console).
+    // Members only ever read these - editing is console-only, per the PRD.
+    fun listenProgramEvents(programId: String, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription
 }
 
 class FirebaseHealthRepository : HealthRepository {
@@ -281,6 +285,19 @@ class FirebaseHealthRepository : HealthRepository {
             .addSnapshotListener { snapshot, error ->
                 if (error != null) update(CloudResult.Failure(error.message ?: "Could not load batch pulse", error))
                 else update(CloudResult.Success(snapshot?.takeIf { it.exists() }?.let { CloudDocument(it.id, it.data.orEmpty()) }))
+            }
+        return CloudSubscription { registration.remove() }
+    }
+
+    override fun listenProgramEvents(programId: String, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription {
+        val database = db ?: run { update(CloudResult.Failure("Firebase is not configured")); return CloudSubscription {} }
+        val registration = database.collection("programEvents")
+            .whereEqualTo("programId", programId)
+            .orderBy("startsAt", com.google.firebase.firestore.Query.Direction.ASCENDING)
+            .limit(50)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) update(CloudResult.Failure(error.message ?: "Could not load the program calendar", error))
+                else update(CloudResult.Success(snapshot?.documents.orEmpty().map { CloudDocument(it.id, it.data.orEmpty()) }))
             }
         return CloudSubscription { registration.remove() }
     }

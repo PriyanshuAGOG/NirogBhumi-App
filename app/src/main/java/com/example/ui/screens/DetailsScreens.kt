@@ -20,6 +20,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import com.google.firebase.Timestamp
+import com.nirogbhumi.app.data.CloudResult
+import com.nirogbhumi.app.notifications.EventReminderWorker
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -2118,13 +2121,82 @@ private fun ReminderToggleRow(label: String, checked: Boolean, showDivider: Bool
 // specific calendar date; today is highlighted so members always know where they are.
 @Composable
 fun ProgramCalendarScreen(state: NirogState) {
+    val context = LocalContext.current
     val totalDays = state.programDurationDays.toInt().coerceAtLeast(1)
     val startMillis = state.programStartedAtMillis.takeIf { it > 0 } ?: System.currentTimeMillis()
     val todayIndex = (((System.currentTimeMillis() - startMillis) / (1000L * 60 * 60 * 24)) + 1).toInt().coerceIn(1, totalDays)
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = (todayIndex - 3).coerceAtLeast(0))
 
+    var events by remember { mutableStateOf<List<Map<String, Any?>>>(emptyList()) }
+    DisposableEffect(state.activeProgramId) {
+        if (state.activeProgramId.isBlank()) return@DisposableEffect onDispose {}
+        val sub = state.repository.listenProgramEvents(state.activeProgramId) { result ->
+            if (result is CloudResult.Success) events = result.value.map { it.values }
+        }
+        onDispose { sub.cancel() }
+    }
+    val upcoming = events.filter { ((it["startsAt"] as? Timestamp)?.toDate()?.time ?: 0L) >= System.currentTimeMillis() }
+
     Column(modifier = Modifier.fillMaxSize().background(Color(0xFFF8F6EF))) {
         DetailScreenHeader(state.activeProgramName.ifBlank { "Program Calendar" }, onBack = { state.currentScreen = "dashboard" })
+
+        if (upcoming.isNotEmpty()) {
+            Text(
+                "UPCOMING EVENTS", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFFC7902F),
+                letterSpacing = 1.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
+            )
+            Column(modifier = Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                upcoming.forEach { event ->
+                    val title = event["title"] as? String ?: "Program event"
+                    val type = event["type"] as? String
+                    val description = event["description"] as? String
+                    val startsAt = (event["startsAt"] as? Timestamp)?.toDate()
+                    val location = event["location"] as? String
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                        shape = RoundedCornerShape(18.dp)
+                    ) {
+                        Column(Modifier.padding(16.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(title, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFF1B2219), modifier = Modifier.weight(1f))
+                                if (type != null) {
+                                    Surface(color = Color(0xFFF4E9D3), shape = RoundedCornerShape(20.dp)) {
+                                        Text(type.uppercase(), fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFFB9832B), modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp))
+                                    }
+                                }
+                            }
+                            if (startsAt != null) {
+                                Text(
+                                    java.text.SimpleDateFormat("EEE, d MMM · h:mm a", java.util.Locale.getDefault()).format(startsAt),
+                                    fontSize = 12.sp, color = Color(0xFF697169), modifier = Modifier.padding(top = 4.dp)
+                                )
+                            }
+                            if (!location.isNullOrBlank()) {
+                                Text(location, fontSize = 12.sp, color = Color(0xFF697169))
+                            }
+                            if (!description.isNullOrBlank()) {
+                                Text(description, fontSize = 12.5.sp, color = Color(0xFF434842), modifier = Modifier.padding(top = 6.dp))
+                            }
+                            if (startsAt != null) {
+                                TextButton(
+                                    onClick = {
+                                        EventReminderWorker.schedule(context, "${title}_${startsAt.time}", title, "Starting now - $title", startsAt.time)
+                                    },
+                                    modifier = Modifier.padding(top = 4.dp)
+                                ) {
+                                    Icon(Icons.Filled.NotificationsActive, contentDescription = null, modifier = Modifier.size(14.dp), tint = Color(0xFF314936))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Remind me", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF314936))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+        }
+
         Text(
             "Day $todayIndex of $totalDays", fontSize = 13.sp, color = Color(0xFF697169),
             modifier = Modifier.padding(horizontal = 20.dp)
