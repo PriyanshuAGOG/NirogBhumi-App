@@ -66,6 +66,7 @@ fun HealthFileScreen(state: NirogState) {
   var recentWeight by remember { mutableStateOf<List<Map<String, Any?>>>(emptyList()) }
   var labReports by remember { mutableStateOf<List<Map<String, Any?>>>(emptyList()) }
   var generating by remember { mutableStateOf(false) }
+  var shareError by remember { mutableStateOf<String?>(null) }
 
   DisposableEffect(Unit) {
     val subs = listOf(
@@ -149,6 +150,18 @@ fun HealthFileScreen(state: NirogState) {
       }
 
       Spacer(Modifier.size(NirogSpace.xl))
+      if (shareError != null) {
+        Box(
+          Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(NirogColor.statusCriticalBg)
+            .padding(NirogSpace.lg),
+        ) {
+          Text(shareError!!, style = NirogType.caption, color = NirogColor.statusCritical)
+        }
+        Spacer(Modifier.size(NirogSpace.md))
+      }
       if (generating) {
         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
           CircularProgressIndicator(color = NirogColor.forest)
@@ -158,7 +171,8 @@ fun HealthFileScreen(state: NirogState) {
           "Share Health File",
           onClick = {
             generating = true
-            val uri = buildAndSaveHealthFilePdf(
+            shareError = null
+            val result = buildAndSaveHealthFilePdf(
               context = context,
               name = state.profileName.ifBlank { "Member" },
               details = listOfNotNull(
@@ -173,13 +187,19 @@ fun HealthFileScreen(state: NirogState) {
               labLines = labReports.map { (it["reportType"] as? String ?: "Lab report") },
             )
             generating = false
-            if (uri != null) {
-              val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                type = "application/pdf"
-                putExtra(Intent.EXTRA_STREAM, uri)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            result.onSuccess { uri ->
+              runCatching {
+                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                  type = "application/pdf"
+                  putExtra(Intent.EXTRA_STREAM, uri)
+                  addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                context.startActivity(Intent.createChooser(shareIntent, "Share Health File"))
+              }.onFailure {
+                shareError = "No app available to share the PDF. It was saved on your device."
               }
-              context.startActivity(Intent.createChooser(shareIntent, "Share Health File"))
+            }.onFailure {
+              shareError = "The Health File couldn't be created. Please try again."
             }
           },
         )
@@ -210,7 +230,7 @@ private fun buildAndSaveHealthFilePdf(
   bpLine: String,
   weightLine: String,
   labLines: List<String>,
-): android.net.Uri? {
+): Result<android.net.Uri> {
   return runCatching {
     val document = PdfDocument()
     val pageInfo = PdfDocument.PageInfo.Builder(595, 842, 1).create() // A4 at 72dpi
@@ -251,5 +271,5 @@ private fun buildAndSaveHealthFilePdf(
     document.close()
 
     FileProvider.getUriForFile(context, "${context.packageName}.files", file)
-  }.getOrNull()
+  }
 }
