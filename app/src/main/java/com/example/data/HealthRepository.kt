@@ -31,6 +31,7 @@ interface HealthRepository {
     fun requestAccountDeletion(done: (CloudResult<Unit>) -> Unit)
     fun createPaymentOrder(kind: String, entityId: String, done: (CloudResult<Map<String, Any?>>) -> Unit)
     fun upsertUserRecord(collection: String, documentId: String, values: Map<String, Any?>, done: (CloudResult<Unit>) -> Unit = {})
+    fun deleteUserRecord(collection: String, documentId: String, done: (CloudResult<Unit>) -> Unit)
     fun getPrivateDownloadUrl(storagePath: String, done: (CloudResult<String>) -> Unit)
     fun redeemProgramCode(code: String, done: (CloudResult<Map<String, Any?>>) -> Unit)
 
@@ -318,6 +319,16 @@ class FirebaseHealthRepository : HealthRepository {
         // scoped per user the way the userId field is.
         val safeId = "${uid}_$normalizedId"
         db?.collection(collection)?.document(safeId)?.set(values + mapOf("userId" to uid, "profileId" to (values["profileId"] ?: uid), "createdAt" to FieldValue.serverTimestamp(), "updatedAt" to FieldValue.serverTimestamp()), SetOptions.merge())
+            ?.addOnSuccessListener { done(CloudResult.Success(Unit)) }
+            ?.addOnFailureListener { done(CloudResult.Failure(it.message ?: "Synced record could not be saved", it)) }
+            ?: done(CloudResult.Failure("Firebase is not configured"))
+    }
+
+    override fun deleteUserRecord(collection: String, documentId: String, done: (CloudResult<Unit>) -> Unit) {
+        val allowed = setOf("profiles", "labReports", "walkLogs")
+        if (collection !in allowed) return done(CloudResult.Failure("Unsupported record"))
+        if (userId == null) return done(CloudResult.Failure("Sign in is required"))
+        db?.collection(collection)?.document(documentId)?.delete()
             ?.addOnSuccessListener { done(CloudResult.Success(Unit)) }
             ?.addOnFailureListener { done(CloudResult.Failure(it.message ?: "Synced record could not be saved", it)) }
             ?: done(CloudResult.Failure("Firebase is not configured"))

@@ -1551,6 +1551,7 @@ fun EmptyStateCard(icon: androidx.compose.ui.graphics.vector.ImageVector, messag
 @Composable
 fun FamilyProfilesScreen(state: NirogState) {
     var records by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>?>(null) }
+    var showAdd by remember { mutableStateOf(false) }
     DisposableEffect(Unit) {
         val subscription = state.repository.listenUserCollection("profiles", 30) { result ->
             records = when (result) {
@@ -1624,7 +1625,7 @@ fun FamilyProfilesScreen(state: NirogState) {
                         modifier = Modifier.fillMaxWidth().clickable {
                             state.selectedDocumentId = record.id
                             state.selectedDocumentValues = record.values
-                            state.currentScreen = "family_dashboard"
+                            state.currentScreen = "family_member_detail"
                         },
                         colors = CardDefaults.cardColors(containerColor = Color.White),
                         shape = RoundedCornerShape(16.dp),
@@ -1656,7 +1657,7 @@ fun FamilyProfilesScreen(state: NirogState) {
 
         Spacer(modifier = Modifier.height(20.dp))
         Button(
-            onClick = { state.currentScreen = "add_family" },
+            onClick = { showAdd = true },
             modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).height(52.dp),
             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF314936)),
             shape = RoundedCornerShape(26.dp)
@@ -1666,6 +1667,141 @@ fun FamilyProfilesScreen(state: NirogState) {
             Text("Add family member", color = Color.White, fontWeight = FontWeight.Bold)
         }
         Spacer(modifier = Modifier.height(32.dp))
+    }
+
+    if (showAdd) {
+        var name by remember { mutableStateOf("") }
+        var relationship by remember { mutableStateOf("") }
+        var age by remember { mutableStateOf("") }
+        var city by remember { mutableStateOf("") }
+        var diabetesStatus by remember { mutableStateOf("Not sure") }
+        var consented by remember { mutableStateOf(false) }
+        var saving by remember { mutableStateOf(false) }
+        AlertDialog(
+            onDismissRequest = { if (!saving) showAdd = false },
+            title = { Text("Add family member", fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedTextField(name, { name = it }, label = { Text("Full name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(relationship, { relationship = it }, label = { Text("Relationship") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        OutlinedTextField(age, { age = it.filter(Char::isDigit) }, label = { Text("Age") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f))
+                        OutlinedTextField(city, { city = it }, label = { Text("City") }, modifier = Modifier.weight(1f))
+                    }
+                    Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("No diabetes", "Prediabetes", "Type 2 diabetes", "Type 1 diabetes", "Not sure").forEach { t ->
+                            Surface(shape = RoundedCornerShape(12.dp), color = if (diabetesStatus == t) Color(0xFF314936) else Color(0xFFEBF7E8), modifier = Modifier.clickable { diabetesStatus = t }) {
+                                Text(t, color = if (diabetesStatus == t) Color.White else Color(0xFF1B3221), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
+                            }
+                        }
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { consented = !consented }) {
+                        Checkbox(checked = consented, onCheckedChange = { consented = it }, colors = CheckboxDefaults.colors(checkedColor = Color(0xFF314936)))
+                        Text("I have permission to manage this profile", fontSize = 12.5.sp, color = Color(0xFF434842))
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    enabled = !saving && name.isNotBlank() && consented,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF314936)),
+                    onClick = {
+                        saving = true
+                        state.repository.addHealthLog("profiles", mapOf(
+                            "name" to name.trim(),
+                            "relationship" to relationship.trim().ifBlank { null },
+                            "age" to age.toIntOrNull(),
+                            "city" to city.trim().ifBlank { null },
+                            "selection" to diabetesStatus
+                        )) { result ->
+                            saving = false
+                            if (result is com.nirogbhumi.app.data.CloudResult.Success) showAdd = false
+                            else state.cloudMessage = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
+                        }
+                    }
+                ) { Text(if (saving) "Saving..." else "Save", color = Color.White) }
+            },
+            dismissButton = { TextButton(onClick = { showAdd = false }) { Text("Cancel", color = Color(0xFF737972)) } }
+        )
+    }
+}
+
+// A focused detail view for one family member's profile - not a full app-clone
+// dashboard (that would need a parallel data model per profile, out of scope
+// here), just their basics with an edit-free summary and a way to remove them.
+@Composable
+fun FamilyMemberDetailScreen(state: NirogState) {
+    val values = state.selectedDocumentValues
+    val name = values["name"]?.toString() ?: values["fullName"]?.toString() ?: "Family member"
+    val relationship = values["relationship"]?.toString()?.ifBlank { null }
+    val age = values["age"]?.toString()?.ifBlank { null }
+    val city = values["city"]?.toString()?.ifBlank { null }
+    val status = values["selection"]?.toString()?.ifBlank { null }
+    var confirmingRemove by remember { mutableStateOf(false) }
+
+    Column(modifier = Modifier.fillMaxSize().background(Color(0xFFF8F6EF))) {
+        DetailScreenHeader(name, onBack = { state.currentScreen = "family_profiles" })
+        Column(modifier = Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                shape = RoundedCornerShape(20.dp),
+                border = BorderStroke(0.5.dp, Color(0xFFD8D0C0))
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Box(
+                        modifier = Modifier.size(56.dp).clip(CircleShape).background(Color(0xFF9CB79F)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(name.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(name, fontFamily = FontFamily.Serif, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+                    Text(relationship ?: "Family member", fontSize = 13.sp, color = Color(0xFF697169))
+                    Spacer(modifier = Modifier.height(16.dp))
+                    listOfNotNull(
+                        age?.let { "Age" to it },
+                        city?.let { "City" to it },
+                        status?.let { "Diabetes status" to it.replace('_', ' ') }
+                    ).forEach { (label, value) ->
+                        Row(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(label, fontSize = 13.sp, color = Color(0xFF697169))
+                            Text(value, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF1B2219))
+                        }
+                    }
+                }
+            }
+            Text(
+                "This person's own health logs stay separate from yours. Full tracking under their own profile is coming soon.",
+                fontSize = 12.5.sp, color = Color(0xFF8B9285), lineHeight = 18.sp
+            )
+            OutlinedButton(
+                onClick = { confirmingRemove = true },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFB4472F))
+            ) { Text("Remove from family profiles") }
+        }
+    }
+
+    if (confirmingRemove) {
+        AlertDialog(
+            onDismissRequest = { confirmingRemove = false },
+            title = { Text("Remove $name?", fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221)) },
+            text = { Text("This removes them from your family profiles. This can't be undone.", fontSize = 13.sp, color = Color(0xFF434842)) },
+            confirmButton = {
+                Button(
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB4472F)),
+                    onClick = {
+                        state.repository.deleteUserRecord("profiles", state.selectedDocumentId) { result ->
+                            confirmingRemove = false
+                            if (result is com.nirogbhumi.app.data.CloudResult.Success) state.currentScreen = "family_profiles"
+                            else state.cloudMessage = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
+                        }
+                    }
+                ) { Text("Remove", color = Color.White) }
+            },
+            dismissButton = { TextButton(onClick = { confirmingRemove = false }) { Text("Cancel", color = Color(0xFF737972)) } }
+        )
     }
 }
 

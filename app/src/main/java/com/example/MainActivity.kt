@@ -309,6 +309,7 @@ fun ActiveScreenContent(state: NirogState) {
       "sugar_detail" -> BloodSugarDetailScreen(state)
       "coming_soon" -> ComingSoonScreen(state)
       "lab_reports" -> LabReportsScreen(state)
+      "family_member_detail" -> FamilyMemberDetailScreen(state)
       "consult_stepper" -> BookConsultationStepper(state)
       "active_journey" -> ActiveJourneyScreen(state)
       "insight_detail" -> InsightDetailScreen(state)
