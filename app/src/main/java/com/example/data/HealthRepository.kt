@@ -307,11 +307,16 @@ class FirebaseHealthRepository : HealthRepository {
     }
 
     override fun upsertUserRecord(collection: String, documentId: String, values: Map<String, Any?>, done: (CloudResult<Unit>) -> Unit) {
-        val allowed = setOf("glucoseReadings", "bpReadings", "sleepLogs", "walkLogs", "weightLogs", "deviceConnections")
+        val allowed = setOf("glucoseReadings", "bpReadings", "sleepLogs", "walkLogs", "weightLogs", "deviceConnections", "checklistLogs")
         if (collection !in allowed) return done(CloudResult.Failure("Unsupported synced record"))
         val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
         val normalizedId = documentId.replace(Regex("[^A-Za-z0-9_-]"), "_").take(120)
-        val safeId = if (collection == "deviceConnections") "${uid}_$normalizedId" else normalizedId
+        // Always uid-prefixed: the id is otherwise just a caller-chosen string
+        // (e.g. a stable per-day key), and without this prefix two different
+        // users' upserts with the same id would silently overwrite each other
+        // in the same document, since Firestore document ids aren't implicitly
+        // scoped per user the way the userId field is.
+        val safeId = "${uid}_$normalizedId"
         db?.collection(collection)?.document(safeId)?.set(values + mapOf("userId" to uid, "profileId" to (values["profileId"] ?: uid), "createdAt" to FieldValue.serverTimestamp(), "updatedAt" to FieldValue.serverTimestamp()), SetOptions.merge())
             ?.addOnSuccessListener { done(CloudResult.Success(Unit)) }
             ?.addOnFailureListener { done(CloudResult.Failure(it.message ?: "Synced record could not be saved", it)) }

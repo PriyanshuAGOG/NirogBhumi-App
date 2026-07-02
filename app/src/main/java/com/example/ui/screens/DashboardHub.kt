@@ -435,7 +435,23 @@ fun TodayTab(state: NirogState) {
                 if (systolic != null && diastolic != null) state.latestBpReading = "$systolic/$diastolic"
             }
         }
-        onDispose { sugarSub.cancel(); bpSub.cancel() }
+        // Restores today's checklist state from Firestore on every open - without
+        // this, "Mark Complete" only ever lived in memory and silently reset the
+        // moment the app was reopened, even though it visually said "Completed".
+        val checklistSub = state.repository.listenUserCollection("checklistLogs", 10) { result ->
+            if (result is com.nirogbhumi.app.data.CloudResult.Success) {
+                val todayKey = com.nirogbhumi.app.ui.localDayKey(System.currentTimeMillis())
+                val walkDoneToday = result.value.any { doc ->
+                    val ts = (doc.values["completedAt"] as? com.google.firebase.Timestamp) ?: (doc.values["updatedAt"] as? com.google.firebase.Timestamp)
+                    doc.values["taskId"] == "daily_post_dinner_walk" &&
+                        doc.values["status"] == "done" &&
+                        ts != null && com.nirogbhumi.app.ui.localDayKey(ts.toDate().time) == todayKey
+                }
+                if (walkDoneToday && !state.dailyRitualsCompleted.contains("Walk")) state.dailyRitualsCompleted.add("Walk")
+                else if (!walkDoneToday) state.dailyRitualsCompleted.remove("Walk")
+            }
+        }
+        onDispose { sugarSub.cancel(); bpSub.cancel(); checklistSub.cancel() }
     }
     Column(
         modifier = Modifier
@@ -518,11 +534,11 @@ fun TodayTab(state: NirogState) {
                         }
                         TextButton(onClick = {
                             state.dailyRitualsCompleted.remove("Walk")
-                            state.repository.addHealthLog("checklistLogs", mapOf(
+                            val dayKey = com.nirogbhumi.app.ui.localDayKey(System.currentTimeMillis())
+                            state.repository.upsertUserRecord("checklistLogs", "daily_post_dinner_walk_$dayKey", mapOf(
                                 "taskId" to "daily_post_dinner_walk",
                                 "title" to "Walk 15 minutes after dinner",
                                 "status" to "pending",
-                                "date" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
                                 "completedAt" to null
                             )) { result -> if (result is com.nirogbhumi.app.data.CloudResult.Failure) state.cloudMessage = result.message }
                         }) {
@@ -533,11 +549,11 @@ fun TodayTab(state: NirogState) {
                     Button(
                         onClick = {
                             state.dailyRitualsCompleted.add("Walk")
-                            state.repository.addHealthLog("checklistLogs", mapOf(
+                            val dayKey = com.nirogbhumi.app.ui.localDayKey(System.currentTimeMillis())
+                            state.repository.upsertUserRecord("checklistLogs", "daily_post_dinner_walk_$dayKey", mapOf(
                                 "taskId" to "daily_post_dinner_walk",
                                 "title" to "Walk 15 minutes after dinner",
                                 "status" to "done",
-                                "date" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
                                 "completedAt" to com.google.firebase.firestore.FieldValue.serverTimestamp()
                             )) { result -> if (result is com.nirogbhumi.app.data.CloudResult.Failure) state.cloudMessage = result.message }
                         },
@@ -645,11 +661,12 @@ fun TodayTab(state: NirogState) {
             }
         }
 
-        // Weekly preview card
+        // Weekly preview card - opens the real Rhythm screen (ring + 30-day grid),
+        // not the old generic "weekly_report" catalog template.
         Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable { state.currentScreen = "weekly_report" }
+                .clickable { state.currentScreen = "rhythm" }
                 .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.4f), shape = RoundedCornerShape(24.dp)),
             colors = CardDefaults.cardColors(containerColor = Color.White),
             shape = RoundedCornerShape(24.dp)
@@ -774,7 +791,85 @@ fun TodayTab(state: NirogState) {
                 Text("Open", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
             }
         }
+
+        // The one thing Today has that Track doesn't: a program-aware view of
+        // what's coming up in Care+. Only rendered for enrolled members, and
+        // only when there's something upcoming to show - never an empty card.
+        if (state.isProgramActive) {
+            TodayProgramPreview(state)
+        }
+
         Spacer(modifier = Modifier.height(24.dp))
+    }
+}
+
+/**
+ * Today's program-aware utility: the next upcoming Care+ calendar event, read
+ * live from the same programEvents the admin console manages. Nothing is
+ * shown until there's a real, real upcoming event - no placeholder card.
+ */
+@Composable
+private fun TodayProgramPreview(state: NirogState) {
+    var events by remember { mutableStateOf<List<Map<String, Any?>>>(emptyList()) }
+    DisposableEffect(state.activeProgramId) {
+        if (state.activeProgramId.isBlank()) return@DisposableEffect onDispose {}
+        val sub = state.repository.listenProgramEvents(state.activeProgramId) { result ->
+            if (result is com.nirogbhumi.app.data.CloudResult.Success) events = result.value.map { it.values }
+        }
+        onDispose { sub.cancel() }
+    }
+    val next = events
+        .mapNotNull { e -> (e["startsAt"] as? com.google.firebase.Timestamp)?.toDate()?.let { it to e } }
+        .filter { (date, _) -> date.time >= System.currentTimeMillis() }
+        .minByOrNull { (date, _) -> date.time }
+        ?.second
+        ?: return
+
+    val title = next["title"] as? String ?: "Program event"
+    val type = next["type"] as? String
+    val startsAt = (next["startsAt"] as? com.google.firebase.Timestamp)?.toDate()
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { state.currentScreen = "program_calendar" }
+            .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.3f), shape = RoundedCornerShape(24.dp)),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        shape = RoundedCornerShape(24.dp)
+    ) {
+        Row(modifier = Modifier.padding(16.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            if (startsAt != null) {
+                Column(
+                    modifier = Modifier
+                        .width(46.dp)
+                        .background(Color(0xFFF1EDE3), RoundedCornerShape(12.dp))
+                        .padding(vertical = 6.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        java.text.SimpleDateFormat("d", java.util.Locale.getDefault()).format(startsAt),
+                        fontFamily = FontFamily.Serif, fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221)
+                    )
+                    Text(
+                        java.text.SimpleDateFormat("MMM", java.util.Locale.getDefault()).format(startsAt).uppercase(),
+                        fontSize = 9.5.sp, fontWeight = FontWeight.Bold, color = Color(0xFF8B9285)
+                    )
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Next in your program", fontSize = 10.5.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFFC7902F))
+                }
+                Text(title, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B2219))
+                if (startsAt != null) {
+                    Text(
+                        java.text.SimpleDateFormat("EEE, d MMM · h:mm a", java.util.Locale.getDefault()).format(startsAt) + (type?.let { " · $it" } ?: ""),
+                        fontSize = 11.5.sp, color = Color(0xFF8B9285)
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -1221,7 +1316,9 @@ fun InsightsTab(state: NirogState) {
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { state.currentScreen = "trends_30" }
+                    // Opens the real Rhythm screen, not the old generic "trends_30"
+                    // catalog template.
+                    .clickable { state.currentScreen = "rhythm" }
                     .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.4f), shape = RoundedCornerShape(24.dp)),
                 colors = CardDefaults.cardColors(containerColor = Color.White),
                 shape = RoundedCornerShape(24.dp)
