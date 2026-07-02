@@ -308,6 +308,7 @@ fun ActiveScreenContent(state: NirogState) {
       // Metrics Detailed screens
       "sugar_detail" -> BloodSugarDetailScreen(state)
       "coming_soon" -> ComingSoonScreen(state)
+      "lab_reports" -> LabReportsScreen(state)
       "consult_stepper" -> BookConsultationStepper(state)
       "active_journey" -> ActiveJourneyScreen(state)
       "insight_detail" -> InsightDetailScreen(state)

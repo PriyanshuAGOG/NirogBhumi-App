@@ -358,3 +358,80 @@ private fun HistoryRow(value: String, time: String) {
         }
     }
 }
+
+// ---------- Lab Reports ----------
+// A purpose-built screen replacing the old generic catalog template - same
+// underlying labReports schema (reportType/reportDate/labName/notes) so
+// existing data and the Health File's report list keep working unchanged.
+@Composable
+fun LabReportsScreen(state: NirogState) {
+    var records by remember { mutableStateOf<List<CloudDocument>?>(null) }
+    var showAdd by remember { mutableStateOf(false) }
+    DisposableEffect(Unit) {
+        val sub = state.repository.listenUserCollection("labReports", 30) { r -> records = if (r is CloudResult.Success) r.value else emptyList() }
+        onDispose { sub.cancel() }
+    }
+    val sorted = (records ?: emptyList()).sortedByDescending { docTime(it.values)?.time ?: 0 }
+
+    Column(Modifier.fillMaxSize().background(Paper2)) {
+        DetailScreenHeader("Lab Reports", onBack = { state.currentScreen = "dashboard" }, trailing = {
+            IconButton(onClick = { showAdd = true }) { Icon(Icons.Filled.Add, "Add report", tint = Ink2) }
+        })
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Text("Kept together and private - only you can see these.", fontSize = 13.sp, color = Muted2)
+            when {
+                records == null -> LoadingRow()
+                sorted.isEmpty() -> EmptyStateCard(Icons.Filled.Science, "No lab reports yet. Tap + to keep one on file for your next doctor visit.")
+                else -> sorted.forEach { rec ->
+                    val type = rec.values["reportType"] as? String ?: "Report"
+                    val lab = rec.values["labName"] as? String
+                    HistoryRow(
+                        if (!lab.isNullOrBlank()) "$type · $lab" else type,
+                        docTime(rec.values)?.let { relativeTimeLabel(it) } ?: "Synced"
+                    )
+                }
+            }
+            Spacer(Modifier.height(24.dp))
+        }
+    }
+
+    if (showAdd) {
+        var reportType by remember { mutableStateOf("HbA1c") }
+        var labName by remember { mutableStateOf("") }
+        var notes by remember { mutableStateOf("") }
+        var saving by remember { mutableStateOf(false) }
+        AlertDialog(
+            onDismissRequest = { if (!saving) showAdd = false },
+            title = { Text("Add lab report", fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Ink2) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("HbA1c", "Lipid profile", "Kidney function", "Other").forEach { t ->
+                            Surface(shape = RoundedCornerShape(12.dp), color = if (reportType == t) Green2 else Color(0xFFEBF7E8), modifier = Modifier.clickable { reportType = t }) {
+                                Text(t, color = if (reportType == t) Color.White else Ink2, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp))
+                            }
+                        }
+                    }
+                    OutlinedTextField(labName, { labName = it }, label = { Text("Lab name (optional)") }, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(notes, { notes = it }, label = { Text("Notes (optional)") }, minLines = 2, modifier = Modifier.fillMaxWidth())
+                }
+            },
+            confirmButton = {
+                Button(enabled = !saving, colors = ButtonDefaults.buttonColors(containerColor = Green2), onClick = {
+                    saving = true
+                    state.repository.addHealthLog("labReports", mapOf(
+                        "reportType" to reportType,
+                        "labName" to labName.ifBlank { null },
+                        "notes" to notes.ifBlank { null },
+                        "measuredAt" to FieldValue.serverTimestamp(),
+                        "source" to "manual"
+                    )) { r ->
+                        saving = false
+                        if (r is CloudResult.Success) showAdd = false else state.cloudMessage = (r as CloudResult.Failure).message
+                    }
+                }) { Text(if (saving) "Saving..." else "Save", color = Color.White) }
+            },
+            dismissButton = { TextButton(onClick = { showAdd = false }) { Text("Cancel", color = Muted2) } }
+        )
+    }
+}
