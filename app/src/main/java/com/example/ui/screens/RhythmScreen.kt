@@ -37,6 +37,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
 import com.nirogbhumi.app.data.CloudResult
 import com.nirogbhumi.app.ui.NirogState
+import com.nirogbhumi.app.ui.localDayKey
 import com.nirogbhumi.app.ui.components.PrimaryButton
 import com.nirogbhumi.app.ui.components.SectionLabel
 import com.nirogbhumi.app.ui.theme.NirogColor
@@ -236,10 +237,4 @@ private fun warmRecap(loaded: Boolean, last7: Int, empty: Boolean): String = whe
   !loaded -> "Gathering your recent check-ins…"
   empty -> "Your rhythm will appear here after your first check-in. One reading a day is all it takes."
   else -> "You checked in $last7 of the last 7 days - that's steady progress. Every entry helps your care team see the full picture, and there's no penalty for a quiet week."
-}
-
-/** Local calendar-day index (days since epoch in the device time zone). */
-private fun localDayKey(millis: Long): Long {
-  val tz = java.util.TimeZone.getDefault()
-  return (millis + tz.getOffset(millis)) / 86_400_000L
 }

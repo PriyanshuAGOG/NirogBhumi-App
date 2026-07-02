@@ -38,10 +38,6 @@ import kotlinx.coroutines.launch
 // Screen 1: Sugar Metric detailed deepdive
 @Composable
 fun BloodSugarDetailScreen(state: NirogState) {
-    var selectedLogType by remember { mutableStateOf("Fasting") } // "Fasting" or "Post-meal"
-    var sugarInputText by remember { mutableStateOf("") }
-    var isRecordingDialogueOpen by remember { mutableStateOf(false) }
-
     DisposableEffect(Unit) {
         val subscription = state.repository.listenUserCollection("glucoseReadings", 30) { result ->
             when (result) {
@@ -96,7 +92,7 @@ fun BloodSugarDetailScreen(state: NirogState) {
                 fontSize = 20.sp,
                 color = Color(0xFF1B3221)
             )
-            IconButton(onClick = { isRecordingDialogueOpen = true }) {
+            IconButton(onClick = { state.checkinStartStep = 0; state.currentScreen = "daily_checkin" }) {
                 Icon(Icons.Filled.Add, "Log Reading", tint = Color(0xFF1B3221))
             }
         }
@@ -229,117 +225,6 @@ fun BloodSugarDetailScreen(state: NirogState) {
             }
 
             Spacer(modifier = Modifier.height(32.dp))
-        }
-
-        // Add Dialog Modal
-        if (isRecordingDialogueOpen) {
-            AlertDialog(
-                onDismissRequest = { isRecordingDialogueOpen = false },
-                title = { Text("Log New Reading", fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221)) },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            if (selectedLogType == "HbA1c") {
-                                val percentValue = sugarInputText.toDoubleOrNull()
-                                if (percentValue == null) return@Button
-                                state.repository.addHealthLog(
-                                    "glucoseReadings",
-                                    mapOf(
-                                        "value" to percentValue,
-                                        "unit" to "%",
-                                        "readingType" to "hba1c",
-                                        "measuredAt" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
-                                        "source" to "manual"
-                                    )
-                                ) { result ->
-                                    state.cloudMessage = when (result) {
-                                        is com.nirogbhumi.app.data.CloudResult.Success -> "Synced securely"
-                                        is com.nirogbhumi.app.data.CloudResult.Failure -> result.message
-                                    }
-                                }
-                            } else {
-                                val sugarInt = sugarInputText.toIntOrNull() ?: return@Button
-                                val status = if (sugarInt > 130) "High" else if (sugarInt < 80) "Low" else "Normal"
-                                state.sugarLogs.add(
-                                    0,
-                                    SugarLog(
-                                        state.sugarLogs.size + 1,
-                                        sugarInt,
-                                        selectedLogType,
-                                        "Today, Just Now",
-                                        status
-                                    )
-                                )
-                                state.fastingSugarValue = sugarInt
-                                state.repository.addHealthLog(
-                                    "glucoseReadings",
-                                    mapOf(
-                                        "value" to sugarInt,
-                                        "unit" to "mg/dL",
-                                        "readingType" to if (selectedLogType == "Fasting") "fasting" else "post_meal",
-                                        "measuredAt" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
-                                        "source" to "manual"
-                                    )
-                                ) { result ->
-                                    state.cloudMessage = when (result) {
-                                        is com.nirogbhumi.app.data.CloudResult.Success -> "Synced securely"
-                                        is com.nirogbhumi.app.data.CloudResult.Failure -> result.message
-                                    }
-                                }
-                            }
-                            isRecordingDialogueOpen = false
-                            sugarInputText = ""
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF314936))
-                    ) {
-                        Text("Save Record", color = Color.White)
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { isRecordingDialogueOpen = false }) {
-                        Text("Cancel", color = Color(0xFF737972))
-                    }
-                },
-                text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            listOf("Fasting", "Post-meal", "HbA1c").forEach { type ->
-                                Surface(
-                                    shape = RoundedCornerShape(12.dp),
-                                    color = if (selectedLogType == type) Color(0xFF314936) else Color(0xFFEBF7E8),
-                                    modifier = Modifier.clickable { selectedLogType = type; sugarInputText = "" }.padding(4.dp)
-                                ) {
-                                    Text(type, color = if (selectedLogType == type) Color.White else Color(0xFF1B3221), fontSize = 13.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
-                                }
-                            }
-                        }
-
-                        OutlinedTextField(
-                            value = sugarInputText,
-                            onValueChange = { value ->
-                                sugarInputText = if (selectedLogType == "HbA1c") {
-                                    value.filter { it.isDigit() || it == '.' }.let { candidate -> if (candidate.count { c -> c == '.' } <= 1) candidate else sugarInputText }
-                                } else value.filter(Char::isDigit)
-                            },
-                            placeholder = { Text(if (selectedLogType == "HbA1c") "Value in % (e.g. 5.8)" else "Value in mg/dL (e.g. 105)", color = Color(0xFFC3C8C0)) },
-                            keyboardOptions = KeyboardOptions(keyboardType = if (selectedLogType == "HbA1c") KeyboardType.Decimal else KeyboardType.Number),
-                            shape = RoundedCornerShape(12.dp),
-                            singleLine = true,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedContainerColor = Color(0xFFF8F6EF),
-                                unfocusedContainerColor = Color(0xFFF8F6EF),
-                                focusedBorderColor = Color(0xFF314936),
-                                unfocusedBorderColor = Color.Transparent
-                            )
-                        )
-                    }
-                },
-                containerColor = Color.White,
-                shape = RoundedCornerShape(20.dp)
-            )
         }
     }
 }

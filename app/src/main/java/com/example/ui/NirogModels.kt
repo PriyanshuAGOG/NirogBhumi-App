@@ -102,6 +102,14 @@ class NirogState {
     var stepsLogged by mutableStateOf(0)
     var latestBpReading by mutableStateOf<String?>(null)
 
+    // True once ANY real reading (sugar/BP/weight) has been logged today - the one
+    // shared signal the Today/Track prompts and Rhythm agree on, so a completed
+    // check-in never keeps re-prompting with an empty-feeling "do this now" card.
+    var checkedInToday by mutableStateOf(false)
+    // Lets a quick-log entry point (a chip, a tile's "+" ) jump the Daily Check-in
+    // wizard straight to the relevant step instead of starting over at sugar.
+    var checkinStartStep by mutableStateOf(0)
+
     // Sugar History & Tracking State - populated only from real Firestore reads
     val sugarLogs = mutableStateListOf<SugarLog>()
 

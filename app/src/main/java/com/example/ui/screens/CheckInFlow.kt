@@ -46,8 +46,10 @@ private val Muted = Color(0xFF697169)
 @Composable
 fun DailyCheckInScreen(state: NirogState) {
     val context = LocalContext.current
-    // step: 0 = sugar, 1 = bp, 2 = weight, 3 = done summary
-    var step by remember { mutableStateOf(0) }
+    // step: 0 = sugar, 1 = bp, 2 = weight, 3 = done summary. Quick-log entry points
+    // (a chip, a tile) can jump straight to the relevant step via checkinStartStep,
+    // so there's exactly one logging flow instead of parallel per-metric dialogs.
+    var step by remember { mutableStateOf(state.checkinStartStep) }
     var saving by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 

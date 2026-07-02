@@ -37,6 +37,33 @@ import com.nirogbhumi.app.ui.theme.NirogType
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainHub(state: NirogState) {
+    // Shared "has anything real been logged today" signal, computed once here
+    // (not per-tab) so Today's focus card and Track's check-in card always agree,
+    // and a completed check-in never re-prompts with an empty-feeling "do this
+    // now" card - it shows a genuine done-for-today state instead.
+    DisposableEffect(Unit) {
+        val todayKey = com.nirogbhumi.app.ui.localDayKey(System.currentTimeMillis())
+        fun anyToday(docs: List<com.nirogbhumi.app.data.CloudDocument>): Boolean = docs.any { doc ->
+            val ts = (doc.values["createdAt"] as? com.google.firebase.Timestamp)
+                ?: (doc.values["measuredAt"] as? com.google.firebase.Timestamp)
+            ts != null && com.nirogbhumi.app.ui.localDayKey(ts.toDate().time) == todayKey
+        }
+        val flags = booleanArrayOf(false, false, false)
+        fun recompute() { state.checkedInToday = flags.any { it } }
+        val subs = listOf(
+            state.repository.listenUserCollection("glucoseReadings", 5) { r ->
+                if (r is CloudResult.Success) { flags[0] = anyToday(r.value); recompute() }
+            },
+            state.repository.listenUserCollection("bpReadings", 5) { r ->
+                if (r is CloudResult.Success) { flags[1] = anyToday(r.value); recompute() }
+            },
+            state.repository.listenUserCollection("weightLogs", 5) { r ->
+                if (r is CloudResult.Success) { flags[2] = anyToday(r.value); recompute() }
+            },
+        )
+        onDispose { subs.forEach { it.cancel() } }
+    }
+
     Scaffold(
         topBar = {
             NirogTopAppBar(
@@ -551,8 +578,11 @@ fun TodayTab(state: NirogState) {
                 fontWeight = FontWeight.Bold,
                 color = Color(0xFF1B3221)
             )
-            TextButton(onClick = { state.currentScreen = "daily_checkin" }) {
-                Text("Log now", color = Color(0xFF314936), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            TextButton(onClick = { state.checkinStartStep = 0; state.currentScreen = "daily_checkin" }) {
+                Text(
+                    if (state.checkedInToday) "Add more" else "Log now",
+                    color = Color(0xFF314936), fontWeight = FontWeight.Bold, fontSize = 13.sp
+                )
                 Spacer(modifier = Modifier.width(2.dp))
                 Icon(Icons.Filled.ArrowForward, contentDescription = null, tint = Color(0xFF314936), modifier = Modifier.size(15.dp))
             }
@@ -846,7 +876,7 @@ fun VitalBentoCard(
 // TAB 2: Track Hub Grid
 @Composable
 fun TrackTab(state: NirogState) {
-    var quickLogMetric by remember { mutableStateOf<String?>(null) }
+    var showActivityLog by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -873,25 +903,50 @@ fun TrackTab(state: NirogState) {
 
         // Primary path: the guided daily check-in. This is the low-friction default -
         // one tap walks the user through sugar/BP/weight without hunting around the grid.
+        // Once something real has been logged today, this becomes a calm "done"
+        // state instead of a blank restart prompt - re-opening the wizard after
+        // completion used to just reset every field, which read as broken.
         Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable { state.currentScreen = "daily_checkin" }
+                .clickable { state.checkinStartStep = 0; state.currentScreen = "daily_checkin" }
                 .border(width = 0.5.dp, color = Color(0xFF9CB79F).copy(alpha = 0.4f), shape = RoundedCornerShape(24.dp)),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF314936)),
+            colors = CardDefaults.cardColors(containerColor = if (state.checkedInToday) Color(0xFFEBF7E8) else Color(0xFF314936)),
             shape = RoundedCornerShape(24.dp)
         ) {
             Row(modifier = Modifier.padding(20.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Box(
-                    modifier = Modifier.size(44.dp).background(Color.White.copy(alpha = 0.15f), CircleShape),
+                    modifier = Modifier.size(44.dp).background(
+                        if (state.checkedInToday) Color(0xFF314936).copy(alpha = 0.12f) else Color.White.copy(alpha = 0.15f),
+                        CircleShape
+                    ),
                     contentAlignment = Alignment.Center
-                ) { Icon(Icons.Filled.PlaylistAddCheck, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp)) }
+                ) {
+                    Icon(
+                        if (state.checkedInToday) Icons.Filled.CheckCircle else Icons.Filled.PlaylistAddCheck,
+                        contentDescription = null,
+                        tint = if (state.checkedInToday) Color(0xFF3F7D58) else Color.White,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
                 Spacer(modifier = Modifier.width(16.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Daily Check-in", fontSize = 18.sp, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color.White)
-                    Text("Sugar, BP & weight — under 2 minutes", fontSize = 13.sp, color = Color(0xFFB2CEB4))
+                    Text(
+                        if (state.checkedInToday) "Checked in for today" else "Daily Check-in",
+                        fontSize = 18.sp, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold,
+                        color = if (state.checkedInToday) Color(0xFF1B3221) else Color.White
+                    )
+                    Text(
+                        if (state.checkedInToday) "Nicely done — tap to add another reading" else "Sugar, BP & weight — under 2 minutes",
+                        fontSize = 13.sp,
+                        color = if (state.checkedInToday) Color(0xFF4B6450) else Color(0xFFB2CEB4)
+                    )
                 }
-                Icon(Icons.Filled.ArrowForward, contentDescription = "Start", tint = Color.White)
+                Icon(
+                    Icons.Filled.ArrowForward,
+                    contentDescription = "Start",
+                    tint = if (state.checkedInToday) Color(0xFF314936) else Color.White
+                )
             }
         }
 
@@ -903,9 +958,10 @@ fun TrackTab(state: NirogState) {
                 modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                QuickLogChip("Sugar", Icons.Filled.Bloodtype, Color(0xFFBA1A1A)) { quickLogMetric = "sugar" }
-                QuickLogChip("BP", Icons.Filled.Favorite, Color(0xFF1B3221)) { quickLogMetric = "bp" }
-                QuickLogChip("Weight", Icons.Filled.MonitorWeight, Color(0xFF4B6450)) { quickLogMetric = "weight" }
+                QuickLogChip("Sugar", Icons.Filled.Bloodtype, Color(0xFFBA1A1A)) { state.checkinStartStep = 0; state.currentScreen = "daily_checkin" }
+                QuickLogChip("BP", Icons.Filled.Favorite, Color(0xFF1B3221)) { state.checkinStartStep = 1; state.currentScreen = "daily_checkin" }
+                QuickLogChip("Weight", Icons.Filled.MonitorWeight, Color(0xFF4B6450)) { state.checkinStartStep = 2; state.currentScreen = "daily_checkin" }
+                QuickLogChip("Activity", Icons.Filled.DirectionsWalk, Color(0xFF426820)) { showActivityLog = true }
             }
         }
 
@@ -975,8 +1031,8 @@ fun TrackTab(state: NirogState) {
         Spacer(modifier = Modifier.height(32.dp))
     }
 
-    quickLogMetric?.let { metric ->
-        QuickLogSheet(state = state, metric = metric, onDismiss = { quickLogMetric = null })
+    if (showActivityLog) {
+        ActivityLogDialog(state) { showActivityLog = false }
     }
 }
 
@@ -1000,171 +1056,6 @@ fun QuickLogChip(label: String, icon: androidx.compose.ui.graphics.vector.ImageV
         Spacer(modifier = Modifier.height(6.dp))
         Text(label, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
     }
-}
-
-@Composable
-fun QuickLogSheet(state: NirogState, metric: String, onDismiss: () -> Unit) {
-    var sugarInput by remember { mutableStateOf("") }
-    var sugarType by remember { mutableStateOf("Fasting") }
-    var systolicInput by remember { mutableStateOf("") }
-    var diastolicInput by remember { mutableStateOf("") }
-    var weightInput by remember { mutableStateOf(state.profileWeight) }
-    var saving by remember { mutableStateOf(false) }
-
-    val title = when (metric) {
-        "sugar" -> "Log Blood Sugar"
-        "bp" -> "Log Blood Pressure"
-        else -> "Log Weight"
-    }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(title, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221)) },
-        text = {
-            when (metric) {
-                "sugar" -> Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Row(
-                        modifier = Modifier.horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        listOf("Fasting", "Post-meal", "HbA1c").forEach { type ->
-                            Surface(
-                                shape = RoundedCornerShape(12.dp),
-                                color = if (sugarType == type) Color(0xFF314936) else Color(0xFFEBF7E8),
-                                modifier = Modifier.clickable { sugarType = type; sugarInput = "" }
-                            ) {
-                                Text(type, color = if (sugarType == type) Color.White else Color(0xFF1B3221), fontSize = 13.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
-                            }
-                        }
-                    }
-                    if (sugarType == "HbA1c") {
-                        OutlinedTextField(
-                            value = sugarInput,
-                            onValueChange = { value -> sugarInput = value.filter { it.isDigit() || it == '.' }.let { candidate -> if (candidate.count { c -> c == '.' } <= 1) candidate else sugarInput } },
-                            label = { Text("Value (%)") },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    } else {
-                        OutlinedTextField(
-                            value = sugarInput,
-                            onValueChange = { sugarInput = it.filter(Char::isDigit) },
-                            label = { Text("Value (mg/dL)") },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-                }
-                "bp" -> Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    OutlinedTextField(
-                        value = systolicInput,
-                        onValueChange = { systolicInput = it.filter(Char::isDigit) },
-                        label = { Text("Systolic") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.weight(1f)
-                    )
-                    OutlinedTextField(
-                        value = diastolicInput,
-                        onValueChange = { diastolicInput = it.filter(Char::isDigit) },
-                        label = { Text("Diastolic") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-                else -> OutlinedTextField(
-                    value = weightInput,
-                    onValueChange = { weightInput = it.filter { c -> c.isDigit() || c == '.' } },
-                    label = { Text("Weight (kg)") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-        },
-        confirmButton = {
-            Button(
-                enabled = !saving,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF314936)),
-                onClick = {
-                    saving = true
-                    when (metric) {
-                        "sugar" -> if (sugarType == "HbA1c") {
-                            val value = sugarInput.toDoubleOrNull()
-                            if (value == null) { saving = false; return@Button }
-                            // HbA1c is a lab percentage on a totally different scale than day-to-day
-                            // mg/dL readings, so it's saved separately and kept out of sugarLogs/
-                            // fastingSugarValue to avoid corrupting the mg/dL trend and averages.
-                            state.repository.addHealthLog("glucoseReadings", mapOf(
-                                "value" to value,
-                                "unit" to "%",
-                                "readingType" to "hba1c",
-                                "measuredAt" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
-                                "source" to "manual"
-                            )) { result ->
-                                saving = false
-                                if (result is com.nirogbhumi.app.data.CloudResult.Success) onDismiss()
-                                else state.cloudMessage = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
-                            }
-                        } else {
-                            val value = sugarInput.toIntOrNull()
-                            if (value == null) { saving = false; return@Button }
-                            state.repository.addHealthLog("glucoseReadings", mapOf(
-                                "value" to value,
-                                "unit" to "mg/dL",
-                                "readingType" to if (sugarType == "Fasting") "fasting" else "post_meal",
-                                "measuredAt" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
-                                "source" to "manual"
-                            )) { result ->
-                                saving = false
-                                if (result is com.nirogbhumi.app.data.CloudResult.Success) {
-                                    state.fastingSugarValue = value
-                                    state.sugarLogs.add(0, SugarLog(state.sugarLogs.size + 1, value, sugarType, "Today, Just Now", if (value > 130) "High" else if (value < 80) "Low" else "Normal"))
-                                    onDismiss()
-                                } else state.cloudMessage = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
-                            }
-                        }
-                        "bp" -> {
-                            val sys = systolicInput.toIntOrNull()
-                            val dia = diastolicInput.toIntOrNull()
-                            if (sys == null || dia == null) { saving = false; return@Button }
-                            state.repository.addHealthLog("bpReadings", mapOf(
-                                "systolic" to sys,
-                                "diastolic" to dia,
-                                "measuredAt" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
-                                "source" to "manual"
-                            )) { result ->
-                                saving = false
-                                if (result is com.nirogbhumi.app.data.CloudResult.Success) {
-                                    state.latestBpReading = "$sys/$dia"
-                                    onDismiss()
-                                } else state.cloudMessage = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
-                            }
-                        }
-                        else -> {
-                            val weight = weightInput.toDoubleOrNull()
-                            if (weight == null) { saving = false; return@Button }
-                            state.repository.addHealthLog("weightLogs", mapOf(
-                                "valueKg" to weight,
-                                "measuredAt" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
-                                "source" to "manual"
-                            )) { result ->
-                                saving = false
-                                if (result is com.nirogbhumi.app.data.CloudResult.Success) {
-                                    state.profileWeight = weightInput
-                                    onDismiss()
-                                } else state.cloudMessage = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
-                            }
-                        }
-                    }
-                }
-            ) {
-                if (saving) CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
-                else Text("Save", color = Color.White)
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel", color = Color(0xFF737972)) }
-        }
-    )
 }
 
 // Fixed compile extension function for modifier border to prevent error
