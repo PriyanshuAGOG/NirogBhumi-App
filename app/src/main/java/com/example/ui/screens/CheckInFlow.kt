@@ -297,9 +297,9 @@ private fun ColumnScope.CheckInDone(state: NirogState, sugar: String?, bp: Strin
     }
     Spacer(Modifier.height(16.dp))
     Button(
-        onClick = { state.currentScreen = "dashboard" },
+        onClick = { state.currentScreen = "body_report" },
         modifier = Modifier.fillMaxWidth().height(54.dp),
         colors = ButtonDefaults.buttonColors(containerColor = Green),
         shape = RoundedCornerShape(27.dp)
-    ) { Text("Back to Today", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 16.sp) }
+    ) { Text("See your Body Report", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 16.sp) }
 }
