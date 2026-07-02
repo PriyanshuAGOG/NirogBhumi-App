@@ -12,7 +12,15 @@
     { "collectionGroup": "coachMessages", "queryScope": "COLLECTION", "fields": [{"fieldPath":"toUid","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}] },
     { "collectionGroup": "reportedMessages", "queryScope": "COLLECTION", "fields": [{"fieldPath":"status","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}] },
     { "collectionGroup": "supportRequests", "queryScope": "COLLECTION", "fields": [{"fieldPath":"status","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}] },
-    { "collectionGroup": "walkLogs", "queryScope": "COLLECTION", "fields": [{"fieldPath":"userId","order":"ASCENDING"},{"fieldPath":"createdAt","order":"ASCENDING"}] }
+    { "collectionGroup": "walkLogs", "queryScope": "COLLECTION", "fields": [{"fieldPath":"userId","order":"ASCENDING"},{"fieldPath":"createdAt","order":"ASCENDING"}] },
+    { "collectionGroup": "walkLogs", "queryScope": "COLLECTION", "fields": [{"fieldPath":"userId","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}] },
+    { "collectionGroup": "bpReadings", "queryScope": "COLLECTION", "fields": [{"fieldPath":"userId","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}] },
+    { "collectionGroup": "sleepLogs", "queryScope": "COLLECTION", "fields": [{"fieldPath":"userId","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}] },
+    { "collectionGroup": "weightLogs", "queryScope": "COLLECTION", "fields": [{"fieldPath":"userId","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}] },
+    { "collectionGroup": "labReports", "queryScope": "COLLECTION", "fields": [{"fieldPath":"userId","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}] },
+    { "collectionGroup": "checklistLogs", "queryScope": "COLLECTION", "fields": [{"fieldPath":"userId","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}] },
+    { "collectionGroup": "dailyCheckins", "queryScope": "COLLECTION", "fields": [{"fieldPath":"userId","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}] },
+    { "collectionGroup": "coachNotes", "queryScope": "COLLECTION", "fields": [{"fieldPath":"targetUid","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}] }
   ],
   "fieldOverrides": []
 }

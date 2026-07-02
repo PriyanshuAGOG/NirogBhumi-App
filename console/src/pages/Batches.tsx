@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import {
   addDoc,
   collection,
@@ -181,6 +182,9 @@ function Roster({ program }: { program: Program }) {
                     <span className="member-km">{m.contributionKm} km</span>
                   )}
                   <span className={`tag ${c.cls}`}>{c.tag}</span>
+                  <Link to={`/members/${m.uid ?? m.id}`} className="btn btn-ghost btn-sm">
+                    Health record
+                  </Link>
                   <button
                     className="btn btn-ghost btn-sm"
                     onClick={() => {
