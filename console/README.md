@@ -8,16 +8,20 @@ the same Auth, Firestore collections, and security rules — no extra backend.
 Access is staff-only: after email/password sign-in the console reads the user's
 ID-token custom claim `role` and admits only `admin`, `coach`, or `super_admin`.
 
-## What's in this slice (foundation)
+## What's in the console
 
 - Role-gated auth shell (`AuthProvider`, sign-in page, staff-only gate).
-- Left-sidebar `AppShell` with nav: Moderation, Batches, Announcements,
-  Calendar, Programs, Content, Settings.
-- **Moderation queue** — the one fully working realtime screen. A live
-  `onSnapshot` listener on `reportedMessages` (status `open`, newest first)
-  renders each report as a card with Dismiss / Remove actions that write
-  `status`, `reviewedBy`, `reviewedAt`.
-- Every other nav item renders a "Coming in this phase" placeholder.
+- Left-sidebar `AppShell` with nav: Overview, Moderation, Batches,
+  Announcements, Calendar, Programs & Codes, Content, Consultations,
+  Support, Users & Roles, Settings.
+- Every page is realtime (`onSnapshot`) and connected: Dashboard summary
+  tiles; Moderation queue (dismiss/remove reports); Batches (roster + Batch
+  Pulse + coach→member messaging); Announcements composer; Calendar CRUD
+  with optional auto-announce on change; Programs & program-code
+  management; Content (Learn) authoring; read-only Consultations; Support
+  inbox; Users & Roles (role changes via the `setUserRole` callable
+  Function - shows a clear inline message if that Function isn't deployed
+  yet); Settings.
 
 ## Setup
 
@@ -46,23 +50,20 @@ npm run build   # type-check + production build to dist/
 npm run preview # serve the production build locally
 ```
 
-## Deploying to Firebase Hosting (later)
+## Deploying to Firebase Hosting
 
-Do NOT edit the root `firebase.json` as part of this slice. When the console is
-ready to deploy, add this `hosting` block to the repository-root `firebase.json`
-(the console builds to `console/dist`, and the SPA needs a catch-all rewrite):
+The root `firebase.json` already has the `hosting` block pointed at
+`console/dist` with the SPA catch-all rewrite. From the repo root:
 
-```json
-"hosting": {
-  "public": "console/dist",
-  "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
-  "rewrites": [
-    { "source": "**", "destination": "/index.html" }
-  ]
-}
+```sh
+npm --prefix console run build
+firebase deploy --only hosting --project nirog-bhumi-app
 ```
 
-Then, from the repo root: `npm --prefix console run build && firebase deploy --only hosting`.
+That publishes the console to the project's default Hosting URL
+(`https://nirog-bhumi-app.web.app` / `.firebaseapp.com`). A custom domain
+(e.g. `admin.nirogbhumi.app`) can be added later in the Firebase console
+under Hosting → Add custom domain.
 
 ## Design tokens
 
@@ -74,10 +75,12 @@ surfaces read as one product. Keep these values in sync with
 ## Notes / follow-ups
 
 - The Moderation listener prefers the indexed query
-  `where('status','==','open') orderBy('createdAt','desc')`. If that composite
-  index is missing (or `status` is absent on legacy docs) it automatically falls
-  back to an unfiltered `orderBy('createdAt','desc')` listener and filters
-  client-side. Add the composite index before relying on it at scale.
+  `where('status','==','open') orderBy('createdAt','desc')` - the required
+  composite index is in `firebase/firestore.indexes.json` and deployed. If a
+  legacy doc predates the `status` field, the listener falls back to an
+  unfiltered `orderBy('createdAt','desc')` and filters client-side.
 - Moderation actions currently write directly to the report doc (admin update is
   allowed by existing rules). The BUILD_PLAN's callable-Function moderation path
   (audit logs, message tombstoning) is a later slice.
+- `setUserRole` (the Users & Roles page) requires the Cloud Function of the
+  same name to be deployed (`firebase deploy --only functions:setUserRole`).
