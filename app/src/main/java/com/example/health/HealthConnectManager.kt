@@ -16,6 +16,9 @@ import java.util.Date
 
 data class HealthSyncSummary(val steps: Int, val sleep: Int, val glucose: Int, val bloodPressure: Int, val weight: Int)
 
+/** Today-only pre-fill summary shown in the Daily Check-in wizard (PRD v2's "2-minute" USP). */
+data class TodaySyncSummary(val totalSteps: Int, val sleepHours: Int, val sleepMinutes: Int)
+
 private const val HEALTH_CONNECT_PACKAGE = "com.google.android.apps.healthdata"
 
 enum class HealthConnectStatus { AVAILABLE, NEEDS_INSTALL_OR_UPDATE, UNSUPPORTED }
@@ -73,6 +76,36 @@ class HealthConnectManager(private val context: Context, private val repository:
 
         repository.upsertUserRecord("deviceConnections", "health_connect", mapOf("provider" to "health_connect", "status" to "connected", "permissions" to permissions.associateWith { it in granted }, "lastSyncedAt" to FieldValue.serverTimestamp()))
         return HealthSyncSummary(steps.size, sleep.size, glucose.size, bp.size, weight.size)
+    }
+
+    /** Reads + saves TODAY's steps and sleep only - the fast pre-fill check the Daily Check-in wizard opens with. */
+    suspend fun syncToday(): TodaySyncSummary? {
+        if (!isAvailable) return null
+        val granted = client.permissionController.getGrantedPermissions()
+        if (granted.isEmpty()) return null
+        val now = Instant.now()
+        val startOfDay = now.truncatedTo(ChronoUnit.DAYS)
+        val filter = TimeRangeFilter.between(startOfDay, now)
+
+        var totalSteps = 0
+        if (HealthPermission.getReadPermission(StepsRecord::class) in granted) {
+            val steps = client.readRecords(ReadRecordsRequest<StepsRecord>(filter)).records
+            totalSteps = steps.sumOf { it.count }.toInt()
+            steps.forEach { record -> repository.upsertUserRecord("walkLogs", id("steps", record.metadata.id, record.startTime), mapOf("steps" to record.count, "startTime" to Date.from(record.startTime), "endTime" to Date.from(record.endTime), "source" to "health_connect", "providerRecordId" to record.metadata.id)) }
+        }
+
+        var sleepMinutesTotal = 0
+        if (HealthPermission.getReadPermission(SleepSessionRecord::class) in granted) {
+            // Sleep sessions typically start the night before, so look back further
+            // than midnight but only count minutes that fall within the last 18 hours.
+            val sleepFilter = TimeRangeFilter.between(now.minus(18, ChronoUnit.HOURS), now)
+            val sleep = client.readRecords(ReadRecordsRequest<SleepSessionRecord>(sleepFilter)).records
+            sleepMinutesTotal = sleep.sumOf { (it.endTime.epochSecond - it.startTime.epochSecond) / 60 }.toInt()
+            sleep.forEach { record -> repository.upsertUserRecord("sleepLogs", id("sleep", record.metadata.id, record.startTime), mapOf("sleepTime" to Date.from(record.startTime), "wakeTime" to Date.from(record.endTime), "duration" to (record.endTime.epochSecond - record.startTime.epochSecond) / 3600.0, "source" to "health_connect", "providerRecordId" to record.metadata.id)) }
+        }
+
+        if (totalSteps == 0 && sleepMinutesTotal == 0) return null
+        return TodaySyncSummary(totalSteps, sleepMinutesTotal / 60, sleepMinutesTotal % 60)
     }
 
     private fun id(prefix: String, providerId: String, time: Instant): String = "${prefix}_${providerId.ifBlank { time.toEpochMilli().toString() }}"

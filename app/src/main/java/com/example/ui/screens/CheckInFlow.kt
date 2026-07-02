@@ -17,6 +17,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -25,6 +26,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.firebase.firestore.FieldValue
 import com.nirogbhumi.app.data.CloudResult
+import com.nirogbhumi.app.health.HealthConnectManager
+import com.nirogbhumi.app.health.TodaySyncSummary
 import com.nirogbhumi.app.ui.NirogState
 import com.nirogbhumi.app.ui.SugarLog
 
@@ -42,10 +45,23 @@ private val Muted = Color(0xFF697169)
  */
 @Composable
 fun DailyCheckInScreen(state: NirogState) {
+    val context = LocalContext.current
     // step: 0 = sugar, 1 = bp, 2 = weight, 3 = done summary
     var step by remember { mutableStateOf(0) }
     var saving by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+
+    // Device pre-fill: a fast, silent check for today's steps/sleep already synced
+    // from a connected watch/band, so a connected user has less left to log by hand.
+    var syncSummary by remember { mutableStateOf<TodaySyncSummary?>(null) }
+    LaunchedEffect(Unit) {
+        val manager = HealthConnectManager(context, state.repository)
+        val summary = runCatching { manager.syncToday() }.getOrNull()
+        if (summary != null) {
+            syncSummary = summary
+            state.stepsLogged = summary.totalSteps
+        }
+    }
 
     // Collected results, for the closing summary. Null = skipped.
     var sugarResult by remember { mutableStateOf<String?>(null) }
@@ -92,6 +108,28 @@ fun DailyCheckInScreen(state: NirogState) {
                             .height(4.dp)
                             .background(if (i <= step) Green else Color(0xFFDDE3D8), RoundedCornerShape(2.dp))
                     )
+                }
+            }
+        }
+
+        syncSummary?.let { summary ->
+            if (step < 3) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 10.dp),
+                    color = Color(0xFFE4EFE4),
+                    shape = RoundedCornerShape(14.dp)
+                ) {
+                    Row(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Filled.Watch, contentDescription = null, tint = Color(0xFF3F7D58), modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(8.dp))
+                        val parts = mutableListOf<String>()
+                        if (summary.totalSteps > 0) parts += "${summary.totalSteps} steps"
+                        if (summary.sleepHours > 0 || summary.sleepMinutes > 0) parts += "${summary.sleepHours}h ${summary.sleepMinutes}m sleep"
+                        Text(
+                            "${parts.joinToString(" & ")} already synced from your watch",
+                            fontSize = 12.5.sp, fontWeight = FontWeight.Bold, color = Color(0xFF3F7D58)
+                        )
+                    }
                 }
             }
         }
