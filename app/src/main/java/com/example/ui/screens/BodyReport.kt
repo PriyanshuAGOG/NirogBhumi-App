@@ -109,6 +109,14 @@ fun BodyReportScreen(state: NirogState) {
       onClick = { state.currentScreen = "dashboard" },
     )
 
+    Spacer(Modifier.size(NirogSpace.md))
+    RowCard(
+      title = "See your rhythm",
+      subtitle = "Your check-in pattern over the last 30 days",
+      trailing = "View",
+      onClick = { state.currentScreen = "rhythm" },
+    )
+
     Spacer(Modifier.size(NirogSpace.xl))
     PrimaryButton("Done", onClick = { state.currentScreen = "dashboard" })
     Spacer(Modifier.size(NirogSpace.xxl))
