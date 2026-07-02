@@ -1978,6 +1978,223 @@ fun relativeTimeLabel(date: java.util.Date): String {
     }
 }
 
+// Data export & account deletion - both real, backed by the same Cloud
+// Functions/Firestore request-queue path (requestDataExport/
+// requestAccountDeletion -> dataExportRequests/deletionRequests, processed by
+// existing scheduled Functions) rather than a generic form that goes nowhere.
+@Composable
+fun DataControlsScreen(state: NirogState) {
+    var exporting by remember { mutableStateOf(false) }
+    var exportRequested by remember { mutableStateOf(false) }
+    var confirmingDelete by remember { mutableStateOf(false) }
+    var deleting by remember { mutableStateOf(false) }
+    var deletionRequested by remember { mutableStateOf(false) }
+
+    Column(modifier = Modifier.fillMaxSize().background(Color(0xFFF8F6EF))) {
+        DetailScreenHeader("Export or delete my data", onBack = { state.currentScreen = "profile" })
+        Column(modifier = Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                shape = RoundedCornerShape(20.dp),
+                border = BorderStroke(0.5.dp, Color(0xFFD8D0C0))
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Icon(Icons.Filled.DownloadForOffline, contentDescription = null, tint = Color(0xFF1B3221))
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("Export your data", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF1B3221))
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        "A copy of everything you've logged - readings, reports, program activity - as a file you can keep or share with a doctor.",
+                        fontSize = 13.sp, color = Color(0xFF697169), lineHeight = 18.sp
+                    )
+                    Spacer(modifier = Modifier.height(14.dp))
+                    if (exportRequested) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = Color(0xFF3F7D58), modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Requested - you'll get a notification when it's ready.", fontSize = 13.sp, color = Color(0xFF3F7D58), fontWeight = FontWeight.SemiBold)
+                        }
+                    } else {
+                        Button(
+                            enabled = !exporting,
+                            onClick = {
+                                exporting = true
+                                state.repository.requestDataExport { result ->
+                                    exporting = false
+                                    if (result is com.nirogbhumi.app.data.CloudResult.Success) exportRequested = true
+                                    else state.cloudMessage = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF314936)),
+                            shape = RoundedCornerShape(20.dp)
+                        ) { Text(if (exporting) "Requesting..." else "Request my data", color = Color.White, fontWeight = FontWeight.Bold) }
+                    }
+                }
+            }
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFF5DFD6)),
+                shape = RoundedCornerShape(20.dp)
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Icon(Icons.Filled.DeleteForever, contentDescription = null, tint = Color(0xFFB4472F))
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("Delete my account", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF7B332E))
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        "Permanently removes your logs, reports, and program activity after identity verification. This can't be undone.",
+                        fontSize = 13.sp, color = Color(0xFF7B332E), lineHeight = 18.sp
+                    )
+                    Spacer(modifier = Modifier.height(14.dp))
+                    if (deletionRequested) {
+                        Text("Deletion requested - pending approval and identity verification.", fontSize = 13.sp, color = Color(0xFF7B332E), fontWeight = FontWeight.SemiBold)
+                    } else {
+                        OutlinedButton(
+                            enabled = !deleting,
+                            onClick = { confirmingDelete = true },
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFB4472F))
+                        ) { Text("Request account deletion") }
+                    }
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(32.dp))
+    }
+
+    if (confirmingDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmingDelete = false },
+            title = { Text("Delete your account?", fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221)) },
+            text = { Text("All your health logs and reports will be permanently deleted after verification. This can't be undone.", fontSize = 13.sp, color = Color(0xFF434842)) },
+            confirmButton = {
+                Button(
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB4472F)),
+                    onClick = {
+                        deleting = true
+                        state.repository.requestAccountDeletion { result ->
+                            deleting = false
+                            confirmingDelete = false
+                            if (result is com.nirogbhumi.app.data.CloudResult.Success) deletionRequested = true
+                            else state.cloudMessage = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
+                        }
+                    }
+                ) { Text("Delete my account", color = Color.White) }
+            },
+            dismissButton = { TextButton(onClick = { confirmingDelete = false }) { Text("Cancel", color = Color(0xFF737972)) } }
+        )
+    }
+}
+
+// Read-only summary of onboarding consent - matches Legal Center's promise
+// that optional consent can be reviewed/withdrawn here. Required consent
+// (health data storage, medical disclaimer) can't be withdrawn without
+// deleting the account, since the app can't function without it.
+@Composable
+fun PrivacyConsentScreen(state: NirogState) {
+    Column(modifier = Modifier.fillMaxSize().background(Color(0xFFF8F6EF))) {
+        DetailScreenHeader("Privacy & consent", onBack = { state.currentScreen = "profile" })
+        Column(modifier = Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("What you've agreed to, and what's optional.", fontSize = 13.sp, color = Color(0xFF697169))
+            ConsentRow("Health data storage", "Required to track your readings and reports.", state.consentHealthData, required = true)
+            ConsentRow("Expert review", "Lets an assigned expert see your logs when you book care or join a program.", state.consentExpertReview, required = false)
+            ConsentRow("Medical disclaimer acknowledgement", "You understand this app doesn't replace medical advice.", state.consentMedicalDisclaimer, required = true)
+            Spacer(modifier = Modifier.height(4.dp))
+            TextButton(onClick = { state.legalReturnRoute = "privacy_consent"; state.currentScreen = "legal_center" }) {
+                Text("Read the full privacy policy", color = Color(0xFF314936), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            }
+        }
+        Spacer(modifier = Modifier.height(32.dp))
+    }
+}
+
+@Composable
+private fun ConsentRow(title: String, description: String, granted: Boolean, required: Boolean) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(0.5.dp, Color(0xFFD8D0C0))
+    ) {
+        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                if (granted) Icons.Filled.CheckCircle else Icons.Filled.RadioButtonUnchecked,
+                contentDescription = null,
+                tint = if (granted) Color(0xFF3F7D58) else Color(0xFF9CB79F),
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(title, fontWeight = FontWeight.Bold, fontSize = 13.5.sp, color = Color(0xFF1B2219))
+                    if (required) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Surface(color = Color(0xFFEBF7E8), shape = RoundedCornerShape(8.dp)) {
+                            Text("REQUIRED", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFF426820), modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                        }
+                    }
+                }
+                Text(description, fontSize = 12.sp, color = Color(0xFF8B9285), lineHeight = 16.sp)
+            }
+        }
+    }
+}
+
+// Contact support - writes a real supportRequests doc (rules already permit
+// self-scoped create/read) instead of a generic form with no clear outcome.
+@Composable
+fun SupportScreen(state: NirogState) {
+    var subject by remember { mutableStateOf("") }
+    var message by remember { mutableStateOf("") }
+    var sending by remember { mutableStateOf(false) }
+    var sent by remember { mutableStateOf(false) }
+
+    Column(modifier = Modifier.fillMaxSize().background(Color(0xFFF8F6EF))) {
+        DetailScreenHeader("Help & support", onBack = { state.currentScreen = "profile" })
+        Column(modifier = Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            if (sent) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFEBF7E8)),
+                    shape = RoundedCornerShape(20.dp)
+                ) {
+                    Column(modifier = Modifier.padding(20.dp)) {
+                        Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = Color(0xFF3F7D58))
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Message sent", fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text("We'll get back to you as soon as we can.", fontSize = 13.sp, color = Color(0xFF4B6450))
+                    }
+                }
+            } else {
+                Text("What can we help with?", fontSize = 13.sp, color = Color(0xFF697169))
+                OutlinedTextField(subject, { subject = it }, label = { Text("Subject") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(message, { message = it }, label = { Text("Message") }, minLines = 5, modifier = Modifier.fillMaxWidth())
+                Button(
+                    enabled = !sending && subject.isNotBlank() && message.isNotBlank(),
+                    onClick = {
+                        sending = true
+                        state.repository.addHealthLog("supportRequests", mapOf(
+                            "subject" to subject.trim(),
+                            "message" to message.trim(),
+                            "status" to "open"
+                        )) { result ->
+                            sending = false
+                            if (result is com.nirogbhumi.app.data.CloudResult.Success) sent = true
+                            else state.cloudMessage = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF314936)),
+                    shape = RoundedCornerShape(20.dp)
+                ) { Text(if (sending) "Sending..." else "Send message", color = Color.White, fontWeight = FontWeight.Bold) }
+            }
+        }
+        Spacer(modifier = Modifier.height(32.dp))
+    }
+}
+
 // Notification Settings - custom Switch-based screen replacing the generic
 // checklist form. Health reminders are real, on-device WorkManager schedules
 // (see ReminderScheduler/ReminderWorker) so they fire even without connectivity;
