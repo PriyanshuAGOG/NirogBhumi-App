@@ -205,3 +205,48 @@ Code + security rules + indexes (if any) committed together · CI build green ·
 prototype/PRD parity on the screen · no fabricated data · warm/non-punitive
 copy · audit entry for any admin write. A slice isn't "done" until the Actions
 build passes.
+
+---
+
+## 8. Post-launch backlog (standing `/goal`, worked via `/loop`)
+
+Phases 0-3 above shipped; a full security audit (Android/Functions/rules/
+console) also found and fixed every Critical/High finding (see git log for
+the security-hardening commit). This phase is the next tranche, prioritized
+by the user. Work sequentially, CI-verified per slice, small commits.
+
+1. [x] **Deploy automation** — `deploy-firebase.yml` now uses Workload
+   Identity Federation instead of a service-account key (the org policy
+   that blocks key creation doesn't block WIF, since no key is ever
+   created). One-time `gcloud` setup documented in
+   `docs/deploy-wif-setup.md` — **owner action required** to actually run
+   it once before the workflow will authenticate successfully.
+2. [ ] **Real typography** (Fraunces + Manrope) — blocked: this sandbox's
+   network policy doesn't allow fetching font binaries from Google
+   Fonts/GitHub. Needs the font files supplied another way (owner upload,
+   or a network policy change on the environment) before this can ship.
+3. [ ] **Per-coach batch scoping** — rules + console + data model so a
+   coach only manages their assigned program(s), not any program.
+4. [ ] **Unread badges in Chat Hub** — wire
+   `programMembers.lastReadGeneralAt`/`lastReadAnnouncementsAt`.
+5. [x] **Razorpay cleanup** — removed `PaymentResultListener`, the
+   `razorpay-checkout` dependency, `RazorpayPaymentLauncher`, and the dead
+   `createPaymentOrder` call site. The unreachable `care_hub` →
+   `consult_stepper` → `payment_confirmation` chain still exists as inert
+   scaffold (confirmed no live entry point) pending item 11's real rebuild.
+6. [ ] **Medication logging** — new `medicationLogs` collection: rules,
+   indexes, Android logging UI, console/coach visibility.
+7. [ ] **Analytics events, accessibility pass, Compose/rules unit tests.**
+8. [ ] **Verify console deploy** — confirm the live URL actually serves the
+   latest build end to end.
+9. [ ] **Smart reminder timing** using `checkinHourHint`.
+10. [ ] **Care+ community features** — @mentions, pin-a-message, photo
+    sharing, voice notes in chat.
+11. [ ] **Consultations** — build a real non-payment booking flow
+    end to end (replaces the inert scaffold from item 5).
+12. [ ] **Health data intelligence** — basic trend correlation insight.
+13. [ ] **Shareable Health File link** (signed URL / QR).
+14. [ ] **Retention/habit formation** — streak number, first-week
+    checklist, milestone moments.
+15. [ ] **Admin console utility** — announcement templates, bulk "message
+    all quiet members," CSV roster export.
