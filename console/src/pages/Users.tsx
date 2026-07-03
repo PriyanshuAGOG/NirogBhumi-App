@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { collection, onSnapshot, query } from 'firebase/firestore'
 import { httpsCallable, type HttpsCallableResult } from 'firebase/functions'
 import { FirebaseError } from 'firebase/app'
 import { db, functions } from '../lib/firebase'
 import { errText } from '../lib/errors'
+import { PERMISSION_KEYS, type Permission } from '../auth/AuthProvider'
 import './Users.css'
 
 interface UserRow {
@@ -15,10 +17,22 @@ interface UserRow {
   role?: string
   status?: string
   programActive?: boolean
+  permissions?: Permission[]
 }
 
 type AssignableRole = 'user' | 'coach' | 'admin'
 const ROLE_OPTIONS: AssignableRole[] = ['user', 'coach', 'admin']
+
+const PERMISSION_LABELS: Record<Permission, string> = {
+  moderation: 'Moderation',
+  batches: 'Batches',
+  announcements: 'Announcements',
+  calendar: 'Calendar',
+  programs: 'Programs',
+  consultations: 'Consultations',
+  support: 'Support',
+  members: 'Member monitoring',
+}
 
 // A callable's "not deployed" surfaces as one of these codes.
 const NOT_DEPLOYED = new Set(['functions/not-found', 'functions/unavailable', 'functions/internal'])
@@ -47,6 +61,7 @@ export default function Users() {
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [pending, setPending] = useState<Record<string, AssignableRole>>({})
+  const [pendingPerms, setPendingPerms] = useState<Record<string, Permission[]>>({})
   const [rowState, setRowState] = useState<Record<string, RowState>>({})
 
   useEffect(() => {
@@ -77,15 +92,17 @@ export default function Users() {
 
   async function apply(u: UserRow) {
     const nextRole = pending[u.id] ?? (u.role as AssignableRole) ?? 'user'
+    const nextPerms = nextRole === 'coach' ? pendingPerms[u.id] ?? u.permissions ?? PERMISSION_KEYS : undefined
     setRowState((prev) => ({ ...prev, [u.id]: { saving: true, message: null, error: null } }))
     try {
-      const setUserRole = httpsCallable<{ uid: string; role: string }, unknown>(
+      const setUserRole = httpsCallable<{ uid: string; role: string; permissions?: string[] }, unknown>(
         functions,
         'setUserRole',
       )
       const res: HttpsCallableResult<unknown> = await setUserRole({
         uid: u.userId ?? u.id,
         role: nextRole,
+        ...(nextPerms ? { permissions: nextPerms } : {}),
       })
       void res
       setRowState((prev) => ({
@@ -152,42 +169,76 @@ export default function Users() {
             const current = (u.role as AssignableRole) ?? 'user'
             const selected = pending[u.id] ?? current
             const state = rowState[u.id]
-            const changed = selected !== current
+            const currentPerms = u.permissions ?? PERMISSION_KEYS
+            const selectedPerms = pendingPerms[u.id] ?? currentPerms
+            const changed =
+              selected !== current ||
+              (selected === 'coach' &&
+                JSON.stringify([...selectedPerms].sort()) !== JSON.stringify([...currentPerms].sort()))
             return (
-              <div key={u.id} className="card user-row">
-                <div className="user-main">
-                  <span className="user-name">{u.name ?? '(no name)'}</span>
-                  <span className="user-sub">
-                    {u.email ?? '—'}
-                    {u.phone ? ` · ${u.phone}` : ''}
-                  </span>
-                  {state?.message && <span className="user-ok">{state.message}</span>}
-                  {state?.error && <span className="user-err">{state.error}</span>}
+              <div key={u.id} className="card user-row-card">
+                <div className="user-row">
+                  <div className="user-main">
+                    <span className="user-name">{u.name ?? '(no name)'}</span>
+                    <span className="user-sub">
+                      {u.email ?? '—'}
+                      {u.phone ? ` · ${u.phone}` : ''}
+                    </span>
+                    {state?.message && <span className="user-ok">{state.message}</span>}
+                    {state?.error && <span className="user-err">{state.error}</span>}
+                  </div>
+                  <div className="user-meta">
+                    {u.programActive && (
+                      <Link to={`/members/${u.userId ?? u.id}`} className="btn btn-ghost btn-sm">
+                        Health record
+                      </Link>
+                    )}
+                    <span className={`tag ${roleTagClass(u.role)}`}>{u.role ?? 'user'}</span>
+                    <select
+                      className="select user-role-select"
+                      value={selected}
+                      onChange={(e) =>
+                        setPending((prev) => ({ ...prev, [u.id]: e.target.value as AssignableRole }))
+                      }
+                    >
+                      {ROLE_OPTIONS.map((r) => (
+                        <option key={r} value={r}>
+                          {r}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      className="btn btn-forest btn-sm"
+                      disabled={!changed || state?.saving}
+                      onClick={() => void apply(u)}
+                    >
+                      {state?.saving ? 'Saving…' : 'Set role'}
+                    </button>
+                  </div>
                 </div>
-                <div className="user-meta">
-                  {u.programActive && <span className="tag tag-good">Care+</span>}
-                  <span className={`tag ${roleTagClass(u.role)}`}>{u.role ?? 'user'}</span>
-                  <select
-                    className="select user-role-select"
-                    value={selected}
-                    onChange={(e) =>
-                      setPending((prev) => ({ ...prev, [u.id]: e.target.value as AssignableRole }))
-                    }
-                  >
-                    {ROLE_OPTIONS.map((r) => (
-                      <option key={r} value={r}>
-                        {r}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    className="btn btn-forest btn-sm"
-                    disabled={!changed || state?.saving}
-                    onClick={() => void apply(u)}
-                  >
-                    {state?.saving ? 'Saving…' : 'Set role'}
-                  </button>
-                </div>
+                {selected === 'coach' && (
+                  <div className="perm-grid">
+                    <span className="perm-label">Console access for this coach</span>
+                    <div className="perm-checks">
+                      {PERMISSION_KEYS.map((p) => (
+                        <label key={p} className="check">
+                          <input
+                            type="checkbox"
+                            checked={selectedPerms.includes(p)}
+                            onChange={(e) =>
+                              setPendingPerms((prev) => {
+                                const base = prev[u.id] ?? currentPerms
+                                const next = e.target.checked ? [...base, p] : base.filter((x) => x !== p)
+                                return { ...prev, [u.id]: next }
+                              })
+                            }
+                          />
+                          {PERMISSION_LABELS[p]}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )
           })}

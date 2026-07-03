@@ -164,9 +164,17 @@ export const queueDeletionRequest = onDocumentCreated({ document: 'deletionReque
   await event.data?.ref.set({ status: 'awaiting_verification', updatedAt: FieldValue.serverTimestamp() }, { merge: true });
 });
 
+// Feature areas a coach's console access can be scoped to. Admin/super_admin
+// always have full access regardless of this list (it only narrows coaches).
+const PERMISSION_KEYS = ['moderation', 'batches', 'announcements', 'calendar', 'programs', 'consultations', 'support', 'members'] as const;
+type PermissionKey = typeof PERMISSION_KEYS[number];
+
 // Sets a user's role custom claim (used by the admin console's Users page).
 // Only an admin/super_admin may call it; it updates both the Auth claim (the
 // enforcement source) and the mirrored users/{uid}.role field, and audits it.
+// For role 'coach' it also accepts a `permissions` array that scopes exactly
+// which console feature areas that coach can use - stored in the same custom
+// claim (`perms`) so it's part of the enforcement source, not just UI dressing.
 export const setUserRole = onCall({ region }, async request => {
   const auth = requireUser(request);
   if (auth.token.role !== 'admin' && auth.token.role !== 'super_admin') throw new HttpsError('permission-denied', 'Admin only');
@@ -174,10 +182,19 @@ export const setUserRole = onCall({ region }, async request => {
   const role = String(request.data?.role ?? '');
   if (!uid || !['user', 'coach', 'admin'].includes(role)) throw new HttpsError('invalid-argument', 'A uid and a valid role (user|coach|admin) are required');
   if (uid === auth.uid && role !== 'admin') throw new HttpsError('failed-precondition', 'You cannot remove your own admin role');
-  await getAuth().setCustomUserClaims(uid, { role });
-  await db.doc(`users/${uid}`).set({ role, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
-  await db.collection('auditLogs').add({ actorId: auth.uid, actorRole: auth.token.role ?? 'admin', action: 'set_role', entityType: 'user', entityId: uid, metadata: { role }, createdAt: FieldValue.serverTimestamp() });
-  return { updated: true, uid, role };
+
+  let perms: PermissionKey[] | null = null;
+  if (role === 'coach') {
+    const requested = Array.isArray(request.data?.permissions) ? request.data.permissions : PERMISSION_KEYS;
+    perms = requested.filter((p: unknown): p is PermissionKey => PERMISSION_KEYS.includes(p as PermissionKey));
+  }
+
+  const claims: Record<string, unknown> = { role };
+  if (perms) claims.perms = perms;
+  await getAuth().setCustomUserClaims(uid, claims);
+  await db.doc(`users/${uid}`).set({ role, permissions: perms ?? FieldValue.delete(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  await db.collection('auditLogs').add({ actorId: auth.uid, actorRole: auth.token.role ?? 'admin', action: 'set_role', entityType: 'user', entityId: uid, metadata: { role, permissions: perms }, createdAt: FieldValue.serverTimestamp() });
+  return { updated: true, uid, role, permissions: perms };
 });
 
 export const processApprovedDeletions = onSchedule({ schedule: 'every 60 minutes', timeZone: 'Asia/Kolkata', region }, async () => {

@@ -1,25 +1,28 @@
 import { NavLink, Outlet } from 'react-router-dom'
-import { useAuth } from '../auth/AuthProvider'
+import { useAuth, type Permission } from '../auth/AuthProvider'
 import './AppShell.css'
 
 interface NavItem {
   to: string
   label: string
   icon: string
-  /** If set, only these roles see the item. Otherwise all staff do. */
+  /** If set, only admin/super_admin see the item - never scopable to a coach. */
   adminOnly?: boolean
+  /** If set, a coach only sees the item when this permission is in their scope. */
+  permission?: Permission
 }
 
 const NAV: NavItem[] = [
   { to: '/dashboard', label: 'Overview', icon: '🏠' },
-  { to: '/moderation', label: 'Moderation', icon: '🛡️' },
-  { to: '/batches', label: 'Batches', icon: '👥' },
-  { to: '/announcements', label: 'Announcements', icon: '📣' },
-  { to: '/calendar', label: 'Calendar', icon: '🗓️' },
-  { to: '/programs', label: 'Programs', icon: '🌱' },
+  { to: '/moderation', label: 'Moderation', icon: '🛡️', permission: 'moderation' },
+  { to: '/members', label: 'Members', icon: '💚', permission: 'members' },
+  { to: '/batches', label: 'Batches', icon: '👥', permission: 'batches' },
+  { to: '/announcements', label: 'Announcements', icon: '📣', permission: 'announcements' },
+  { to: '/calendar', label: 'Calendar', icon: '🗓️', permission: 'calendar' },
+  { to: '/programs', label: 'Programs', icon: '🌱', permission: 'programs' },
   { to: '/content', label: 'Content', icon: '📚', adminOnly: true },
-  { to: '/consultations', label: 'Consultations', icon: '🩺' },
-  { to: '/support', label: 'Support', icon: '💬' },
+  { to: '/consultations', label: 'Consultations', icon: '🩺', permission: 'consultations' },
+  { to: '/support', label: 'Support', icon: '💬', permission: 'support' },
   { to: '/users', label: 'Users & Roles', icon: '🧑‍🤝‍🧑', adminOnly: true },
   { to: '/settings', label: 'Settings', icon: '⚙️' },
 ]
@@ -38,9 +41,11 @@ function roleLabel(role: string | null): string {
 }
 
 export default function AppShell() {
-  const { user, role, signOut } = useAuth()
+  const { user, role, signOut, hasPermission } = useAuth()
   const isAdmin = role === 'admin' || role === 'super_admin'
-  const nav = NAV.filter((item) => !item.adminOnly || isAdmin)
+  const nav = NAV.filter(
+    (item) => (!item.adminOnly || isAdmin) && (!item.permission || hasPermission(item.permission)),
+  )
 
   return (
     <div className="shell">

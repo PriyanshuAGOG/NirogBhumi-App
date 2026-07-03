@@ -23,7 +23,7 @@ service cloud.firestore {
 
     match /users/{uid} {
       allow create: if owner(uid) && request.resource.data.userId == uid && (!('role' in request.resource.data) || request.resource.data.role == 'user');
-      allow read: if owner(uid) || admin() || assigned(uid);
+      allow read: if owner(uid) || staff() || assigned(uid);
       allow update: if admin() || (owner(uid) && (!('role' in resource.data) || request.resource.data.role == resource.data.role) && (!('status' in resource.data) || request.resource.data.status == resource.data.status));
       allow delete: if admin();
     }
@@ -35,7 +35,11 @@ service cloud.firestore {
     }
     match /{collection}/{id} {
       allow create: if collection in ['glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','labReports','dailyCheckins','checklistLogs'] && validCreate();
-      allow read, delete: if collection in ['glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','labReports','dailyCheckins','checklistLogs'] && (ownsResource() || admin() || assigned(resource.data.userId));
+      // Coaches get read-only access to their members' day-to-day logs (Care+
+      // console health monitoring) alongside the member and the admin/expert
+      // paths; only admin (not coach) may delete or edit another member's entry.
+      allow read: if collection in ['glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','labReports','dailyCheckins','checklistLogs'] && (ownsResource() || staff() || assigned(resource.data.userId));
+      allow delete: if collection in ['glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','labReports','dailyCheckins','checklistLogs'] && (ownsResource() || admin() || assigned(resource.data.userId));
       allow update: if collection in ['glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','labReports','dailyCheckins','checklistLogs'] && (admin() || (ownsResource() && ownsRequest() && preservesUserId()) || (assigned(resource.data.userId) && preservesUserId()));
     }
     match /consultations/{id} {
@@ -116,6 +120,12 @@ service cloud.firestore {
       allow read: if staff() || (signedIn() && resource.data.toUid == request.auth.uid);
       allow create: if staff() && request.resource.data.fromUid == request.auth.uid;
       allow update, delete: if staff();
+    }
+    // Coach-only case notes on a member, for consultation prep. Members never
+    // see these - staff-only end to end.
+    match /coachNotes/{id} {
+      allow read, update, delete: if staff();
+      allow create: if staff() && request.resource.data.authorId == request.auth.uid && request.resource.data.createdAt == request.time;
     }
     match /{document=**} { allow read, write: if false; }
   }
