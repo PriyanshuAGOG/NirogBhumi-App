@@ -189,9 +189,15 @@ slice that introduces it.
 
 ## 6. Known operational blockers (must clear before "live")
 
-1. **CI `FIREBASE_TOKEN` secret expired** → auto-distribution of new APKs is
-   broken. Fix: `firebase login:ci` → update repo secret (Settings →
-   Environments → production). Owner action.
+1. **Fixed 2026-07-03**: `build-firebase-debug-apk.yml` (the workflow that
+   actually uploads to Firebase App Distribution) was `workflow_dispatch`
+   only, so a new build only ever reached testers if someone remembered to
+   manually trigger it - CI's own `ci.yml` never uploads anywhere, it only
+   produces an ephemeral compile-check artifact. Testers were stuck on a
+   build from the prior evening while ~9 commits shipped with no signal.
+   Now triggers automatically on push to `main`/`claude/**` when app code
+   changes (`FIREBASE_TOKEN`/`APP_DISTRIBUTION_TESTERS` secrets confirmed
+   still valid - the distribution step succeeded on the first auto-run).
 2. **Android compile can't be verified in-sandbox** → we rely on the Actions
    build per slice; keep slices small and green.
 3. **Fonts/App Distribution** and **App Check debug** caveats from earlier
