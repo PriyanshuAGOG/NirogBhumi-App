@@ -252,18 +252,33 @@ by the user. Work sequentially, CI-verified per slice, small commits.
    indexes), a 4th Daily Check-in step (taken/missed + optional name),
    a Track-tab quick-log chip, and coach visibility (including a missed
    dose in the Member Detail alert panel) in the console.
-7. [~] **Rules unit tests done; analytics events and accessibility pass
-   still open.** `firebase/rules-tests` (`@firebase/rules-unit-testing`
-   against the real emulator, wired into CI's `firebase-rules` job) - 26
-   tests covering the highest-risk logic added this session: per-coach
-   `programStaff()` scoping (assigned coach passes, unassigned coach
-   denied, admin always passes), the two field-restricted self-update
-   rules (chat reactions, unread-badge read markers), the users/{uid}
-   program-field self-enrollment lock, and health-log read/delete
-   scoping. All 26 pass, which is real verification (not just "the rules
-   file compiles") for exactly the logic that had none before. Extend
-   this suite rather than re-deferring coachNotes/health-log program
-   scoping blind next time.
+7. [x] **Rules unit tests, analytics events, and accessibility pass** —
+   `firebase/rules-tests` (`@firebase/rules-unit-testing` against the real
+   emulator, wired into CI's `firebase-rules` job) - 27 tests covering the
+   highest-risk logic added this session: per-coach `programStaff()`
+   scoping (assigned coach passes, unassigned coach denied, admin always
+   passes), the two field-restricted self-update rules (chat reactions,
+   unread-badge read markers), the users/{uid} program-field
+   self-enrollment lock (including `checkinHourHint`), and health-log
+   read/delete scoping. All 27 pass, which is real verification (not just
+   "the rules file compiles") for exactly the logic that had none before.
+   Extend this suite rather than re-deferring coachNotes/health-log
+   program scoping blind next time.
+   New `AnalyticsLogger` (never throws, never blocks a repository call)
+   is called from `HealthRepository`'s success paths - the single cloud
+   boundary - for `log_added`, `checkin_completed`, `program_joined`,
+   `chat_message_sent`, `announcement_posted`, `data_export_requested`,
+   and `account_deletion_requested`, complementing the existing
+   `screen_view` tracking in `MainActivity`.
+   Accessibility: an icon-level audit (every `IconButton`/clickable-`Icon`
+   `contentDescription` across `ui/screens/`) found no genuine gaps -
+   real gap was text fields relying only on `placeholder`, which TalkBack
+   does not reliably expose as a persistent name. Fixed with a real
+   `label` where visible fits (medication name, check-in numeric fields,
+   search, email/password, program code) and an invisible
+   `Modifier.semantics { contentDescription = ... }` where a visible
+   label would break a compact design (OTP boxes, chat composer, the
+   shared `OutlinedProfileField`).
 8. [~] **Console deploy** — `deploy-firebase.yml` now also builds the
    console and includes `hosting` in the deploy target, so every backend
    deploy keeps `nirog-bhumi-app.web.app` in sync automatically (it was
