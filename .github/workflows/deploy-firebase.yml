@@ -41,5 +41,18 @@ jobs:
       - name: Build functions
         working-directory: firebase/functions
         run: npm ci && npm test
-      - name: Deploy rules, indexes, storage, and functions
-        run: npx --yes firebase-tools@latest deploy --project "${{ inputs.project_id }}" --only firestore,storage,functions --non-interactive
+      - name: Build console
+        working-directory: console
+        # Firebase web config isn't a secret - it's shipped in the client
+        # bundle either way, security comes from Firestore/Storage rules and
+        # App Check, not from hiding these values (see console/.env.example).
+        env:
+          VITE_FIREBASE_API_KEY: AIzaSyAYFiVyhjpaIDBFFU82FPv__GWxObXnIks
+          VITE_FIREBASE_AUTH_DOMAIN: nirog-bhumi-app.firebaseapp.com
+          VITE_FIREBASE_PROJECT_ID: nirog-bhumi-app
+          VITE_FIREBASE_STORAGE_BUCKET: nirog-bhumi-app.firebasestorage.app
+          VITE_FIREBASE_MESSAGING_SENDER_ID: "126409331898"
+          VITE_FIREBASE_APP_ID: "1:126409331898:web:62ba9137dd9781f0009e83"
+        run: npm ci && npm run build
+      - name: Deploy rules, indexes, storage, functions, and hosting
+        run: npx --yes firebase-tools@latest deploy --project "${{ inputs.project_id }}" --only firestore,storage,functions,hosting --non-interactive

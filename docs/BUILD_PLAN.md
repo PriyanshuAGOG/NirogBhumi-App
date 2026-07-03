@@ -253,8 +253,14 @@ by the user. Work sequentially, CI-verified per slice, small commits.
    a Track-tab quick-log chip, and coach visibility (including a missed
    dose in the Member Detail alert panel) in the console.
 7. [ ] **Analytics events, accessibility pass, Compose/rules unit tests.**
-8. [ ] **Verify console deploy** — confirm the live URL actually serves the
-   latest build end to end.
+8. [~] **Console deploy** — `deploy-firebase.yml` now also builds the
+   console and includes `hosting` in the deploy target, so every backend
+   deploy keeps `nirog-bhumi-app.web.app` in sync automatically (it was
+   previously a separate, easy-to-forget manual step). Not fully closed:
+   no way to independently browse/verify the Vercel URL from this sandbox
+   (no general web access) - owner should confirm that URL separately, or
+   rely on the Firebase Hosting URL going forward since it's now part of
+   the automated pipeline.
 9. [ ] **Smart reminder timing** using `checkinHourHint`.
 10. [ ] **Care+ community features** — @mentions, pin-a-message, photo
     sharing, voice notes in chat.
