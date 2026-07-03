@@ -10,6 +10,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.*
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -30,6 +31,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.google.firebase.Timestamp
 import com.nirogbhumi.app.data.CloudResult
 import com.nirogbhumi.app.notifications.EventReminderWorker
@@ -3037,6 +3040,7 @@ private fun VoiceNoteBubble(url: String, durationSec: Int, isMine: Boolean) {
 
     Row(
         modifier = Modifier
+            .widthIn(min = 160.dp)
             .clip(NirogRadius.pillShape)
             .background(if (isMine) Color.White.copy(alpha = 0.12f) else NirogColor.surfaceSunken)
             .clickable { togglePlayback() }
@@ -3047,11 +3051,20 @@ private fun VoiceNoteBubble(url: String, durationSec: Int, isMine: Boolean) {
         Text(if (isPlaying) "⏸" else "▶", style = NirogType.cardTitle, color = if (isMine) NirogColor.onAccent else NirogColor.forest)
         Spacer(Modifier.width(8.dp))
         val shownSec = if (isPlaying || elapsedSec > 0) elapsedSec else durationSec
-        Text(
-            "%d:%02d".format(shownSec / 60, shownSec % 60),
-            style = NirogType.caption,
-            color = if (isMine) NirogColor.onAccent.copy(alpha = 0.85f) else NirogColor.inkSecondary,
-        )
+        Column(modifier = Modifier.weight(1f)) {
+            LinearProgressIndicator(
+                progress = { if (durationSec > 0) (shownSec.toFloat() / durationSec).coerceIn(0f, 1f) else 0f },
+                modifier = Modifier.fillMaxWidth().height(3.dp).clip(NirogRadius.pillShape),
+                color = if (isMine) NirogColor.onAccent else NirogColor.forest,
+                trackColor = if (isMine) Color.White.copy(alpha = 0.25f) else NirogColor.surface,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "%d:%02d".format(shownSec / 60, shownSec % 60),
+                style = NirogType.caption,
+                color = if (isMine) NirogColor.onAccent.copy(alpha = 0.85f) else NirogColor.inkSecondary,
+            )
+        }
     }
 }
 
@@ -3115,6 +3128,7 @@ fun ProgramChatScreen(state: NirogState) {
     var uploadingAudio by remember { mutableStateOf(false) }
     var typingStatuses by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>>(emptyList()) }
     var typingTickMillis by remember { mutableStateOf(System.currentTimeMillis()) }
+    var viewingPhotoUrl by remember { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
     val myUid = state.repository.userId
@@ -3303,6 +3317,7 @@ fun ProgramChatScreen(state: NirogState) {
                     val photoUrl = record.values["photoUrl"]?.toString()
                     val audioUrl = record.values["audioUrl"]?.toString()
                     val audioDurationSec = (record.values["audioDurationSec"] as? Number)?.toInt() ?: 0
+                    val sentAt = (record.values["createdAt"] as? Timestamp)?.toDate()
                     @Suppress("UNCHECKED_CAST")
                     val replyTo = record.values["replyTo"] as? Map<String, Any?>
                     @Suppress("UNCHECKED_CAST")
@@ -3312,65 +3327,90 @@ fun ProgramChatScreen(state: NirogState) {
                         modifier = Modifier.fillMaxWidth().animateItem(),
                         horizontalAlignment = if (isMine) Alignment.End else Alignment.Start,
                     ) {
-                        Column(
-                            modifier = Modifier
-                                .widthIn(max = 280.dp)
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(if (isMine) NirogColor.forest else NirogColor.surfaceCard)
-                                .then(if (isMine) Modifier else Modifier.border(0.5.dp, NirogColor.surfaceSunken, RoundedCornerShape(16.dp)))
-                                .combinedClickable(onClick = {}, onLongClick = { actionTarget = record })
-                                .padding(horizontal = 14.dp, vertical = 10.dp)
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.Bottom,
                         ) {
-                            if (!isMine) Text(senderName, style = NirogType.overline, color = NirogColor.forestSoft)
-                            if (replyTo != null) {
-                                Column(
-                                    modifier = Modifier
-                                        .padding(top = 4.dp, bottom = 6.dp)
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .background(
-                                            if (isMine) Color.White.copy(alpha = 0.12f) else NirogColor.surfaceSunken
-                                        )
-                                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                            if (!isMine) {
+                                Box(
+                                    modifier = Modifier.size(28.dp).clip(CircleShape).background(NirogColor.forestSoft),
+                                    contentAlignment = Alignment.Center,
                                 ) {
                                     Text(
-                                        replyTo["sender"]?.toString() ?: "Member",
-                                        style = NirogType.overline,
-                                        color = if (isMine) NirogColor.goldSoft else NirogColor.gold,
-                                    )
-                                    Text(
-                                        replyTo["text"]?.toString().orEmpty(),
-                                        style = NirogType.caption,
-                                        color = if (isMine) NirogColor.onAccent.copy(alpha = 0.85f) else NirogColor.inkSecondary,
-                                        maxLines = 2,
+                                        senderName.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?",
+                                        style = NirogType.caption, color = NirogColor.forest, fontWeight = FontWeight.Bold,
                                     )
                                 }
                             }
-                            if (photoUrl != null) {
-                                coil.compose.AsyncImage(
-                                    model = photoUrl, contentDescription = "Photo from $senderName",
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .heightIn(max = 220.dp)
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .then(if (text.isNotBlank()) Modifier.padding(bottom = 6.dp) else Modifier),
-                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                                )
+                            Column(
+                                modifier = Modifier
+                                    .widthIn(max = 260.dp)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(if (isMine) NirogColor.forest else NirogColor.surfaceCard)
+                                    .then(if (isMine) Modifier else Modifier.border(0.5.dp, NirogColor.surfaceSunken, RoundedCornerShape(16.dp)))
+                                    .combinedClickable(onClick = {}, onLongClick = { actionTarget = record })
+                                    .padding(horizontal = 14.dp, vertical = 10.dp)
+                            ) {
+                                if (!isMine) Text(senderName, style = NirogType.overline, color = NirogColor.forestSoft)
+                                if (replyTo != null) {
+                                    Column(
+                                        modifier = Modifier
+                                            .padding(top = 4.dp, bottom = 6.dp)
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(
+                                                if (isMine) Color.White.copy(alpha = 0.12f) else NirogColor.surfaceSunken
+                                            )
+                                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                                    ) {
+                                        Text(
+                                            replyTo["sender"]?.toString() ?: "Member",
+                                            style = NirogType.overline,
+                                            color = if (isMine) NirogColor.goldSoft else NirogColor.gold,
+                                        )
+                                        Text(
+                                            replyTo["text"]?.toString().orEmpty(),
+                                            style = NirogType.caption,
+                                            color = if (isMine) NirogColor.onAccent.copy(alpha = 0.85f) else NirogColor.inkSecondary,
+                                            maxLines = 2,
+                                        )
+                                    }
+                                }
+                                if (photoUrl != null) {
+                                    coil.compose.AsyncImage(
+                                        model = photoUrl, contentDescription = "Photo from $senderName - tap to view full screen",
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .heightIn(max = 220.dp)
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .clickable { viewingPhotoUrl = photoUrl }
+                                            .then(if (text.isNotBlank()) Modifier.padding(bottom = 6.dp) else Modifier),
+                                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                    )
+                                }
+                                if (audioUrl != null) {
+                                    VoiceNoteBubble(audioUrl, audioDurationSec, isMine)
+                                }
+                                if (text.isNotBlank()) {
+                                    Text(
+                                        mentionAnnotatedText(text, mentionColor = if (isMine) NirogColor.goldSoft else NirogColor.gold),
+                                        style = NirogType.body.copy(color = if (isMine) NirogColor.onAccent else NirogColor.inkPrimary),
+                                    )
+                                }
                             }
-                            if (audioUrl != null) {
-                                VoiceNoteBubble(audioUrl, audioDurationSec, isMine)
-                            }
-                            if (text.isNotBlank()) {
-                                Text(
-                                    mentionAnnotatedText(text, mentionColor = if (isMine) NirogColor.goldSoft else NirogColor.gold),
-                                    style = NirogType.body.copy(color = if (isMine) NirogColor.onAccent else NirogColor.inkPrimary),
-                                )
-                            }
+                        }
+
+                        if (sentAt != null) {
+                            Text(
+                                java.text.SimpleDateFormat("h:mm a", java.util.Locale.getDefault()).format(sentAt),
+                                style = NirogType.caption, color = NirogColor.inkMuted,
+                                modifier = Modifier.padding(top = 2.dp, start = if (isMine) 0.dp else 34.dp, end = if (isMine) 4.dp else 0.dp),
+                            )
                         }
 
                         if (reactions.isNotEmpty()) {
                             Row(
-                                modifier = Modifier.padding(top = 4.dp),
+                                modifier = Modifier.padding(top = 4.dp, start = if (isMine) 0.dp else 34.dp),
                                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                             ) {
                                 reactions.forEach { (emoji, uidsAny) ->
@@ -3637,6 +3677,30 @@ fun ProgramChatScreen(state: NirogState) {
             },
             dismissButton = { TextButton(onClick = { reportTarget = null }, enabled = !reporting) { Text("Cancel", color = NirogColor.inkSecondary) } }
         )
+    }
+
+    viewingPhotoUrl?.let { url ->
+        Dialog(onDismissRequest = { viewingPhotoUrl = null }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black)
+                    .clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) { viewingPhotoUrl = null },
+                contentAlignment = Alignment.Center,
+            ) {
+                coil.compose.AsyncImage(
+                    model = url, contentDescription = "Full screen photo",
+                    modifier = Modifier.fillMaxWidth(),
+                    contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+                )
+                IconButton(
+                    onClick = { viewingPhotoUrl = null },
+                    modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(NirogSpace.md),
+                ) {
+                    Icon(Icons.Filled.Close, contentDescription = "Close", tint = Color.White)
+                }
+            }
+        }
     }
 }
 
