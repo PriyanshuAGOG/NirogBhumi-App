@@ -1,10 +1,33 @@
 name: Build Firebase-connected debug APK
 
+# This is the workflow that actually gets a new build in front of testers -
+# CI (ci.yml) only ever produces an ephemeral compile-check artifact, never
+# an App Distribution upload. Before this, that meant every commit to the
+# app needed someone to remember to come here and click "Run workflow" by
+# hand, which is exactly the kind of manual step that silently stops
+# happening: a real gap where testers were left on a build from hours/days
+# earlier while unaware new commits had landed. Push-triggering on the
+# paths that can actually change what gets built closes that gap; the
+# concurrency group keeps a burst of pushes from queuing redundant uploads
+# for commits that are about to be superseded anyway.
 on:
+  push:
+    branches: [main, 'claude/**']
+    paths:
+      - 'app/**'
+      - 'gradle/**'
+      - 'gradlew'
+      - 'build.gradle.kts'
+      - 'settings.gradle.kts'
+      - '.github/workflows/build-firebase-debug-apk.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: debug-apk-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   debug-apk:
