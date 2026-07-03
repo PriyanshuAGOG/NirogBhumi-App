@@ -167,6 +167,12 @@ describe('users/{uid} program-field lock (self-enrollment bypass fix)', () => {
   it('still lets a user update an unrelated field like fullName', async () => {
     await assertSucceeds(updateDoc(doc(member('mem1'), 'users/mem1'), { fullName: 'New Name' }));
   });
+
+  it('lets a user set their own checkinHourHint (smart reminder timing)', async () => {
+    await assertSucceeds(updateDoc(doc(member('mem1'), 'users/mem1'), {
+      checkinHourHint: 19, lastCheckinAt: serverTimestamp(),
+    }));
+  });
 });
 
 describe('health-log collection group (glucoseReadings as representative)', () => {

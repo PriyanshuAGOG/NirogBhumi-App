@@ -272,7 +272,14 @@ by the user. Work sequentially, CI-verified per slice, small commits.
    (no general web access) - owner should confirm that URL separately, or
    rely on the Firebase Hosting URL going forward since it's now part of
    the automated pipeline.
-9. [ ] **Smart reminder timing** using `checkinHourHint`.
+9. [x] **Smart reminder timing** — a new `DAILY_CHECKIN` reminder type
+   (in the existing Notification Settings toggle list, no new UI needed).
+   `checkinHourHint` on `users/{uid}` is an exponential moving average
+   updated on every genuine check-in completion (not an empty skip-
+   through); `ReminderScheduler.scheduleSmart()` aligns the on-device
+   WorkManager periodic request's first fire ~15 minutes before that
+   hour, falling back to a safe elapsed-24h schedule until the hint
+   loads or if the member has none yet.
 10. [ ] **Care+ community features** — @mentions, pin-a-message, photo
     sharing, voice notes in chat.
 11. [ ] **Consultations** — build a real non-payment booking flow

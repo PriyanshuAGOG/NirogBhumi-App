@@ -352,6 +352,20 @@ private fun ColumnScope.CheckInDone(state: NirogState, sugar: String?, bp: Strin
         weight?.let { "Weight" to it },
         medication?.let { "Medication" to it }
     )
+    // Smart reminder timing: a genuine completion (not an empty skip-through)
+    // feeds the hour into checkinHourHint, then re-aligns the on-device
+    // reminder to it if the member has that reminder turned on.
+    val context = LocalContext.current
+    LaunchedEffect(Unit) {
+        if (logged.isEmpty()) return@LaunchedEffect
+        val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        state.repository.recordCheckinCompletion(hour) { result ->
+            val hint = (result as? CloudResult.Success)?.value ?: return@recordCheckinCompletion
+            if (com.nirogbhumi.app.notifications.ReminderScheduler.isEnabled(context, com.nirogbhumi.app.notifications.ReminderType.DAILY_CHECKIN)) {
+                com.nirogbhumi.app.notifications.ReminderScheduler.scheduleSmart(context, hint)
+            }
+        }
+    }
     Spacer(Modifier.height(32.dp))
     Box(
         modifier = Modifier.size(80.dp).background(Color(0xFFE4EFDB), CircleShape).align(Alignment.CenterHorizontally),

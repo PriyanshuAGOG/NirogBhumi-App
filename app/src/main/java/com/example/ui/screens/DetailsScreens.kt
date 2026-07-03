@@ -2253,6 +2253,16 @@ fun NotificationSettingsScreen(state: NirogState) {
                     if (checked) ensureNotificationPermission()
                     com.nirogbhumi.app.notifications.ReminderScheduler.setEnabled(context, type, checked)
                     reminderStates = reminderStates + (type to checked)
+                    // setEnabled() already schedules a safe elapsed-interval
+                    // fallback; upgrade it to the learned time once the hint
+                    // loads (fire-and-forget - the fallback already covers
+                    // the case where this fails or the member has no hint yet).
+                    if (checked && type == com.nirogbhumi.app.notifications.ReminderType.DAILY_CHECKIN) {
+                        state.repository.peekCheckinHourHint { result ->
+                            val hint = (result as? CloudResult.Success)?.value
+                            com.nirogbhumi.app.notifications.ReminderScheduler.scheduleSmart(context, hint)
+                        }
+                    }
                 }
             }
         }

@@ -70,6 +70,13 @@ interface HealthRepository {
     // field is "lastReadGeneralAt" or "lastReadAnnouncementsAt" - marks the
     // caller's own roster doc read up to now. Called on entering that room.
     fun markProgramRead(programId: String, field: String, done: (CloudResult<Unit>) -> Unit = {})
+
+    // Smart reminder timing: called once a Daily Check-in completes. Blends
+    // the hour of day into users/{uid}.checkinHourHint (a light exponential
+    // moving average, not just "last time"), and returns the new hint so the
+    // caller can re-align the on-device reminder to it.
+    fun recordCheckinCompletion(hourOfDay: Int, done: (CloudResult<Int>) -> Unit = {})
+    fun peekCheckinHourHint(done: (CloudResult<Int?>) -> Unit)
 }
 
 class FirebaseHealthRepository : HealthRepository {
@@ -338,6 +345,33 @@ class FirebaseHealthRepository : HealthRepository {
             .update(field, FieldValue.serverTimestamp())
             .addOnSuccessListener { done(CloudResult.Success(Unit)) }
             .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Could not mark as read", it)) }
+    }
+
+    override fun recordCheckinCompletion(hourOfDay: Int, done: (CloudResult<Int>) -> Unit) {
+        val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
+        val database = db ?: return done(CloudResult.Failure("Firebase is not configured"))
+        val hour = hourOfDay.coerceIn(0, 23)
+        val ref = database.collection("users").document(uid)
+        ref.get()
+            .addOnSuccessListener { snap ->
+                val existing = snap.getLong("checkinHourHint")?.toInt()
+                // Light exponential moving average - adapts to a real shift in
+                // routine within a couple of weeks without one late night
+                // swinging the reminder time around.
+                val next = if (existing == null) hour else Math.round(existing * 0.7 + hour * 0.3)
+                ref.set(mapOf("checkinHourHint" to next, "lastCheckinAt" to FieldValue.serverTimestamp()), SetOptions.merge())
+                    .addOnSuccessListener { done(CloudResult.Success(next)) }
+                    .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Could not save", it)) }
+            }
+            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Could not save", it)) }
+    }
+
+    override fun peekCheckinHourHint(done: (CloudResult<Int?>) -> Unit) {
+        val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
+        val database = db ?: return done(CloudResult.Failure("Firebase is not configured"))
+        database.collection("users").document(uid).get()
+            .addOnSuccessListener { snap -> done(CloudResult.Success(snap.getLong("checkinHourHint")?.toInt())) }
+            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Could not load", it)) }
     }
 
     override fun upsertUserRecord(collection: String, documentId: String, values: Map<String, Any?>, done: (CloudResult<Unit>) -> Unit) {
