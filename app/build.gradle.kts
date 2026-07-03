@@ -17,8 +17,18 @@ android {
     applicationId = "in.nirogbhumi.app"
     minSdk = 26
     targetSdk = 36
-    versionCode = 1
-    versionName = "1.0"
+    // Overridable via -PVERSION_CODE/-PVERSION_NAME so CI can stamp a real,
+    // monotonically-increasing version on every build (git commit count) -
+    // without this, every build would report the same "1.0"/1 forever and
+    // the self-update system could never detect a newer version exists.
+    // Local/manual builds fall back to these committed defaults.
+    versionCode = (project.findProperty("VERSION_CODE") as String?)?.toIntOrNull() ?: 1
+    versionName = project.findProperty("VERSION_NAME") as String? ?: "1.0.0"
+
+    // Surfaced in Developer Settings ("current git commit, if available") -
+    // CI passes the real short SHA via -PGIT_COMMIT; local builds fall back
+    // to "local" rather than a stale/misleading hardcoded value.
+    buildConfigField("String", "GIT_COMMIT", "\"${project.findProperty("GIT_COMMIT") as String? ?: "local"}\"")
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }

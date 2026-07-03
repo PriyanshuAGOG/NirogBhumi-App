@@ -1126,6 +1126,12 @@ fun ProfileScreen(state: NirogState) {
             }
         }
 
+        SettingsSection(title = "Developer") {
+            SettingsRow(Icons.Filled.Build, "Developer settings", showDivider = false) {
+                state.currentScreen = "developer_settings"
+            }
+        }
+
         Spacer(modifier = Modifier.height(8.dp))
 
         TextButton(
@@ -1211,6 +1217,165 @@ private fun SettingsRow(
         }
         if (showDivider) {
             Divider(color = Color(0xFFF0ECE2), thickness = 1.dp, modifier = Modifier.padding(start = 50.dp))
+        }
+    }
+}
+
+/**
+ * Developer Settings: version/build/channel visibility + a manual "check
+ * for updates" trigger, so testers can verify a release landed without
+ * waiting for the 30-minute foreground loop or the 6-hourly WorkManager
+ * backstop.
+ */
+@Composable
+fun DeveloperSettingsScreen(state: NirogState) {
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    var showReleaseNotes by remember { mutableStateOf(false) }
+    var currentChannel by remember { mutableStateOf(com.nirogbhumi.app.update.UpdatePrefs.channel(context)) }
+    var lastCheckMillis by remember { mutableStateOf(com.nirogbhumi.app.update.UpdatePrefs.lastCheckAtMillis(context)) }
+    val currentVersionCode = remember {
+        runCatching {
+            val info = context.packageManager.getPackageInfo(context.packageName, 0)
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) info.longVersionCode.toInt()
+            else @Suppress("DEPRECATION") info.versionCode
+        }.getOrDefault(0)
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFFF8F6EF))
+            .verticalScroll(rememberScrollState())
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = { state.currentScreen = "profile" }) {
+                Icon(Icons.Outlined.ArrowBack, contentDescription = "Back", tint = Color(0xFF1B3221))
+            }
+            Text("Developer settings", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        SettingsSection(title = "App Info") {
+            DeveloperInfoRow("Version", "${com.nirogbhumi.app.BuildConfig.VERSION_NAME} (build $currentVersionCode)")
+            DeveloperInfoRow("Package", context.packageName)
+            DeveloperInfoRow("Git commit", com.nirogbhumi.app.BuildConfig.GIT_COMMIT, showDivider = false)
+        }
+
+        SettingsSection(title = "Update Channel") {
+            com.nirogbhumi.app.update.UpdateChannelOption.entries.forEachIndexed { index, option ->
+                DeveloperChannelRow(
+                    label = option.label,
+                    selected = option == currentChannel,
+                    showDivider = index != com.nirogbhumi.app.update.UpdateChannelOption.entries.lastIndex,
+                ) {
+                    currentChannel = option
+                    com.nirogbhumi.app.update.UpdatePrefs.setChannel(context, option)
+                }
+            }
+        }
+
+        SettingsSection(title = "Updates") {
+            DeveloperInfoRow(
+                "Last checked",
+                if (lastCheckMillis > 0) android.text.format.DateUtils.getRelativeTimeSpanString(lastCheckMillis).toString() else "Never",
+            )
+            SettingsRow(
+                Icons.Filled.Refresh,
+                if (state.updateCheckBusy) "Checking…" else "Check for updates",
+                showDivider = state.availableUpdate != null || state.updateCheckError.isNotBlank(),
+            ) {
+                if (state.updateCheckBusy) return@SettingsRow
+                coroutineScope.launch {
+                    state.updateCheckBusy = true
+                    val result = com.nirogbhumi.app.update.UpdateManager.checkNow(context, currentVersionCode)
+                    state.updateCheckBusy = false
+                    lastCheckMillis = com.nirogbhumi.app.update.UpdatePrefs.lastCheckAtMillis(context)
+                    result.onSuccess { info ->
+                        state.updateCheckError = ""
+                        if (info != null) state.availableUpdate = info
+                    }.onFailure {
+                        state.updateCheckError = it.message ?: "Couldn't check for updates"
+                    }
+                }
+            }
+            if (state.updateCheckError.isNotBlank()) {
+                Text(
+                    state.updateCheckError,
+                    fontSize = 12.sp,
+                    color = Color(0xFF8B2E2E),
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+            } else if (state.availableUpdate != null) {
+                SettingsRow(Icons.Filled.Description, "View release notes", showDivider = false) {
+                    showReleaseNotes = true
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(32.dp))
+    }
+
+    if (showReleaseNotes) {
+        val info = state.availableUpdate
+        AlertDialog(
+            onDismissRequest = { showReleaseNotes = false },
+            title = { Text("What's new in ${info?.latestVersionName ?: ""}", fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221)) },
+            text = {
+                Text(
+                    info?.releaseNotes?.takeIf { it.isNotBlank() } ?: "No release notes were provided for this version.",
+                    fontSize = 14.sp,
+                    color = Color(0xFF434842),
+                )
+            },
+            confirmButton = {
+                Button(onClick = { showReleaseNotes = false }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF314936))) {
+                    Text("Close", color = Color.White)
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun DeveloperInfoRow(label: String, value: String, showDivider: Boolean = true) {
+    Column {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(label, fontSize = 14.sp, color = Color(0xFF737972))
+            Text(value, fontSize = 13.sp, color = Color(0xFF1B3221), fontWeight = FontWeight.SemiBold)
+        }
+        if (showDivider) {
+            Divider(color = Color(0xFFF0ECE2), thickness = 1.dp, modifier = Modifier.padding(start = 16.dp))
+        }
+    }
+}
+
+@Composable
+private fun DeveloperChannelRow(label: String, selected: Boolean, showDivider: Boolean, onClick: () -> Unit) {
+    Column {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onClick)
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(label, fontSize = 14.sp, color = Color(0xFF1B3221))
+            if (selected) {
+                Icon(Icons.Filled.CheckCircle, contentDescription = "Selected", tint = Color(0xFF314936), modifier = Modifier.size(20.dp))
+            }
+        }
+        if (showDivider) {
+            Divider(color = Color(0xFFF0ECE2), thickness = 1.dp, modifier = Modifier.padding(start = 16.dp))
         }
     }
 }

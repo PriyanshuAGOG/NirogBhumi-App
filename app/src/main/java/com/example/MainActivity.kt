@@ -23,6 +23,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import com.nirogbhumi.app.ui.NirogState
 import com.nirogbhumi.app.ui.screens.*
 import com.nirogbhumi.app.ui.theme.MyApplicationTheme
@@ -271,6 +274,7 @@ fun ActiveScreenContent(state: NirogState) {
       })
     }
   }
+  UpdateLifecycleEffects(state)
   Box(modifier = Modifier.fillMaxSize()) {
     when (state.currentScreen) {
       "splash" -> SplashScreen(state)
@@ -290,6 +294,7 @@ fun ActiveScreenContent(state: NirogState) {
       "dashboard" -> MainHub(state)
       "profile" -> ProfileScreen(state)
       "profile_edit" -> ProfileEditScreen(state)
+      "developer_settings" -> DeveloperSettingsScreen(state)
       "device_hub" -> DeviceSyncScreen(state)
       "notifications" -> NotificationInboxScreen(state)
       "notification_settings" -> NotificationSettingsScreen(state)
@@ -337,6 +342,124 @@ fun ActiveScreenContent(state: NirogState) {
     // Bottom popup sliding HUD for quick sugar logs
     if (state.isQuickLogFastingOpen) {
       QuickLogFastingOverlay(state)
+    }
+
+    state.availableUpdate?.let { info ->
+      val currentVersionCode = remember { currentVersionCode(context) }
+      com.nirogbhumi.app.ui.components.UpdateDialog(
+        info = info,
+        downloadState = state.updateDownloadState,
+        mandatory = com.nirogbhumi.app.update.UpdateManager.isMandatory(context, info, currentVersionCode),
+        onUpdateNow = { beginUpdateDownload(context, state, info) },
+        onInstall = {
+          val ready = state.updateDownloadState
+          if (ready is com.nirogbhumi.app.update.DownloadState.ReadyToInstall) {
+            com.nirogbhumi.app.update.UpdateInstaller.installApk(context, java.io.File(ready.filePath))
+          }
+        },
+        onRetry = { beginUpdateDownload(context, state, info) },
+        onDismiss = {
+          com.nirogbhumi.app.update.UpdatePrefs.dismissVersion(context, info.latestVersionCode)
+          state.availableUpdate = null
+          state.updateDownloadState = com.nirogbhumi.app.update.DownloadState.Idle
+        },
+      )
+    }
+  }
+}
+
+/** BuildConfig.VERSION_CODE isn't stable across module boundaries in this project's Compose preview tooling, so read it straight from PackageManager like UpdateCheckWorker does. */
+private fun currentVersionCode(context: android.content.Context): Int = runCatching {
+  val info = context.packageManager.getPackageInfo(context.packageName, 0)
+  if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) info.longVersionCode.toInt()
+  else @Suppress("DEPRECATION") info.versionCode
+}.getOrDefault(0)
+
+private fun beginUpdateDownload(context: android.content.Context, state: NirogState, info: com.nirogbhumi.app.update.UpdateInfo) {
+  val id = com.nirogbhumi.app.update.ApkDownloader.enqueue(context, info)
+  if (id == null) {
+    state.updateDownloadState = com.nirogbhumi.app.update.DownloadState.Failed("Couldn't start the download - the update link looks invalid")
+    return
+  }
+  state.activeDownloadId = id
+  state.updateDownloadState = com.nirogbhumi.app.update.DownloadState.InProgress(0, 0, 0)
+}
+
+/**
+ * Drives the whole "on launch, on foreground, every 30 minutes while open"
+ * requirement from one place: an initial check, a lifecycle-scoped loop that
+ * only ticks while RESUMED (so it naturally pauses when backgrounded and
+ * restarts on the next foreground), and download-progress polling once a
+ * download is active. WorkManager's UpdateManager.schedulePeriodicCheck
+ * (registered in NirogBhumiApplication) is the separate background-only
+ * backstop for when the app isn't open at all.
+ */
+@Composable
+private fun UpdateLifecycleEffects(state: NirogState) {
+  val context = LocalContext.current
+  val lifecycleOwner = LocalLifecycleOwner.current
+
+  suspend fun runCheck() {
+    if (state.updateDownloadState !is com.nirogbhumi.app.update.DownloadState.Idle) return
+    state.updateCheckBusy = true
+    val currentVersionCode = currentVersionCode(context)
+    val result = com.nirogbhumi.app.update.UpdateManager.checkNow(context, currentVersionCode)
+    state.updateCheckBusy = false
+    result.onSuccess { info ->
+      state.updateCheckError = ""
+      if (info != null) state.availableUpdate = info
+    }.onFailure {
+      state.updateCheckError = it.message ?: "Couldn't check for updates"
+    }
+  }
+
+  LaunchedEffect(lifecycleOwner) {
+    lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+      runCheck()
+      while (true) {
+        kotlinx.coroutines.delay(30 * 60 * 1000L)
+        runCheck()
+      }
+    }
+  }
+
+  val downloadId = state.activeDownloadId
+  LaunchedEffect(downloadId) {
+    if (downloadId == null) return@LaunchedEffect
+    while (true) {
+      val progress = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        com.nirogbhumi.app.update.ApkDownloader.queryProgress(context, downloadId)
+      }
+      when (progress) {
+        is com.nirogbhumi.app.update.DownloadState.ReadyToInstall -> {
+          val info = state.availableUpdate
+          val target = if (info != null) com.nirogbhumi.app.update.ApkDownloader.targetFile(context, info.latestVersionCode) else null
+          if (info != null && target != null && target.exists()) {
+            state.updateDownloadState = com.nirogbhumi.app.update.DownloadState.Verifying(target.absolutePath)
+            val verified = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+              com.nirogbhumi.app.update.UpdateInstaller.verifyChecksum(target, info.checksum)
+            }
+            state.updateDownloadState = if (verified) {
+              com.nirogbhumi.app.update.DownloadState.ReadyToInstall(target.absolutePath)
+            } else {
+              com.nirogbhumi.app.update.DownloadState.Failed("The downloaded file didn't match the expected checksum - try checking for updates again")
+            }
+          } else {
+            state.updateDownloadState = com.nirogbhumi.app.update.DownloadState.Failed("The downloaded file is missing - try again")
+          }
+          state.activeDownloadId = null
+          return@LaunchedEffect
+        }
+        is com.nirogbhumi.app.update.DownloadState.Failed -> {
+          state.updateDownloadState = progress
+          state.activeDownloadId = null
+          return@LaunchedEffect
+        }
+        else -> {
+          state.updateDownloadState = progress
+          kotlinx.coroutines.delay(500L)
+        }
+      }
     }
   }
 }

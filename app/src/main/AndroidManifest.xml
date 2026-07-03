@@ -5,6 +5,14 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Self-update system: without this, the ACTION_VIEW install intent for
+         a sideloaded APK is silently blocked by the OS on API 26+ (this is
+         the modern per-app-source replacement for the old, device-wide
+         "Unknown sources" toggle). The user still has to grant it once via
+         Settings (canRequestPackageInstalls() gates the flow), and still
+         taps through the system installer's own confirmation - this
+         permission alone does not enable fully silent installs. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.health.READ_STEPS" />
     <uses-permission android:name="android.permission.health.READ_SLEEP" />
     <uses-permission android:name="android.permission.health.READ_WEIGHT" />
