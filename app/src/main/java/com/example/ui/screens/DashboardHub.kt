@@ -1641,6 +1641,12 @@ fun InsightsTab(state: NirogState) {
 @Composable
 fun CareTab(state: NirogState) {
     val context = LocalContext.current
+    fun openConsultationBooking() {
+        runCatching {
+            context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://nirogbhumi.com/consultation")))
+        }.onFailure { state.cloudMessage = "Couldn't open the browser - visit nirogbhumi.com/consultation directly." }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1664,17 +1670,13 @@ fun CareTab(state: NirogState) {
             )
         }
 
-        // Booking currently lives on the website, not in-app - the in-app
-        // stepper was pulled with the Razorpay removal and isn't being
-        // rebuilt yet, so this is an honest handoff instead of a dead-end
-        // flow or a fabricated "coming soon" screen.
-        CareRow(Icons.Outlined.MedicalServices, "Book a Consultation", "Opens nirogbhumi.com to pick an expert and a time.") {
-            runCatching {
-                context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://nirogbhumi.com/consultation")))
-            }.onFailure { state.cloudMessage = "Couldn't open the browser - visit nirogbhumi.com/consultation directly." }
-        }
-
         if (!state.isProgramActive) {
+            // Booking currently lives on the website, not in-app - the in-app
+            // stepper was pulled with the Razorpay removal and isn't being
+            // rebuilt yet, so this is an honest handoff instead of a dead-end
+            // flow or a fabricated "coming soon" screen.
+            CareRow(Icons.Outlined.MedicalServices, "Book a Consultation", "Opens nirogbhumi.com to pick an expert and a time.") { openConsultationBooking() }
+
             // Care+'s calendar/community layer is a second tier only for enrolled
             // program members. Rather than a single thin locked card, show what's
             // actually inside so the upsell isn't just an empty-feeling wall.
@@ -1717,29 +1719,116 @@ fun CareTab(state: NirogState) {
             val dayNumber = if (state.programStartedAtMillis > 0) {
                 (((System.currentTimeMillis() - state.programStartedAtMillis) / (1000L * 60 * 60 * 24)) + 1).coerceAtLeast(1)
             } else 1
-            Card(
-                modifier = Modifier.fillMaxWidth().border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.3f), shape = RoundedCornerShape(24.dp)),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF314936)),
-                shape = RoundedCornerShape(24.dp)
-            ) {
-                Column(modifier = Modifier.padding(20.dp)) {
-                    Text(state.activeProgramName.ifBlank { "Your Program" }, fontSize = 18.sp, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color.White)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        if (state.programDurationDays > 0) "Day $dayNumber of ${state.programDurationDays}" else "Day $dayNumber",
-                        fontSize = 13.sp, color = Color(0xFFB2CEB4)
-                    )
-                }
+
+            // One unified hero instead of two stacked same-weight cards: program
+            // day and batch pulse are both "where things stand right now," so
+            // they read as a single glance rather than two separate stops.
+            ProgramStatusHero(state, dayNumber)
+
+            SectionLabel("TODAY", color = Color(0xFFC7902F))
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                CareTile(
+                    Icons.Outlined.Checklist, "Checklist", "Today's actions",
+                    modifier = Modifier.weight(1f),
+                ) { state.currentScreen = "active_journey" }
+                CareTile(
+                    Icons.Outlined.CalendarMonth, "Calendar", "Sessions & walks",
+                    modifier = Modifier.weight(1f),
+                ) { state.currentScreen = "program_calendar" }
             }
 
-            BatchPulseCard(state)
+            SectionLabel("COMMUNITY", color = Color(0xFFC7902F))
             PinnedAnnouncementCard(state)
 
-            CareRow(Icons.Outlined.Checklist, "Today's Checklist", "Your daily program actions") { state.currentScreen = "active_journey" }
-            CareRow(Icons.Outlined.CalendarMonth, "Program Calendar", "Live sessions, group walks, and lab weeks") { state.currentScreen = "program_calendar" }
+            SectionLabel("SUPPORT", color = Color(0xFFC7902F))
+            CareRow(Icons.Outlined.MedicalServices, "Book a Consultation", "Opens nirogbhumi.com to pick an expert and a time.") { openConsultationBooking() }
         }
 
         Spacer(modifier = Modifier.height(32.dp))
+    }
+}
+
+@Composable
+private fun ProgramStatusHero(state: NirogState, dayNumber: Long) {
+    var pulse by remember { mutableStateOf<Map<String, Any?>?>(null) }
+    DisposableEffect(state.activeProgramId) {
+        if (state.activeProgramId.isBlank()) return@DisposableEffect onDispose {}
+        val sub = state.repository.listenBatchPulse(state.activeProgramId) { result ->
+            if (result is CloudResult.Success) pulse = result.value?.values
+        }
+        onDispose { sub.cancel() }
+    }
+    val checkedIn = (pulse?.get("checkedInCount") as? Number)?.toInt() ?: 0
+    val memberCount = (pulse?.get("memberCount") as? Number)?.toInt() ?: 0
+    val collectiveMinutes = (pulse?.get("collectiveMinutes") as? Number)?.toInt() ?: 0
+
+    Card(
+        modifier = Modifier.fillMaxWidth().border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.3f), shape = RoundedCornerShape(24.dp)),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF314936)),
+        shape = RoundedCornerShape(24.dp)
+    ) {
+        Column(modifier = Modifier.padding(20.dp)) {
+            Text(state.activeProgramName.ifBlank { "Your Program" }, fontSize = 18.sp, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color.White)
+            Spacer(modifier = Modifier.height(16.dp))
+            Row(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        if (state.programDurationDays > 0) "Day $dayNumber of ${state.programDurationDays}" else "Day $dayNumber",
+                        fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color.White,
+                    )
+                    Text("your program", fontSize = 12.sp, color = Color(0xFFB2CEB4))
+                }
+                Box(modifier = Modifier.width(1.dp).height(36.dp).background(Color.White.copy(alpha = 0.18f)))
+                Column(modifier = Modifier.weight(1f).padding(start = 20.dp)) {
+                    if (memberCount > 0) {
+                        Text("$checkedIn/$memberCount", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        Text("batchmates checked in today", fontSize = 12.sp, color = Color(0xFFB2CEB4))
+                    } else {
+                        Text("—", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        Text("be first to check in today", fontSize = 12.sp, color = Color(0xFFB2CEB4))
+                    }
+                }
+            }
+            // Cooperative, never a per-member ranking - a team total only.
+            if (collectiveMinutes > 0) {
+                Spacer(modifier = Modifier.height(16.dp))
+                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.18f)))
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    "$collectiveMinutes minutes walked as a batch this month - no rankings, just the team total.",
+                    fontSize = 12.sp, color = Color(0xFFB2CEB4), lineHeight = 17.sp,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CareTile(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    Card(
+        modifier = modifier
+            .clickable(onClick = onClick)
+            .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.3f), shape = RoundedCornerShape(20.dp)),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        shape = RoundedCornerShape(20.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp).fillMaxWidth()) {
+            Box(
+                modifier = Modifier.size(36.dp).background(Color(0xFFEBF7E8), CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(icon, title, tint = Color(0xFF1B3221), modifier = Modifier.size(18.dp))
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+            Text(title, fontWeight = FontWeight.Bold, color = Color(0xFF141E15), fontSize = 15.sp)
+            Text(subtitle, fontSize = 12.sp, color = Color(0xFF737972))
+        }
     }
 }
 
@@ -1784,76 +1873,6 @@ private fun PinnedAnnouncementCard(state: NirogState) {
                     announcement["body"]?.toString().orEmpty(),
                     fontSize = 12.sp, color = Color(0xFF4B6450),
                     maxLines = 1, overflow = TextOverflow.Ellipsis
-                )
-            }
-        }
-    }
-}
-
-/**
- * Batch Pulse (PRD v2, Care+): cooperative presence + a collective goal -
- * deliberately never a per-member ranking. Reads a Function-aggregated,
- * PII-free document; shows an honest "be the first" state at zero rather
- * than fabricating activity.
- */
-@Composable
-private fun BatchPulseCard(state: NirogState) {
-    var pulse by remember { mutableStateOf<Map<String, Any?>?>(null) }
-    var loaded by remember { mutableStateOf(false) }
-
-    DisposableEffect(state.activeProgramId) {
-        if (state.activeProgramId.isBlank()) {
-            loaded = true
-            return@DisposableEffect onDispose {}
-        }
-        val sub = state.repository.listenBatchPulse(state.activeProgramId) { result ->
-            if (result is CloudResult.Success) pulse = result.value?.values
-            loaded = true
-        }
-        onDispose { sub.cancel() }
-    }
-
-    if (!loaded) return
-    val checkedIn = (pulse?.get("checkedInCount") as? Number)?.toInt() ?: 0
-    val memberCount = (pulse?.get("memberCount") as? Number)?.toInt() ?: 0
-    val collectiveMinutes = (pulse?.get("collectiveMinutes") as? Number)?.toInt() ?: 0
-
-    Card(
-        modifier = Modifier.fillMaxWidth().border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.3f), shape = RoundedCornerShape(24.dp)),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        shape = RoundedCornerShape(24.dp)
-    ) {
-        Column(Modifier.padding(NirogSpace.xl)) {
-            SectionLabel("Batch pulse")
-            Spacer(Modifier.height(NirogSpace.sm))
-            if (memberCount == 0) {
-                Text(
-                    "Be the first in your batch to check in today.",
-                    style = NirogType.body,
-                    color = NirogColor.inkSecondary,
-                )
-            } else {
-                Row(verticalAlignment = Alignment.Bottom) {
-                    Text("$checkedIn", style = NirogType.display, color = NirogColor.forest)
-                    Text("/$memberCount", style = NirogType.cardTitle, color = NirogColor.inkMuted)
-                }
-                Text(
-                    "batchmates checked in today" + if (checkedIn > 0) " - you're one of them" else "",
-                    style = NirogType.caption,
-                    color = NirogColor.inkMuted,
-                )
-            }
-            if (collectiveMinutes > 0) {
-                Spacer(Modifier.height(NirogSpace.md))
-                Text(
-                    "Batch goal: walk together this month",
-                    style = NirogType.secondary,
-                    color = NirogColor.inkSecondary,
-                )
-                Text(
-                    "$collectiveMinutes minutes walked as a batch so far - no rankings, just the team total.",
-                    style = NirogType.caption,
-                    color = NirogColor.inkMuted,
                 )
             }
         }
