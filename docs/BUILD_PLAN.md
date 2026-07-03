@@ -238,8 +238,11 @@ by the user. Work sequentially, CI-verified per slice, small commits.
    pending rules unit tests (item 7) to verify a chained
    member->program->coach check actually behaves as intended before
    applying it somewhere health-data-sensitive.
-4. [ ] **Unread badges in Chat Hub** — wire
-   `programMembers.lastReadGeneralAt`/`lastReadAnnouncementsAt`.
+4. [x] **Unread badges in Chat Hub** — a one-shot peek (not a live
+   listener) on entering Chat Hub compares the newest message/announcement
+   timestamp against the member's own `lastReadGeneralAt`/
+   `lastReadAnnouncementsAt` (written on entering each room). Rules let a
+   member touch only those two fields on their own roster doc.
 5. [x] **Razorpay cleanup** — removed `PaymentResultListener`, the
    `razorpay-checkout` dependency, `RazorpayPaymentLauncher`, and the dead
    `createPaymentOrder` call site. The unreachable `care_hub` →

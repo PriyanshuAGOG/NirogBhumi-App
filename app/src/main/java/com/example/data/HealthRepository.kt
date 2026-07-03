@@ -60,6 +60,16 @@ interface HealthRepository {
     // Program calendar events (created/edited by staff in the admin console).
     // Members only ever read these - editing is console-only, per the PRD.
     fun listenProgramEvents(programId: String, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription
+
+    // Unread badges for Chat Hub: a one-shot peek (not a live listener - a menu
+    // screen's badge only needs to be current when you land on it) at the
+    // newest createdAt in "programChatMessages" or "announcements" for the
+    // program, compared against the caller's own read markers below.
+    fun peekLatestActivity(programId: String, collection: String, done: (CloudResult<Long?>) -> Unit)
+    fun peekMembership(programId: String, done: (CloudResult<CloudDocument?>) -> Unit)
+    // field is "lastReadGeneralAt" or "lastReadAnnouncementsAt" - marks the
+    // caller's own roster doc read up to now. Called on entering that room.
+    fun markProgramRead(programId: String, field: String, done: (CloudResult<Unit>) -> Unit = {})
 }
 
 class FirebaseHealthRepository : HealthRepository {
@@ -295,6 +305,39 @@ class FirebaseHealthRepository : HealthRepository {
                 else update(CloudResult.Success(snapshot?.documents.orEmpty().map { CloudDocument(it.id, it.data.orEmpty()) }))
             }
         return CloudSubscription { registration.remove() }
+    }
+
+    override fun peekLatestActivity(programId: String, collection: String, done: (CloudResult<Long?>) -> Unit) {
+        val database = db ?: return done(CloudResult.Failure("Firebase is not configured"))
+        if (collection !in setOf("programChatMessages", "announcements")) return done(CloudResult.Failure("Unsupported"))
+        database.collection(collection)
+            .whereEqualTo("programId", programId)
+            .orderBy("createdAt", com.google.firebase.firestore.Query.Direction.DESCENDING)
+            .limit(1)
+            .get()
+            .addOnSuccessListener { snap ->
+                val millis = snap.documents.firstOrNull()?.getTimestamp("createdAt")?.toDate()?.time
+                done(CloudResult.Success(millis))
+            }
+            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Could not check for updates", it)) }
+    }
+
+    override fun peekMembership(programId: String, done: (CloudResult<CloudDocument?>) -> Unit) {
+        val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
+        val database = db ?: return done(CloudResult.Failure("Firebase is not configured"))
+        database.collection("programMembers").document("${programId}_$uid").get()
+            .addOnSuccessListener { snap -> done(CloudResult.Success(snap.takeIf { it.exists() }?.let { CloudDocument(it.id, it.data.orEmpty()) })) }
+            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Could not load your membership", it)) }
+    }
+
+    override fun markProgramRead(programId: String, field: String, done: (CloudResult<Unit>) -> Unit) {
+        val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
+        val database = db ?: return done(CloudResult.Failure("Firebase is not configured"))
+        if (field !in setOf("lastReadGeneralAt", "lastReadAnnouncementsAt")) return done(CloudResult.Failure("Unsupported"))
+        database.collection("programMembers").document("${programId}_$uid")
+            .update(field, FieldValue.serverTimestamp())
+            .addOnSuccessListener { done(CloudResult.Success(Unit)) }
+            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Could not mark as read", it)) }
     }
 
     override fun upsertUserRecord(collection: String, documentId: String, values: Map<String, Any?>, done: (CloudResult<Unit>) -> Unit) {

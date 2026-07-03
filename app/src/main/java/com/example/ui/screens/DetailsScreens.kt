@@ -2508,6 +2508,10 @@ fun AnnouncementsScreen(state: NirogState) {
                 is com.nirogbhumi.app.data.CloudResult.Failure -> emptyList()
             }
         }
+        // Best-effort: opening this screen is "read" for the unread badge on
+        // Chat Hub, whether or not the member is enrolled (fails silently
+        // for non-members - they have no roster doc to mark anyway).
+        state.repository.markProgramRead(state.activeProgramId, "lastReadAnnouncementsAt") {}
         onDispose { subscription.cancel() }
     }
 
@@ -2612,6 +2616,7 @@ fun ProgramChatScreen(state: NirogState) {
                 is com.nirogbhumi.app.data.CloudResult.Failure -> emptyList()
             }
         }
+        state.repository.markProgramRead(state.activeProgramId, "lastReadGeneralAt") {}
         onDispose { subscription.cancel() }
     }
 
