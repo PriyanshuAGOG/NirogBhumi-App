@@ -252,7 +252,18 @@ by the user. Work sequentially, CI-verified per slice, small commits.
    indexes), a 4th Daily Check-in step (taken/missed + optional name),
    a Track-tab quick-log chip, and coach visibility (including a missed
    dose in the Member Detail alert panel) in the console.
-7. [ ] **Analytics events, accessibility pass, Compose/rules unit tests.**
+7. [~] **Rules unit tests done; analytics events and accessibility pass
+   still open.** `firebase/rules-tests` (`@firebase/rules-unit-testing`
+   against the real emulator, wired into CI's `firebase-rules` job) - 26
+   tests covering the highest-risk logic added this session: per-coach
+   `programStaff()` scoping (assigned coach passes, unassigned coach
+   denied, admin always passes), the two field-restricted self-update
+   rules (chat reactions, unread-badge read markers), the users/{uid}
+   program-field self-enrollment lock, and health-log read/delete
+   scoping. All 26 pass, which is real verification (not just "the rules
+   file compiles") for exactly the logic that had none before. Extend
+   this suite rather than re-deferring coachNotes/health-log program
+   scoping blind next time.
 8. [~] **Console deploy** — `deploy-firebase.yml` now also builds the
    console and includes `hosting` in the deploy target, so every backend
    deploy keeps `nirog-bhumi-app.web.app` in sync automatically (it was
