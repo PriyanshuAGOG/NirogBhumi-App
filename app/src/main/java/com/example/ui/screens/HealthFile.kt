@@ -1,8 +1,10 @@
 package com.nirogbhumi.app.ui.screens
 
 import android.content.Intent
+import android.graphics.Bitmap
 import android.graphics.Paint
 import android.graphics.pdf.PdfDocument
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,10 +20,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -31,10 +36,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import com.google.firebase.Timestamp
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.qrcode.QRCodeWriter
 import com.nirogbhumi.app.data.CloudResult
 import com.nirogbhumi.app.ui.NirogState
 import com.nirogbhumi.app.ui.components.NirogCard
@@ -67,6 +77,9 @@ fun HealthFileScreen(state: NirogState) {
   var labReports by remember { mutableStateOf<List<Map<String, Any?>>>(emptyList()) }
   var generating by remember { mutableStateOf(false) }
   var shareError by remember { mutableStateOf<String?>(null) }
+  var generatingLink by remember { mutableStateOf(false) }
+  var shareLink by remember { mutableStateOf<String?>(null) }
+  var linkError by remember { mutableStateOf<String?>(null) }
 
   DisposableEffect(Unit) {
     val subs = listOf(
@@ -162,6 +175,34 @@ fun HealthFileScreen(state: NirogState) {
         }
         Spacer(Modifier.size(NirogSpace.md))
       }
+      if (linkError != null) {
+        Box(
+          Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(NirogColor.statusCriticalBg)
+            .padding(NirogSpace.lg),
+        ) {
+          Text(linkError!!, style = NirogType.caption, color = NirogColor.statusCritical)
+        }
+        Spacer(Modifier.size(NirogSpace.md))
+      }
+
+      fun generatePdf() = buildAndSaveHealthFilePdf(
+        context = context,
+        name = state.profileName.ifBlank { "Member" },
+        details = listOfNotNull(
+          state.profileAge.takeIf { it.isNotBlank() }?.let { "Age: $it" },
+          state.profileGender.takeIf { it.isNotBlank() },
+          state.profileCity.takeIf { it.isNotBlank() },
+        ).joinToString(" | "),
+        conditions = "Diabetes: ${state.selectedDiabetesStatus} | BP: ${state.selectedBpStatus} | On medication: ${state.selectedOnMedication}",
+        sugarLine = sugarAvg30d?.let { "Fasting sugar average (30d): ${it.toInt()} mg/dL across ${sugarValues!!.size} readings" } ?: "Fasting sugar: not logged yet",
+        bpLine = latestBp?.let { "Latest blood pressure: ${it["systolic"]}/${it["diastolic"]} mmHg" } ?: "Blood pressure: not logged yet",
+        weightLine = latestWeight?.let { "Latest weight: ${(it["valueKg"] as? Number)}kg" } ?: "Weight: not logged yet",
+        labLines = labReports.map { (it["reportType"] as? String ?: "Lab report") },
+      )
+
       if (generating) {
         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
           CircularProgressIndicator(color = NirogColor.forest)
@@ -172,20 +213,7 @@ fun HealthFileScreen(state: NirogState) {
           onClick = {
             generating = true
             shareError = null
-            val result = buildAndSaveHealthFilePdf(
-              context = context,
-              name = state.profileName.ifBlank { "Member" },
-              details = listOfNotNull(
-                state.profileAge.takeIf { it.isNotBlank() }?.let { "Age: $it" },
-                state.profileGender.takeIf { it.isNotBlank() },
-                state.profileCity.takeIf { it.isNotBlank() },
-              ).joinToString(" | "),
-              conditions = "Diabetes: ${state.selectedDiabetesStatus} | BP: ${state.selectedBpStatus} | On medication: ${state.selectedOnMedication}",
-              sugarLine = sugarAvg30d?.let { "Fasting sugar average (30d): ${it.toInt()} mg/dL across ${sugarValues!!.size} readings" } ?: "Fasting sugar: not logged yet",
-              bpLine = latestBp?.let { "Latest blood pressure: ${it["systolic"]}/${it["diastolic"]} mmHg" } ?: "Blood pressure: not logged yet",
-              weightLine = latestWeight?.let { "Latest weight: ${(it["valueKg"] as? Number)}kg" } ?: "Weight: not logged yet",
-              labLines = labReports.map { (it["reportType"] as? String ?: "Lab report") },
-            )
+            val result = generatePdf()
             generating = false
             result.onSuccess { uri ->
               runCatching {
@@ -204,9 +232,93 @@ fun HealthFileScreen(state: NirogState) {
           },
         )
       }
+
+      Spacer(Modifier.size(NirogSpace.sm))
+
+      if (generatingLink) {
+        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+          CircularProgressIndicator(color = NirogColor.forestSoft, modifier = Modifier.size(24.dp))
+        }
+      } else {
+        OutlinedButton(
+          onClick = {
+            generatingLink = true
+            linkError = null
+            val pdfResult = generatePdf()
+            val uri = pdfResult.getOrNull()
+            if (uri == null) {
+              generatingLink = false
+              linkError = "The Health File couldn't be created. Please try again."
+            } else {
+              state.repository.uploadPrivateFile("health-file", uri) { result ->
+                generatingLink = false
+                when (result) {
+                  is CloudResult.Success -> shareLink = result.value
+                  is CloudResult.Failure -> linkError = result.message
+                }
+              }
+            }
+          },
+          modifier = Modifier.fillMaxWidth(),
+        ) { Text("Get shareable link / QR code") }
+      }
       Spacer(Modifier.size(NirogSpace.xxl))
     }
   }
+
+  shareLink?.let { link ->
+    HealthFileLinkDialog(link, onDismiss = { shareLink = null })
+  }
+}
+
+@Composable
+private fun HealthFileLinkDialog(link: String, onDismiss: () -> Unit) {
+  val clipboard = LocalClipboardManager.current
+  val qrBitmap = remember(link) { runCatching { generateQrBitmap(link) }.getOrNull() }
+  AlertDialog(
+    onDismissRequest = onDismiss,
+    title = { Text("Shareable Health File link", style = NirogType.cardTitle, color = NirogColor.inkPrimary) },
+    text = {
+      Column {
+        if (qrBitmap != null) {
+          Image(
+            bitmap = qrBitmap.asImageBitmap(),
+            contentDescription = "QR code for Health File link",
+            modifier = Modifier.fillMaxWidth().size(220.dp),
+          )
+          Spacer(Modifier.size(NirogSpace.md))
+        }
+        Text(link, style = NirogType.caption, color = NirogColor.inkSecondary)
+        Spacer(Modifier.size(NirogSpace.sm))
+        // Honest about what this link actually is: a bearer-token URL, not a
+        // per-viewer access grant - anyone who has it can open it without
+        // signing in, same tradeoff as most "share a link" features. It's
+        // not truly short-lived (the token doesn't auto-expire); a real
+        // expiring signed URL would need a Cloud Function using the Admin
+        // SDK, which is a real gap worth closing before relying on this for
+        // anything more sensitive than showing a doctor in person.
+        Text(
+          "Anyone with this link or QR code can view your Health File without signing in - don't post it publicly. It doesn't expire on its own yet.",
+          style = NirogType.caption, color = NirogColor.inkMuted,
+        )
+      }
+    },
+    confirmButton = {
+      TextButton(onClick = { clipboard.setText(AnnotatedString(link)) }) { Text("Copy link", color = NirogColor.forest) }
+    },
+    dismissButton = { TextButton(onClick = onDismiss) { Text("Close", color = NirogColor.inkSecondary) } },
+  )
+}
+
+private fun generateQrBitmap(text: String, sizePx: Int = 512): Bitmap {
+  val bitMatrix = QRCodeWriter().encode(text, BarcodeFormat.QR_CODE, sizePx, sizePx)
+  val bitmap = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.RGB_565)
+  for (x in 0 until sizePx) {
+    for (y in 0 until sizePx) {
+      bitmap.setPixel(x, y, if (bitMatrix.get(x, y)) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
+    }
+  }
+  return bitmap
 }
 
 @Composable
