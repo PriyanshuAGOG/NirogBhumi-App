@@ -301,14 +301,19 @@ by the user. Work sequentially, CI-verified per slice, small commits.
    WorkManager periodic request's first fire ~15 minutes before that
    hour, falling back to a safe elapsed-24h schedule until the hint
    loads or if the member has none yet.
-10. [~] **Care+ community features** — @mentions (rendering-only
+10. [x] **Care+ community features** — @mentions (rendering-only
     highlighting of "@Name" tokens, no roster autocomplete yet), pin-a-
     message (staff-only, rules-enforced via `programStaff()`, banner at
-    top of General, 6 new rules-unit tests), and photo sharing (new
-    `program-chat-photos/{programId}/{uid}` Storage path with a live
-    Firestore membership check so the whole batch can view it, not just
-    the uploader - 5 new storage-rules tests, the first storage.rules
-    coverage in this repo) shipped. Voice notes still open.
+    top of General), photo sharing, and voice notes (tap-mic record,
+    per-bubble MediaPlayer playback) all shipped. Photos and voice notes
+    share the same `program-chat-{photos,audio}/{programId}/{uid}`
+    Storage pattern: a live Firestore membership check so the whole
+    batch can view them, not just the uploader - the first storage.rules
+    test coverage in this repo (9 new tests). Full rules-tests suite is
+    now 42/42, including a real fix to the test harness itself (Node was
+    running the two test files concurrently against one shared emulator,
+    which made cross-service `firestore.get()` calls fail intermittently
+    - `--test-concurrency=1` fixed it, not a rules bug).
 11. [x] **Consultations** — by owner decision, this is now an honest
     external handoff rather than a rebuilt in-app flow: a real, reachable
     "Book a Consultation" row on the Care+ tab opens
