@@ -109,7 +109,10 @@ class FirebaseHealthRepository : HealthRepository {
         val ref = db?.collection(collection)?.document()
             ?: return done(CloudResult.Failure("Firebase is not configured"))
         ref.set(values + mapOf("userId" to uid, "profileId" to (values["profileId"] ?: uid), "createdAt" to FieldValue.serverTimestamp()))
-            .addOnSuccessListener { done(CloudResult.Success(ref.id)) }
+            .addOnSuccessListener {
+                AnalyticsLogger.log("log_added", mapOf("log_type" to collection))
+                done(CloudResult.Success(ref.id))
+            }
             .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Log could not be saved", it)) }
     }
 
@@ -180,6 +183,7 @@ class FirebaseHealthRepository : HealthRepository {
             .addOnSuccessListener { result ->
                 @Suppress("UNCHECKED_CAST")
                 val value = result.data as? Map<String, Any?> ?: emptyMap()
+                AnalyticsLogger.log("program_joined")
                 done(CloudResult.Success(value))
             }
             .addOnFailureListener { done(CloudResult.Failure(it.message ?: "That program code wasn't recognized", it)) }
@@ -211,8 +215,10 @@ class FirebaseHealthRepository : HealthRepository {
                 "authorId" to uid,
                 "createdAt" to FieldValue.serverTimestamp()
             )
-        ).addOnSuccessListener { done(CloudResult.Success(Unit)) }
-            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Announcement could not be posted", it)) }
+        ).addOnSuccessListener {
+            AnalyticsLogger.log("announcement_posted", mapOf("program_id" to programId))
+            done(CloudResult.Success(Unit))
+        }.addOnFailureListener { done(CloudResult.Failure(it.message ?: "Announcement could not be posted", it)) }
     }
 
     override fun listenProgramChat(programId: String, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription {
@@ -255,8 +261,10 @@ class FirebaseHealthRepository : HealthRepository {
                 "replyTo" to replyTo,
                 "createdAt" to FieldValue.serverTimestamp()
             )
-        ).addOnSuccessListener { done(CloudResult.Success(Unit)) }
-            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Message could not be sent", it)) }
+        ).addOnSuccessListener {
+            AnalyticsLogger.log("chat_message_sent", mapOf("program_id" to programId, "is_reply" to (replyToId != null)))
+            done(CloudResult.Success(Unit))
+        }.addOnFailureListener { done(CloudResult.Failure(it.message ?: "Message could not be sent", it)) }
     }
 
     override fun toggleChatReaction(messageId: String, emoji: String, add: Boolean, done: (CloudResult<Unit>) -> Unit) {
@@ -360,7 +368,10 @@ class FirebaseHealthRepository : HealthRepository {
                 // swinging the reminder time around.
                 val next = if (existing == null) hour else Math.round(existing * 0.7 + hour * 0.3).toInt()
                 ref.set(mapOf("checkinHourHint" to next, "lastCheckinAt" to FieldValue.serverTimestamp()), SetOptions.merge())
-                    .addOnSuccessListener { done(CloudResult.Success(next)) }
+                    .addOnSuccessListener {
+                        AnalyticsLogger.log("checkin_completed", mapOf("hour" to hour))
+                        done(CloudResult.Success(next))
+                    }
                     .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Could not save", it)) }
             }
             .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Could not save", it)) }
@@ -404,7 +415,10 @@ class FirebaseHealthRepository : HealthRepository {
     private fun createRequest(collection: String, done: (CloudResult<Unit>) -> Unit) {
         val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
         db?.collection(collection)?.add(mapOf("userId" to uid, "status" to "requested", "createdAt" to FieldValue.serverTimestamp()))
-            ?.addOnSuccessListener { done(CloudResult.Success(Unit)) }
+            ?.addOnSuccessListener {
+                AnalyticsLogger.log(if (collection == "dataExportRequests") "data_export_requested" else "account_deletion_requested")
+                done(CloudResult.Success(Unit))
+            }
             ?.addOnFailureListener { done(CloudResult.Failure(it.message ?: "Request failed", it)) }
             ?: done(CloudResult.Failure("Firebase is not configured"))
     }
