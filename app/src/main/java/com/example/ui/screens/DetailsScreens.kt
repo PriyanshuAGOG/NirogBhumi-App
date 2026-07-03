@@ -1,7 +1,14 @@
 package com.nirogbhumi.app.ui.screens
 
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -19,18 +26,25 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import com.google.firebase.Timestamp
 import com.nirogbhumi.app.data.CloudResult
 import com.nirogbhumi.app.notifications.EventReminderWorker
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.health.connect.client.PermissionController
 import com.nirogbhumi.app.health.HealthConnectManager
 import com.nirogbhumi.app.health.HealthConnectStatus
+import com.nirogbhumi.app.health.computeSleepGlucoseInsight
 import com.nirogbhumi.app.ui.NirogState
 import com.nirogbhumi.app.ui.SugarLog
 import com.nirogbhumi.app.ui.components.NirogCard
@@ -432,6 +446,7 @@ fun BookConsultationStepper(state: NirogState) {
                     OutlinedTextField(
                         value = state.userConcernText,
                         onValueChange = { state.userConcernText = it },
+                        label = { Text("Wellness concerns") },
                         placeholder = { Text("List any current issues, blood pressure metrics etc.", color = Color(0xFFC3C8C0)) },
                         modifier = Modifier.fillMaxWidth().height(100.dp),
                         colors = OutlinedTextFieldDefaults.colors(
@@ -705,6 +720,19 @@ fun ActiveJourneyScreen(state: NirogState) {
 // Screen 5: Detailed Insight sleeping-correlation dashboard
 @Composable
 fun InsightDetailScreen(state: NirogState) {
+    var sleepLogs by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>>(emptyList()) }
+    var glucoseReadings by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>>(emptyList()) }
+    DisposableEffect(state.repository.userId) {
+        val sleepSub = state.repository.listenUserCollection("sleepLogs", limit = 60) { result ->
+            if (result is CloudResult.Success) sleepLogs = result.value
+        }
+        val glucoseSub = state.repository.listenUserCollection("glucoseReadings", limit = 60) { result ->
+            if (result is CloudResult.Success) glucoseReadings = result.value
+        }
+        onDispose { sleepSub.cancel(); glucoseSub.cancel() }
+    }
+    val insight = remember(sleepLogs, glucoseReadings) { computeSleepGlucoseInsight(sleepLogs, glucoseReadings) }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -747,7 +775,24 @@ fun InsightDetailScreen(state: NirogState) {
                 lineHeight = 20.sp
             )
 
-            if (state.sugarLogs.size < 5) {
+            if (insight != null) {
+                Card(
+                    modifier = Modifier.fillMaxWidth().border(width = 0.5.dp, color = Color(0xFF9CB79F).copy(alpha = 0.3f), shape = RoundedCornerShape(20.dp)),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFF4E9D3)),
+                    shape = RoundedCornerShape(20.dp)
+                ) {
+                    Column(modifier = Modifier.padding(20.dp)) {
+                        Text("YOUR OWN DATA", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFFB9832B))
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            "Fasting sugar has averaged %.0f mg/dL after shorter nights (under 6h, %d logged) vs %.0f mg/dL after longer ones (%d logged).".format(
+                                insight.shortSleepAvg, insight.shortNights, insight.longSleepAvg, insight.longNights
+                            ),
+                            fontSize = 14.sp, color = Color(0xFF4B3B1B), lineHeight = 20.sp,
+                        )
+                    }
+                }
+            } else if (state.sugarLogs.size < 5) {
                 Card(
                     modifier = Modifier.fillMaxWidth().border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.35f), shape = RoundedCornerShape(20.dp)),
                     colors = CardDefaults.cardColors(containerColor = Color.White),
@@ -1081,6 +1126,12 @@ fun ProfileScreen(state: NirogState) {
             }
         }
 
+        SettingsSection(title = "Developer") {
+            SettingsRow(Icons.Filled.Build, "Developer settings", showDivider = false) {
+                state.currentScreen = "developer_settings"
+            }
+        }
+
         Spacer(modifier = Modifier.height(8.dp))
 
         TextButton(
@@ -1166,6 +1217,165 @@ private fun SettingsRow(
         }
         if (showDivider) {
             Divider(color = Color(0xFFF0ECE2), thickness = 1.dp, modifier = Modifier.padding(start = 50.dp))
+        }
+    }
+}
+
+/**
+ * Developer Settings: version/build/channel visibility + a manual "check
+ * for updates" trigger, so testers can verify a release landed without
+ * waiting for the 30-minute foreground loop or the 6-hourly WorkManager
+ * backstop.
+ */
+@Composable
+fun DeveloperSettingsScreen(state: NirogState) {
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    var showReleaseNotes by remember { mutableStateOf(false) }
+    var currentChannel by remember { mutableStateOf(com.nirogbhumi.app.update.UpdatePrefs.channel(context)) }
+    var lastCheckMillis by remember { mutableStateOf(com.nirogbhumi.app.update.UpdatePrefs.lastCheckAtMillis(context)) }
+    val currentVersionCode = remember {
+        runCatching {
+            val info = context.packageManager.getPackageInfo(context.packageName, 0)
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) info.longVersionCode.toInt()
+            else @Suppress("DEPRECATION") info.versionCode
+        }.getOrDefault(0)
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFFF8F6EF))
+            .verticalScroll(rememberScrollState())
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = { state.currentScreen = "profile" }) {
+                Icon(Icons.Outlined.ArrowBack, contentDescription = "Back", tint = Color(0xFF1B3221))
+            }
+            Text("Developer settings", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        SettingsSection(title = "App Info") {
+            DeveloperInfoRow("Version", "${com.nirogbhumi.app.BuildConfig.VERSION_NAME} (build $currentVersionCode)")
+            DeveloperInfoRow("Package", context.packageName)
+            DeveloperInfoRow("Git commit", com.nirogbhumi.app.BuildConfig.GIT_COMMIT, showDivider = false)
+        }
+
+        SettingsSection(title = "Update Channel") {
+            com.nirogbhumi.app.update.UpdateChannelOption.entries.forEachIndexed { index, option ->
+                DeveloperChannelRow(
+                    label = option.label,
+                    selected = option == currentChannel,
+                    showDivider = index != com.nirogbhumi.app.update.UpdateChannelOption.entries.lastIndex,
+                ) {
+                    currentChannel = option
+                    com.nirogbhumi.app.update.UpdatePrefs.setChannel(context, option)
+                }
+            }
+        }
+
+        SettingsSection(title = "Updates") {
+            DeveloperInfoRow(
+                "Last checked",
+                if (lastCheckMillis > 0) android.text.format.DateUtils.getRelativeTimeSpanString(lastCheckMillis).toString() else "Never",
+            )
+            SettingsRow(
+                Icons.Filled.Refresh,
+                if (state.updateCheckBusy) "Checking…" else "Check for updates",
+                showDivider = state.availableUpdate != null || state.updateCheckError.isNotBlank(),
+            ) {
+                if (state.updateCheckBusy) return@SettingsRow
+                coroutineScope.launch {
+                    state.updateCheckBusy = true
+                    val result = com.nirogbhumi.app.update.UpdateManager.checkNow(context, currentVersionCode)
+                    state.updateCheckBusy = false
+                    lastCheckMillis = com.nirogbhumi.app.update.UpdatePrefs.lastCheckAtMillis(context)
+                    result.onSuccess { info ->
+                        state.updateCheckError = ""
+                        if (info != null) state.availableUpdate = info
+                    }.onFailure {
+                        state.updateCheckError = it.message ?: "Couldn't check for updates"
+                    }
+                }
+            }
+            if (state.updateCheckError.isNotBlank()) {
+                Text(
+                    state.updateCheckError,
+                    fontSize = 12.sp,
+                    color = Color(0xFF8B2E2E),
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+            } else if (state.availableUpdate != null) {
+                SettingsRow(Icons.Filled.Description, "View release notes", showDivider = false) {
+                    showReleaseNotes = true
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(32.dp))
+    }
+
+    if (showReleaseNotes) {
+        val info = state.availableUpdate
+        AlertDialog(
+            onDismissRequest = { showReleaseNotes = false },
+            title = { Text("What's new in ${info?.latestVersionName ?: ""}", fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221)) },
+            text = {
+                Text(
+                    info?.releaseNotes?.takeIf { it.isNotBlank() } ?: "No release notes were provided for this version.",
+                    fontSize = 14.sp,
+                    color = Color(0xFF434842),
+                )
+            },
+            confirmButton = {
+                Button(onClick = { showReleaseNotes = false }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF314936))) {
+                    Text("Close", color = Color.White)
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun DeveloperInfoRow(label: String, value: String, showDivider: Boolean = true) {
+    Column {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(label, fontSize = 14.sp, color = Color(0xFF737972))
+            Text(value, fontSize = 13.sp, color = Color(0xFF1B3221), fontWeight = FontWeight.SemiBold)
+        }
+        if (showDivider) {
+            Divider(color = Color(0xFFF0ECE2), thickness = 1.dp, modifier = Modifier.padding(start = 16.dp))
+        }
+    }
+}
+
+@Composable
+private fun DeveloperChannelRow(label: String, selected: Boolean, showDivider: Boolean, onClick: () -> Unit) {
+    Column {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onClick)
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(label, fontSize = 14.sp, color = Color(0xFF1B3221))
+            if (selected) {
+                Icon(Icons.Filled.CheckCircle, contentDescription = "Selected", tint = Color(0xFF314936), modifier = Modifier.size(20.dp))
+            }
+        }
+        if (showDivider) {
+            Divider(color = Color(0xFFF0ECE2), thickness = 1.dp, modifier = Modifier.padding(start = 16.dp))
         }
     }
 }
@@ -2603,6 +2813,134 @@ fun AnnouncementsScreen(state: NirogState) {
 
 private val QUICK_REACTIONS = listOf("👍", "❤️", "😂", "🙏")
 
+// Single-token @mentions ("@Priya", not "@Priya Sharma") - there's no roster
+// autocomplete yet, so this is rendering-only highlighting of whatever the
+// sender typed, not a validated reference to a real member.
+private val MENTION_REGEX = Regex("(?<=^|\\s)@[\\p{L}0-9_]+")
+
+private fun mentionAnnotatedText(text: String, mentionColor: Color): androidx.compose.ui.text.AnnotatedString =
+    buildAnnotatedString {
+        var last = 0
+        for (match in MENTION_REGEX.findAll(text)) {
+            append(text.substring(last, match.range.first))
+            withStyle(SpanStyle(color = mentionColor, fontWeight = FontWeight.Bold)) {
+                append(match.value)
+            }
+            last = match.range.last + 1
+        }
+        append(text.substring(last))
+    }
+
+// One MediaPlayer per visible bubble (released via DisposableEffect when the
+// item scrolls out of the LazyColumn) - deliberately doesn't pause other
+// bubbles' playback when one starts, unlike WhatsApp. Acceptable v1 scope
+// cut: voice notes are short and this is a rare multi-tap scenario.
+@Composable
+private fun VoiceNoteBubble(url: String, durationSec: Int, isMine: Boolean) {
+    var isPlaying by remember { mutableStateOf(false) }
+    var isPrepared by remember { mutableStateOf(false) }
+    var elapsedSec by remember { mutableStateOf(0) }
+    val player = remember { android.media.MediaPlayer() }
+
+    DisposableEffect(url) {
+        onDispose { runCatching { player.release() } }
+    }
+
+    LaunchedEffect(isPlaying) {
+        while (isPlaying) {
+            kotlinx.coroutines.delay(500)
+            elapsedSec = runCatching { player.currentPosition / 1000 }.getOrDefault(elapsedSec)
+        }
+    }
+
+    fun togglePlayback() {
+        if (isPlaying) {
+            runCatching { player.pause() }
+            isPlaying = false
+            return
+        }
+        if (isPrepared) {
+            runCatching { player.start() }
+            isPlaying = true
+            return
+        }
+        runCatching {
+            player.setDataSource(url)
+            player.setOnPreparedListener {
+                isPrepared = true
+                it.start()
+                isPlaying = true
+            }
+            player.setOnCompletionListener {
+                isPlaying = false
+                elapsedSec = 0
+                runCatching { player.seekTo(0) }
+            }
+            player.prepareAsync()
+        }
+    }
+
+    Row(
+        modifier = Modifier
+            .clip(NirogRadius.pillShape)
+            .background(if (isMine) Color.White.copy(alpha = 0.12f) else NirogColor.surfaceSunken)
+            .clickable { togglePlayback() }
+            .semantics { contentDescription = if (isPlaying) "Pause voice note" else "Play voice note" }
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(if (isPlaying) "⏸" else "▶", style = NirogType.cardTitle, color = if (isMine) NirogColor.onAccent else NirogColor.forest)
+        Spacer(Modifier.width(8.dp))
+        val shownSec = if (isPlaying || elapsedSec > 0) elapsedSec else durationSec
+        Text(
+            "%d:%02d".format(shownSec / 60, shownSec % 60),
+            style = NirogType.caption,
+            color = if (isMine) NirogColor.onAccent.copy(alpha = 0.85f) else NirogColor.inkSecondary,
+        )
+    }
+}
+
+@Composable
+private fun TypingIndicatorRow(names: List<String>) {
+    val label = when (names.size) {
+        1 -> "${names[0]} is typing"
+        2 -> "${names[0]} and ${names[1]} are typing"
+        else -> "${names.size} people are typing"
+    }
+    Row(
+        modifier = Modifier
+            .padding(horizontal = NirogSpace.lg, vertical = NirogSpace.xs)
+            .clip(NirogRadius.pillShape)
+            .background(NirogColor.surfaceSunken)
+            .padding(horizontal = NirogSpace.md, vertical = NirogSpace.sm),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        val transition = rememberInfiniteTransition(label = "typing-dots")
+        Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+            repeat(3) { index ->
+                val bounce by transition.animateFloat(
+                    initialValue = 0f,
+                    targetValue = 1f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(durationMillis = 600, delayMillis = index * 150),
+                        repeatMode = RepeatMode.Reverse,
+                    ),
+                    label = "dot$index",
+                )
+                Box(
+                    modifier = Modifier
+                        .size(6.dp)
+                        .graphicsLayer { translationY = -bounce * 4f }
+                        .clip(CircleShape)
+                        .background(NirogColor.forestSoft)
+                )
+            }
+        }
+        Spacer(Modifier.width(8.dp))
+        Text(label, style = NirogType.caption, color = NirogColor.inkMuted)
+    }
+}
+
 // Care+ community chat - one shared room per program, not one global room, so
 // conversation stays relevant to the program a member actually joined.
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
@@ -2615,9 +2953,88 @@ fun ProgramChatScreen(state: NirogState) {
     var replyTarget by remember { mutableStateOf<com.nirogbhumi.app.data.CloudDocument?>(null) }
     var reportTarget by remember { mutableStateOf<com.nirogbhumi.app.data.CloudDocument?>(null) }
     var reporting by remember { mutableStateOf(false) }
+    var pendingPhotoUri by remember { mutableStateOf<Uri?>(null) }
+    var uploadingPhoto by remember { mutableStateOf(false) }
+    var isRecording by remember { mutableStateOf(false) }
+    var recordingElapsedSec by remember { mutableStateOf(0) }
+    var uploadingAudio by remember { mutableStateOf(false) }
+    var typingStatuses by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>>(emptyList()) }
+    var typingTickMillis by remember { mutableStateOf(System.currentTimeMillis()) }
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
     val myUid = state.repository.userId
+    val context = LocalContext.current
+    val recorderHolder = remember { mutableStateOf<android.media.MediaRecorder?>(null) }
+    val recordingFileHolder = remember { mutableStateOf<java.io.File?>(null) }
+    val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) pendingPhotoUri = uri
+    }
+
+    fun startRecording() {
+        val file = java.io.File.createTempFile("voice_note_", ".m4a", context.cacheDir)
+        @Suppress("DEPRECATION")
+        val recorder = android.media.MediaRecorder().apply {
+            setAudioSource(android.media.MediaRecorder.AudioSource.MIC)
+            setOutputFormat(android.media.MediaRecorder.OutputFormat.MPEG_4)
+            setAudioEncoder(android.media.MediaRecorder.AudioEncoder.AAC)
+            setOutputFile(file.absolutePath)
+            runCatching { prepare(); start() }
+        }
+        recorderHolder.value = recorder
+        recordingFileHolder.value = file
+        recordingElapsedSec = 0
+        isRecording = true
+    }
+
+    fun stopRecordingAndSend() {
+        isRecording = false
+        val recorder = recorderHolder.value
+        val file = recordingFileHolder.value
+        recorderHolder.value = null
+        recordingFileHolder.value = null
+        val durationSec = recordingElapsedSec
+        val stopped = runCatching { recorder?.apply { stop(); release() } }.isSuccess
+        if (!stopped || file == null || durationSec < 1) {
+            file?.delete()
+            state.cloudMessage = if (durationSec < 1) "Voice note was too short to send" else "Could not record - please try again"
+            return
+        }
+        uploadingAudio = true
+        state.repository.uploadProgramChatAudio(state.activeProgramId, Uri.fromFile(file)) { result ->
+            file.delete()
+            when (result) {
+                is com.nirogbhumi.app.data.CloudResult.Success -> {
+                    state.repository.sendProgramChatMessage(
+                        programId = state.activeProgramId,
+                        text = "",
+                        senderName = state.profileName.ifBlank { "Member" },
+                        audioUrl = result.value,
+                        audioDurationSec = durationSec,
+                    ) { sendResult ->
+                        uploadingAudio = false
+                        if (sendResult is com.nirogbhumi.app.data.CloudResult.Success) {
+                            coroutineScope.launch { listState.animateScrollToItem(0) }
+                        } else state.cloudMessage = (sendResult as com.nirogbhumi.app.data.CloudResult.Failure).message
+                    }
+                }
+                is com.nirogbhumi.app.data.CloudResult.Failure -> {
+                    uploadingAudio = false
+                    state.cloudMessage = result.message
+                }
+            }
+        }
+    }
+
+    val micPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) startRecording() else state.cloudMessage = "Microphone permission is needed to send a voice note"
+    }
+
+    LaunchedEffect(isRecording) {
+        while (isRecording) {
+            kotlinx.coroutines.delay(1000)
+            recordingElapsedSec += 1
+        }
+    }
 
     DisposableEffect(state.activeProgramId) {
         val subscription = state.repository.listenProgramChat(state.activeProgramId) { result ->
@@ -2630,6 +3047,40 @@ fun ProgramChatScreen(state: NirogState) {
         onDispose { subscription.cancel() }
     }
 
+    // "X is typing..." - listen for the whole program, then filter to recent
+    // (last 6s) and exclude the caller's own doc. Leaving without an explicit
+    // stop-typing write (crash, force-close) self-heals via that staleness
+    // window rather than needing a server-side cleanup job.
+    DisposableEffect(state.activeProgramId) {
+        val subscription = state.repository.listenTypingStatus(state.activeProgramId) { result ->
+            if (result is com.nirogbhumi.app.data.CloudResult.Success) typingStatuses = result.value
+        }
+        onDispose {
+            subscription.cancel()
+            state.repository.setTypingStatus(state.activeProgramId, "", isTyping = false) {}
+        }
+    }
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(1000)
+            typingTickMillis = System.currentTimeMillis()
+        }
+    }
+    LaunchedEffect(messageInput) {
+        if (messageInput.isBlank()) {
+            state.repository.setTypingStatus(state.activeProgramId, "", isTyping = false) {}
+        } else {
+            kotlinx.coroutines.delay(400)
+            state.repository.setTypingStatus(state.activeProgramId, state.profileName.ifBlank { "Member" }, isTyping = true) {}
+        }
+    }
+    val activeTypers = remember(typingStatuses, typingTickMillis, myUid) {
+        typingStatuses.filter { doc ->
+            doc.values["uid"] != myUid &&
+                (doc.values["updatedAt"] as? com.google.firebase.Timestamp)?.let { typingTickMillis - it.toDate().time < 6000 } == true
+        }.mapNotNull { it.values["name"]?.toString() }
+    }
+
     Column(modifier = Modifier.fillMaxSize().background(NirogColor.surface)) {
         DetailScreenHeader("General", onBack = { state.currentScreen = "dashboard" })
         Text(
@@ -2638,6 +3089,44 @@ fun ProgramChatScreen(state: NirogState) {
             modifier = Modifier.padding(horizontal = NirogSpace.lg)
         )
         Spacer(modifier = Modifier.height(NirogSpace.sm))
+
+        // records is already ordered newest-first by createdAt, so the first
+        // pinned hit is the most recently *sent* pinned message - not
+        // necessarily the most recently *pinned* one, but close enough for a
+        // single-banner v1 without needing to parse pinnedAt timestamps.
+        records?.firstOrNull { it.values["pinned"] == true }?.let { pinned ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = NirogSpace.lg, vertical = NirogSpace.xs)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(NirogColor.goldSoft.copy(alpha = 0.25f))
+                    .padding(horizontal = NirogSpace.md, vertical = NirogSpace.sm),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("📌", style = NirogType.body)
+                Spacer(Modifier.width(8.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        pinned.values["senderName"]?.toString() ?: "Member",
+                        style = NirogType.overline, color = NirogColor.forest,
+                    )
+                    Text(
+                        pinned.values["text"]?.toString().orEmpty(),
+                        style = NirogType.caption, color = NirogColor.inkSecondary, maxLines = 2,
+                    )
+                }
+                if (state.isAdmin) {
+                    IconButton(onClick = {
+                        state.repository.togglePinMessage(pinned.id, state.activeProgramId, pinned = false) { result ->
+                            if (result is com.nirogbhumi.app.data.CloudResult.Failure) state.cloudMessage = result.message
+                        }
+                    }) {
+                        Icon(Icons.Filled.Close, contentDescription = "Unpin message", tint = NirogColor.inkMuted, modifier = Modifier.size(18.dp))
+                    }
+                }
+            }
+        }
 
         when {
             records == null -> Box(modifier = Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
@@ -2656,13 +3145,16 @@ fun ProgramChatScreen(state: NirogState) {
                     val isMine = record.values["userId"] == myUid
                     val senderName = record.values["senderName"]?.toString() ?: "Member"
                     val text = record.values["text"]?.toString().orEmpty()
+                    val photoUrl = record.values["photoUrl"]?.toString()
+                    val audioUrl = record.values["audioUrl"]?.toString()
+                    val audioDurationSec = (record.values["audioDurationSec"] as? Number)?.toInt() ?: 0
                     @Suppress("UNCHECKED_CAST")
                     val replyTo = record.values["replyTo"] as? Map<String, Any?>
                     @Suppress("UNCHECKED_CAST")
                     val reactions = (record.values["reactions"] as? Map<String, Any?>).orEmpty()
 
                     Column(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().animateItem(),
                         horizontalAlignment = if (isMine) Alignment.End else Alignment.Start,
                     ) {
                         Column(
@@ -2699,7 +3191,26 @@ fun ProgramChatScreen(state: NirogState) {
                                     )
                                 }
                             }
-                            Text(text, style = NirogType.body, color = if (isMine) NirogColor.onAccent else NirogColor.inkPrimary)
+                            if (photoUrl != null) {
+                                coil.compose.AsyncImage(
+                                    model = photoUrl, contentDescription = "Photo from $senderName",
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(max = 220.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .then(if (text.isNotBlank()) Modifier.padding(bottom = 6.dp) else Modifier),
+                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                )
+                            }
+                            if (audioUrl != null) {
+                                VoiceNoteBubble(audioUrl, audioDurationSec, isMine)
+                            }
+                            if (text.isNotBlank()) {
+                                Text(
+                                    mentionAnnotatedText(text, mentionColor = if (isMine) NirogColor.goldSoft else NirogColor.gold),
+                                    style = NirogType.body.copy(color = if (isMine) NirogColor.onAccent else NirogColor.inkPrimary),
+                                )
+                            }
                         }
 
                         if (reactions.isNotEmpty()) {
@@ -2733,6 +3244,10 @@ fun ProgramChatScreen(state: NirogState) {
             }
         }
 
+        if (activeTypers.isNotEmpty()) {
+            TypingIndicatorRow(activeTypers)
+        }
+
         replyTarget?.let { target ->
             Row(
                 modifier = Modifier
@@ -2753,40 +3268,117 @@ fun ProgramChatScreen(state: NirogState) {
             }
         }
 
+        pendingPhotoUri?.let { uri ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = NirogSpace.lg, vertical = NirogSpace.xs)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(NirogColor.surfaceSunken)
+                    .padding(horizontal = NirogSpace.md, vertical = NirogSpace.sm),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                coil.compose.AsyncImage(
+                    model = uri, contentDescription = "Photo to send",
+                    modifier = Modifier.size(40.dp).clip(RoundedCornerShape(8.dp)),
+                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text("Photo ready to send", style = NirogType.caption, color = NirogColor.inkSecondary, modifier = Modifier.weight(1f))
+                IconButton(onClick = { pendingPhotoUri = null }, enabled = !uploadingPhoto) {
+                    Icon(Icons.Filled.Close, contentDescription = "Remove photo", tint = NirogColor.inkMuted, modifier = Modifier.size(18.dp))
+                }
+            }
+        }
+
         Row(
             modifier = Modifier.fillMaxWidth().padding(NirogSpace.lg),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            IconButton(
+                enabled = !uploadingPhoto && !sending && !isRecording && !uploadingAudio,
+                onClick = { photoPicker.launch("image/*") },
+                modifier = Modifier.semantics { contentDescription = "Attach a photo" },
+            ) {
+                Text("📷", style = NirogType.cardTitle)
+            }
+            IconButton(
+                enabled = !uploadingPhoto && !sending && !uploadingAudio,
+                onClick = {
+                    if (isRecording) {
+                        stopRecordingAndSend()
+                    } else if (androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                        startRecording()
+                    } else {
+                        micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                    }
+                },
+                modifier = Modifier.semantics { contentDescription = if (isRecording) "Stop and send voice note" else "Record a voice note" },
+            ) {
+                if (uploadingAudio) {
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = NirogColor.forestSoft)
+                } else {
+                    Text(if (isRecording) "⏹" else "🎤", style = NirogType.cardTitle, color = if (isRecording) NirogColor.statusCritical else Color.Unspecified)
+                }
+            }
+            if (isRecording) {
+                Text(
+                    "%d:%02d".format(recordingElapsedSec / 60, recordingElapsedSec % 60),
+                    style = NirogType.caption, color = NirogColor.statusCritical,
+                    modifier = Modifier.padding(end = NirogSpace.xs),
+                )
+            }
             OutlinedTextField(
                 value = messageInput,
                 onValueChange = { messageInput = it },
-                modifier = Modifier.weight(1f),
-                placeholder = { Text("Message your program...") },
+                enabled = !isRecording,
+                modifier = Modifier.weight(1f).semantics { contentDescription = "Message your program" },
+                placeholder = { Text(if (isRecording) "Recording..." else "Message your program...") },
                 shape = NirogRadius.pillShape,
                 singleLine = true,
                 colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = NirogColor.forest, unfocusedBorderColor = NirogColor.surfaceSunken, focusedContainerColor = NirogColor.surfaceCard, unfocusedContainerColor = NirogColor.surfaceCard)
             )
             Spacer(modifier = Modifier.width(NirogSpace.sm))
             IconButton(
+                enabled = !sending && !uploadingPhoto && !isRecording && !uploadingAudio,
                 onClick = {
                     val text = messageInput.trim()
-                    if (text.isBlank() || sending) return@IconButton
-                    sending = true
+                    val photo = pendingPhotoUri
+                    if ((text.isBlank() && photo == null) || sending || uploadingPhoto || isRecording || uploadingAudio) return@IconButton
                     val reply = replyTarget
-                    state.repository.sendProgramChatMessage(
-                        programId = state.activeProgramId,
-                        text = text,
-                        senderName = state.profileName.ifBlank { "Member" },
-                        replyToId = reply?.id,
-                        replyToSender = reply?.values?.get("senderName")?.toString(),
-                        replyToText = reply?.values?.get("text")?.toString(),
-                    ) { result ->
-                        sending = false
-                        if (result is com.nirogbhumi.app.data.CloudResult.Success) {
-                            messageInput = ""
-                            replyTarget = null
-                            coroutineScope.launch { listState.animateScrollToItem(0) }
-                        } else state.cloudMessage = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
+
+                    fun send(photoUrl: String?) {
+                        sending = true
+                        state.repository.sendProgramChatMessage(
+                            programId = state.activeProgramId,
+                            text = text,
+                            senderName = state.profileName.ifBlank { "Member" },
+                            replyToId = reply?.id,
+                            replyToSender = reply?.values?.get("senderName")?.toString(),
+                            replyToText = reply?.values?.get("text")?.toString(),
+                            photoUrl = photoUrl,
+                        ) { result ->
+                            sending = false
+                            if (result is com.nirogbhumi.app.data.CloudResult.Success) {
+                                messageInput = ""
+                                replyTarget = null
+                                pendingPhotoUri = null
+                                coroutineScope.launch { listState.animateScrollToItem(0) }
+                            } else state.cloudMessage = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
+                        }
+                    }
+
+                    if (photo != null) {
+                        uploadingPhoto = true
+                        state.repository.uploadProgramChatPhoto(state.activeProgramId, photo) { result ->
+                            uploadingPhoto = false
+                            when (result) {
+                                is com.nirogbhumi.app.data.CloudResult.Success -> send(result.value)
+                                is com.nirogbhumi.app.data.CloudResult.Failure -> state.cloudMessage = result.message
+                            }
+                        }
+                    } else {
+                        send(null)
                     }
                 },
                 modifier = Modifier.size(48.dp).background(NirogColor.forest, CircleShape)
@@ -2831,6 +3423,23 @@ fun ProgramChatScreen(state: NirogState) {
                         },
                         onClick = { replyTarget = target; actionTarget = null },
                     )
+                    if (state.isAdmin) {
+                        val isPinned = target.values["pinned"] == true
+                        RowCard(
+                            title = if (isPinned) "Unpin message" else "Pin message",
+                            leading = {
+                                Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {
+                                    Text("📌", style = NirogType.cardTitle)
+                                }
+                            },
+                            onClick = {
+                                state.repository.togglePinMessage(target.id, state.activeProgramId, pinned = !isPinned) { result ->
+                                    if (result is com.nirogbhumi.app.data.CloudResult.Failure) state.cloudMessage = result.message
+                                }
+                                actionTarget = null
+                            },
+                        )
+                    }
                     if (!isMine) {
                         RowCard(
                             title = "Report",

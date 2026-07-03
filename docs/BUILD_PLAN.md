@@ -189,9 +189,15 @@ slice that introduces it.
 
 ## 6. Known operational blockers (must clear before "live")
 
-1. **CI `FIREBASE_TOKEN` secret expired** → auto-distribution of new APKs is
-   broken. Fix: `firebase login:ci` → update repo secret (Settings →
-   Environments → production). Owner action.
+1. **Fixed 2026-07-03**: `build-firebase-debug-apk.yml` (the workflow that
+   actually uploads to Firebase App Distribution) was `workflow_dispatch`
+   only, so a new build only ever reached testers if someone remembered to
+   manually trigger it - CI's own `ci.yml` never uploads anywhere, it only
+   produces an ephemeral compile-check artifact. Testers were stuck on a
+   build from the prior evening while ~9 commits shipped with no signal.
+   Now triggers automatically on push to `main`/`claude/**` when app code
+   changes (`FIREBASE_TOKEN`/`APP_DISTRIBUTION_TESTERS` secrets confirmed
+   still valid - the distribution step succeeded on the first auto-run).
 2. **Android compile can't be verified in-sandbox** → we rely on the Actions
    build per slice; keep slices small and green.
 3. **Fonts/App Distribution** and **App Check debug** caveats from earlier
@@ -252,18 +258,33 @@ by the user. Work sequentially, CI-verified per slice, small commits.
    indexes), a 4th Daily Check-in step (taken/missed + optional name),
    a Track-tab quick-log chip, and coach visibility (including a missed
    dose in the Member Detail alert panel) in the console.
-7. [~] **Rules unit tests done; analytics events and accessibility pass
-   still open.** `firebase/rules-tests` (`@firebase/rules-unit-testing`
-   against the real emulator, wired into CI's `firebase-rules` job) - 26
-   tests covering the highest-risk logic added this session: per-coach
-   `programStaff()` scoping (assigned coach passes, unassigned coach
-   denied, admin always passes), the two field-restricted self-update
-   rules (chat reactions, unread-badge read markers), the users/{uid}
-   program-field self-enrollment lock, and health-log read/delete
-   scoping. All 26 pass, which is real verification (not just "the rules
-   file compiles") for exactly the logic that had none before. Extend
-   this suite rather than re-deferring coachNotes/health-log program
-   scoping blind next time.
+7. [x] **Rules unit tests, analytics events, and accessibility pass** —
+   `firebase/rules-tests` (`@firebase/rules-unit-testing` against the real
+   emulator, wired into CI's `firebase-rules` job) - 27 tests covering the
+   highest-risk logic added this session: per-coach `programStaff()`
+   scoping (assigned coach passes, unassigned coach denied, admin always
+   passes), the two field-restricted self-update rules (chat reactions,
+   unread-badge read markers), the users/{uid} program-field
+   self-enrollment lock (including `checkinHourHint`), and health-log
+   read/delete scoping. All 27 pass, which is real verification (not just
+   "the rules file compiles") for exactly the logic that had none before.
+   Extend this suite rather than re-deferring coachNotes/health-log
+   program scoping blind next time.
+   New `AnalyticsLogger` (never throws, never blocks a repository call)
+   is called from `HealthRepository`'s success paths - the single cloud
+   boundary - for `log_added`, `checkin_completed`, `program_joined`,
+   `chat_message_sent`, `announcement_posted`, `data_export_requested`,
+   and `account_deletion_requested`, complementing the existing
+   `screen_view` tracking in `MainActivity`.
+   Accessibility: an icon-level audit (every `IconButton`/clickable-`Icon`
+   `contentDescription` across `ui/screens/`) found no genuine gaps -
+   real gap was text fields relying only on `placeholder`, which TalkBack
+   does not reliably expose as a persistent name. Fixed with a real
+   `label` where visible fits (medication name, check-in numeric fields,
+   search, email/password, program code) and an invisible
+   `Modifier.semantics { contentDescription = ... }` where a visible
+   label would break a compact design (OTP boxes, chat composer, the
+   shared `OutlinedProfileField`).
 8. [~] **Console deploy** — `deploy-firebase.yml` now also builds the
    console and includes `hosting` in the deploy target, so every backend
    deploy keeps `nirog-bhumi-app.web.app` in sync automatically (it was
@@ -280,13 +301,74 @@ by the user. Work sequentially, CI-verified per slice, small commits.
    WorkManager periodic request's first fire ~15 minutes before that
    hour, falling back to a safe elapsed-24h schedule until the hint
    loads or if the member has none yet.
-10. [ ] **Care+ community features** — @mentions, pin-a-message, photo
-    sharing, voice notes in chat.
-11. [ ] **Consultations** — build a real non-payment booking flow
-    end to end (replaces the inert scaffold from item 5).
-12. [ ] **Health data intelligence** — basic trend correlation insight.
-13. [ ] **Shareable Health File link** (signed URL / QR).
-14. [ ] **Retention/habit formation** — streak number, first-week
-    checklist, milestone moments.
+10. [x] **Care+ community features** — @mentions (rendering-only
+    highlighting of "@Name" tokens, no roster autocomplete yet), pin-a-
+    message (staff-only, rules-enforced via `programStaff()`, banner at
+    top of General), photo sharing, and voice notes (tap-mic record,
+    per-bubble MediaPlayer playback) all shipped. Photos and voice notes
+    share the same `program-chat-{photos,audio}/{programId}/{uid}`
+    Storage pattern: a live Firestore membership check so the whole
+    batch can view them, not just the uploader - the first storage.rules
+    test coverage in this repo (9 new tests). Full rules-tests suite is
+    now 42/42, including a real fix to the test harness itself (Node was
+    running the two test files concurrently against one shared emulator,
+    which made cross-service `firestore.get()` calls fail intermittently
+    - `--test-concurrency=1` fixed it, not a rules bug).
+11. [x] **Consultations** — by owner decision, this is now an honest
+    external handoff rather than a rebuilt in-app flow: a real, reachable
+    "Book a Consultation" row on the Care+ tab opens
+    `nirogbhumi.com/consultation` in the browser. The old inert
+    `care_hub -> consult_stepper -> payment_confirmation` in-app scaffold
+    (unreachable since the Razorpay removal) is left as-is, not deleted,
+    pending a real in-app rebuild later if the owner wants one.
+12. [x] **Health data intelligence** — `computeSleepGlucoseInsight()`
+    cross-references a member's own fasting glucoseReadings against the
+    previous night's sleepLogs (Asia/Kolkata calendar day), surfaced on
+    the Today tab and the insight_detail screen. Conservative by design:
+    needs >=3 nights per bucket and an >=8 mg/dL average difference,
+    shows nothing at all otherwise rather than a fabricated placeholder.
+13. [x] **Shareable Health File link** — "Get shareable link / QR code"
+    on the Health File screen reuses the existing `uploadPrivateFile`
+    Storage path (owner-only, already allows PDF) and renders a
+    client-side QR (`com.google.zxing:core`, new dependency). Documented
+    honestly in the dialog copy: it's a bearer-token URL, not a true
+    expiring signed URL - that would need a Cloud Function on the Admin
+    SDK, a real gap flagged rather than silently implied as more secure
+    than it is.
+14. [x] **Retention/habit formation** — `checkinStreak` (consecutive
+    Asia/Kolkata calendar days, computed as a side effect of
+    `recordCheckinCompletion`, no new rule needed - owner-writable
+    fields already permitted) shown warmly as a "$N-day rhythm" pill on
+    Today from day 2 on, never framed as a loss to avoid. A first-week
+    checklist (computed client-side from existing state, no new
+    Firestore field) guides new members through their first reading,
+    first check-in, and meeting their Care+ batch, and disappears once
+    done. A one-time milestone banner (🎉 "$N-day rhythm!") fires right
+    at the check-in that hits 7/30/100 days - a real event moment, not a
+    persistent badge, so it can't repeat on a later view of the same
+    day's already-completed check-in.
 15. [ ] **Admin console utility** — announcement templates, bulk "message
     all quiet members," CSV roster export.
+16. [x] **Self-update system** — the app now detects, downloads, verifies,
+    and installs new builds over itself without a manual APK reinstall
+    cycle. `appUpdates/{channel}` (public-read, admin-write) and
+    `releases/{channel}/*` Storage rules, both with passing
+    `firebase/rules-tests`. Android: `VersionChecker` (numeric semver
+    compare), `UpdateManager`/`UpdateRepository`/`ApkDownloader`/
+    `UpdateInstaller` (SHA-256 verify + `FileProvider` install intent),
+    a lifecycle-scoped on-launch/on-foreground/every-30-min check loop
+    plus a 6-hourly WorkManager backstop, a Material `UpdateDialog`
+    (mandatory updates omit "Later"), and a Developer Settings screen
+    (version/build/git-commit, channel picker, manual check, release
+    notes). `build-firebase-debug-apk.yml` now stamps a real
+    `versionCode`/`versionName`/git-commit onto every build and
+    (best-effort, via WIF) publishes release metadata + the APK to the
+    `development` channel. Full architecture/testing-checklist/future-
+    work writeup in `docs/self-update-system.md`. **Owner action
+    required**: the CI publish step needs the same one-time WIF
+    `gcloud` setup as `deploy-firebase.yml` (`docs/deploy-wif-setup.md`)
+    — confirmed via a live CI run that `FIREBASE_WIF_PROVIDER`/
+    `FIREBASE_DEPLOY_SERVICE_ACCOUNT` aren't populated yet, so the
+    publish step currently skips itself cleanly (by design) rather than
+    failing the build; everything else (detection, download, verify,
+    install, Developer Settings) works today independent of that setup.

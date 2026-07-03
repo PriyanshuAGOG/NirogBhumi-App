@@ -22,11 +22,13 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.nirogbhumi.app.data.CloudResult
+import com.nirogbhumi.app.health.computeSleepGlucoseInsight
 import com.nirogbhumi.app.ui.NirogState
 import com.nirogbhumi.app.ui.SugarLog
 import com.nirogbhumi.app.ui.components.SectionLabel
@@ -453,6 +455,14 @@ fun TodayTab(state: NirogState) {
         }
         onDispose { sugarSub.cancel(); bpSub.cancel(); checklistSub.cancel() }
     }
+
+    var checkinStreak by remember { mutableStateOf(0) }
+    LaunchedEffect(state.checkedInToday) {
+        state.repository.peekCheckinStreak { result ->
+            if (result is CloudResult.Success) checkinStreak = result.value
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -483,6 +493,31 @@ fun TodayTab(state: NirogState) {
                 modifier = Modifier.padding(top = 2.dp)
             )
         }
+
+        // Framed as a "rhythm," never a loss-averse streak-counter - only
+        // shown from 2 days on, since a 1-day count isn't really a pattern
+        // yet and showing it on the very first check-in would read as
+        // hollow praise rather than an earned milestone.
+        if (checkinStreak >= 2) {
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(50))
+                    .background(Color(0xFFF4E9D3))
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("🔥", fontSize = 14.sp)
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    "$checkinStreak-day rhythm",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF7A5A1E),
+                )
+            }
+        }
+
+        FirstWeekChecklistCard(state, checkinStreak)
 
         // Highlight daily task card
         Card(
@@ -765,6 +800,8 @@ fun TodayTab(state: NirogState) {
             }
         }
 
+        SleepGlucoseInsightCard(state)
+
         Card(
             modifier = Modifier
                 .fillMaxWidth()
@@ -800,6 +837,120 @@ fun TodayTab(state: NirogState) {
         }
 
         Spacer(modifier = Modifier.height(24.dp))
+    }
+}
+
+/**
+ * First-week guided checklist, computed entirely from state already in
+ * memory (no new Firestore field) - turns the empty-state cliff for a new
+ * member into a guided path instead of a blank dashboard. Disappears the
+ * moment all three are done; never shown again to a member who's already
+ * past this stage, and never re-appears once dismissed for the session.
+ */
+@Composable
+private fun FirstWeekChecklistCard(state: NirogState, checkinStreak: Int) {
+    var dismissed by remember { mutableStateOf(false) }
+    val loggedFirstReading = state.sugarLogs.isNotEmpty()
+    val triedCheckin = state.checkedInToday || checkinStreak >= 1
+    val metBatch = state.isProgramActive
+    if (dismissed || (loggedFirstReading && triedCheckin && metBatch)) return
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.3f), shape = RoundedCornerShape(24.dp)),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        shape = RoundedCornerShape(24.dp)
+    ) {
+        Column(modifier = Modifier.padding(20.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("Getting started", fontWeight = FontWeight.Bold, color = Color(0xFF1B3221), fontSize = 15.sp)
+                IconButton(onClick = { dismissed = true }, modifier = Modifier.size(28.dp)) {
+                    Icon(Icons.Filled.Close, contentDescription = "Dismiss checklist", tint = Color(0xFF9CB79F), modifier = Modifier.size(16.dp))
+                }
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+            ChecklistItemRow("Log your first reading", loggedFirstReading) { state.currentScreen = "daily_checkin" }
+            ChecklistItemRow("Try the Daily Check-in", triedCheckin) { state.currentScreen = "daily_checkin" }
+            ChecklistItemRow("Meet your Care+ batch", metBatch) { state.activeTab = "Care" }
+        }
+    }
+}
+
+@Composable
+private fun ChecklistItemRow(label: String, done: Boolean, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(if (done) Modifier else Modifier.clickable(onClick = onClick))
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            if (done) Icons.Filled.CheckCircle else Icons.Filled.RadioButtonUnchecked,
+            contentDescription = null,
+            tint = if (done) Color(0xFF426820) else Color(0xFF9CB79F),
+            modifier = Modifier.size(20.dp),
+        )
+        Spacer(modifier = Modifier.width(10.dp))
+        Text(
+            label,
+            fontSize = 13.sp,
+            color = if (done) Color(0xFF737972) else Color(0xFF1B2219),
+            textDecoration = if (done) TextDecoration.LineThrough else null,
+        )
+    }
+}
+
+/**
+ * Basic trend correlation insight: cross-references the member's own
+ * glucoseReadings and sleepLogs (a fasting reading against sleep logged the
+ * previous night) rather than showing a generic tip. Renders nothing at all
+ * - not a "not enough data yet" filler - until there's both enough logged
+ * nights in each bucket and a difference large enough to be worth surfacing,
+ * consistent with the app's no-fabricated-data principle.
+ */
+@Composable
+private fun SleepGlucoseInsightCard(state: NirogState) {
+    var sleepLogs by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>>(emptyList()) }
+    var glucoseReadings by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>>(emptyList()) }
+
+    DisposableEffect(state.repository.userId) {
+        val sleepSub = state.repository.listenUserCollection("sleepLogs", limit = 60) { result ->
+            if (result is CloudResult.Success) sleepLogs = result.value
+        }
+        val glucoseSub = state.repository.listenUserCollection("glucoseReadings", limit = 60) { result ->
+            if (result is CloudResult.Success) glucoseReadings = result.value
+        }
+        onDispose { sleepSub.cancel(); glucoseSub.cancel() }
+    }
+
+    val insight = remember(sleepLogs, glucoseReadings) { computeSleepGlucoseInsight(sleepLogs, glucoseReadings) } ?: return
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { state.currentScreen = "insight_detail" }
+            .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.3f), shape = RoundedCornerShape(24.dp)),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFFF4E9D3)),
+        shape = RoundedCornerShape(24.dp)
+    ) {
+        Row(modifier = Modifier.padding(16.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier.size(36.dp).clip(RoundedCornerShape(12.dp)).background(Color(0xFFB9832B).copy(alpha = 0.16f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Outlined.Insights, contentDescription = null, tint = Color(0xFFB9832B), modifier = Modifier.size(18.dp))
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text("A pattern in your logs", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B2219))
+                Text(
+                    "Your fasting sugar has averaged %.0f mg/dL after shorter nights (under 6h) vs %.0f mg/dL after longer ones, based on your own logs.".format(insight.shortSleepAvg, insight.longSleepAvg),
+                    fontSize = 12.sp, color = Color(0xFF4B6450), lineHeight = 17.sp,
+                )
+            }
+        }
     }
 }
 
@@ -1489,6 +1640,7 @@ fun InsightsTab(state: NirogState) {
 // TAB 4: Care Team & Consultations
 @Composable
 fun CareTab(state: NirogState) {
+    val context = LocalContext.current
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1510,6 +1662,16 @@ fun CareTab(state: NirogState) {
                 color = Color(0xFF434842),
                 modifier = Modifier.padding(top = 4.dp)
             )
+        }
+
+        // Booking currently lives on the website, not in-app - the in-app
+        // stepper was pulled with the Razorpay removal and isn't being
+        // rebuilt yet, so this is an honest handoff instead of a dead-end
+        // flow or a fabricated "coming soon" screen.
+        CareRow(Icons.Outlined.MedicalServices, "Book a Consultation", "Opens nirogbhumi.com to pick an expert and a time.") {
+            runCatching {
+                context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://nirogbhumi.com/consultation")))
+            }.onFailure { state.cloudMessage = "Couldn't open the browser - visit nirogbhumi.com/consultation directly." }
         }
 
         if (!state.isProgramActive) {
@@ -1761,6 +1923,7 @@ fun LearnTab(state: NirogState) {
             onValueChange = { state.searchQuery = it },
             modifier = Modifier.fillMaxWidth(),
             leadingIcon = { Icon(Icons.Filled.Search, "Search", tint = Color(0xFF737972)) },
+            label = { Text("Search articles, guides, or products") },
             placeholder = { Text("Search articles, guides, or products...", color = Color(0xFFC3C8C0)) },
             shape = RoundedCornerShape(12.dp),
             colors = OutlinedTextFieldDefaults.colors(

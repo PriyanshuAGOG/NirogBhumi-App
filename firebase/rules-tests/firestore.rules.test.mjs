@@ -143,6 +143,109 @@ describe('programChatMessages reactions-only update', () => {
       text: 'edited by someone else',
     }));
   });
+
+  it('denies a member pinning a message via the reactions-only branch', async () => {
+    await assertFails(updateDoc(doc(member('mem2'), 'programChatMessages/msg1'), {
+      pinned: true,
+    }));
+  });
+});
+
+describe('programTypingStatus ("X is typing...")', () => {
+  beforeEach(async () => {
+    await seed(async (db) => {
+      await setDoc(doc(db, 'users/mem1'), { userId: 'mem1', activeProgramId: 'progA', programActive: true });
+      await setDoc(doc(db, 'users/mem2'), { userId: 'mem2', activeProgramId: 'progA', programActive: true });
+      await setDoc(doc(db, 'users/mem3'), { userId: 'mem3', activeProgramId: 'progB', programActive: true });
+    });
+  });
+
+  it('lets a member set their own typing status', async () => {
+    await assertSucceeds(setDoc(doc(member('mem1'), 'programTypingStatus/progA_mem1'), {
+      programId: 'progA', uid: 'mem1', name: 'Member One', updatedAt: serverTimestamp(),
+    }));
+  });
+
+  it("denies setting someone else's typing status", async () => {
+    await assertFails(setDoc(doc(member('mem1'), 'programTypingStatus/progA_mem2'), {
+      programId: 'progA', uid: 'mem2', name: 'Member Two', updatedAt: serverTimestamp(),
+    }));
+  });
+
+  it('denies a member setting typing status for a program they are not active in', async () => {
+    await assertFails(setDoc(doc(member('mem3'), 'programTypingStatus/progA_mem3'), {
+      programId: 'progA', uid: 'mem3', name: 'Member Three', updatedAt: serverTimestamp(),
+    }));
+  });
+
+  it('lets a batchmate read another member\'s typing status', async () => {
+    await seed(async (db) => {
+      await setDoc(doc(db, 'programTypingStatus/progA_mem1'), {
+        programId: 'progA', uid: 'mem1', name: 'Member One', updatedAt: serverTimestamp(),
+      });
+    });
+    await assertSucceeds(getDoc(doc(member('mem2'), 'programTypingStatus/progA_mem1')));
+  });
+
+  it('lets a member delete their own typing status doc', async () => {
+    await seed(async (db) => {
+      await setDoc(doc(db, 'programTypingStatus/progA_mem1'), {
+        programId: 'progA', uid: 'mem1', name: 'Member One', updatedAt: serverTimestamp(),
+      });
+    });
+    await assertSucceeds(deleteDoc(doc(member('mem1'), 'programTypingStatus/progA_mem1')));
+  });
+
+  it("denies deleting someone else's typing status doc", async () => {
+    await seed(async (db) => {
+      await setDoc(doc(db, 'programTypingStatus/progA_mem1'), {
+        programId: 'progA', uid: 'mem1', name: 'Member One', updatedAt: serverTimestamp(),
+      });
+    });
+    await assertFails(deleteDoc(doc(member('mem2'), 'programTypingStatus/progA_mem1')));
+  });
+});
+
+describe('programChatMessages pin toggle (staff-only, per-program)', () => {
+  beforeEach(async () => {
+    await seed(async (db) => {
+      await setDoc(doc(db, 'programs/progA'), { name: 'Program A', coachId: 'coach-a' });
+      await setDoc(doc(db, 'users/mem1'), { userId: 'mem1', activeProgramId: 'progA', programActive: true });
+      await setDoc(doc(db, 'programChatMessages/msg1'), {
+        programId: 'progA', userId: 'mem1', text: 'Walk at 6pm today', createdAt: serverTimestamp(),
+      });
+    });
+  });
+
+  it('lets the assigned coach pin a message', async () => {
+    await assertSucceeds(updateDoc(doc(coach('coach-a'), 'programChatMessages/msg1'), {
+      pinned: true, pinnedBy: 'coach-a', pinnedAt: serverTimestamp(),
+    }));
+  });
+
+  it('lets admin pin a message regardless of coachId', async () => {
+    await assertSucceeds(updateDoc(doc(admin(), 'programChatMessages/msg1'), {
+      pinned: true, pinnedBy: 'admin-uid', pinnedAt: serverTimestamp(),
+    }));
+  });
+
+  it('denies an unassigned coach pinning a message in another program', async () => {
+    await assertFails(updateDoc(doc(coach('coach-b'), 'programChatMessages/msg1'), {
+      pinned: true, pinnedBy: 'coach-b', pinnedAt: serverTimestamp(),
+    }));
+  });
+
+  it('denies a member (even the author) pinning their own message', async () => {
+    await assertFails(updateDoc(doc(member('mem1'), 'programChatMessages/msg1'), {
+      pinned: true, pinnedBy: 'mem1', pinnedAt: serverTimestamp(),
+    }));
+  });
+
+  it('denies a coach smuggling a text edit in through the pin branch', async () => {
+    await assertFails(updateDoc(doc(coach('coach-a'), 'programChatMessages/msg1'), {
+      pinned: true, text: 'rewritten by staff',
+    }));
+  });
 });
 
 describe('users/{uid} program-field lock (self-enrollment bypass fix)', () => {
@@ -221,6 +324,40 @@ describe('coachNotes stay staff-wide (documented, not per-program scoped)', () =
     const db = coach('coach-x');
     await assertFails(setDoc(doc(db, 'coachNotes/note1'), {
       targetUid: 'mem1', authorId: 'someone-else', text: 'Doing well', createdAt: serverTimestamp(),
+    }));
+  });
+});
+
+describe('appUpdates (self-update system release metadata)', () => {
+  beforeEach(async () => {
+    await seed(async (db) => {
+      await setDoc(doc(db, 'appUpdates/production'), {
+        channel: 'production', latestVersionCode: 42, latestVersionName: '1.0.42',
+        minSupportedVersionCode: 30, apkUrl: 'https://example.com/app.apk',
+        checksum: 'abc123', forceUpdate: false, releaseNotes: 'Bug fixes',
+      });
+    });
+  });
+
+  it('lets an anonymous (signed-out) caller read release metadata', async () => {
+    await assertSucceeds(getDoc(doc(anon(), 'appUpdates/production')));
+  });
+
+  it('lets a plain signed-in member read release metadata', async () => {
+    await assertSucceeds(getDoc(doc(member('mem1'), 'appUpdates/production')));
+  });
+
+  it('denies a plain member writing release metadata', async () => {
+    await assertFails(setDoc(doc(member('mem1'), 'appUpdates/production'), {
+      channel: 'production', latestVersionCode: 999, latestVersionName: '9.9.9',
+    }));
+  });
+
+  it('lets admin write release metadata', async () => {
+    await assertSucceeds(setDoc(doc(admin(), 'appUpdates/production'), {
+      channel: 'production', latestVersionCode: 43, latestVersionName: '1.0.43',
+      minSupportedVersionCode: 30, apkUrl: 'https://example.com/app43.apk',
+      checksum: 'def456', forceUpdate: false, releaseNotes: 'More fixes',
     }));
   });
 });

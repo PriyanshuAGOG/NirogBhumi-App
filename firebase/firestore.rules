@@ -96,6 +96,14 @@ service cloud.firestore {
         && !('type' in request.resource.data);
     }
     match /contentItems/{id} { allow read: if resource.data.status == 'published' || admin(); allow write: if admin() || role('content_manager'); }
+    // Self-update system release metadata, one doc per channel (id ==
+    // channel name: 'production'|'testing'|'development'). Public read since
+    // this is non-sensitive release info the app needs before the user is
+    // necessarily signed in (or even mid-login); writes only ever come from
+    // CI's WIF-authenticated Admin SDK, which bypasses rules entirely - the
+    // admin()-only write here is defense-in-depth against a compromised
+    // client, not the real write path.
+    match /appUpdates/{channel} { allow read: if true; allow write: if admin(); }
     // Program docs hold the plaintext invite/redemption code, so a public
     // signedIn() read would let anyone list every program's code and
     // self-enroll - staff-only read; redemption goes through the
@@ -117,8 +125,23 @@ service cloud.firestore {
       // Reactions are the one thing any batchmate (not just the author) can
       // touch on someone else's message - restricted to only that field so
       // a member can never edit another member's text via this path.
-      allow update: if programMember() && ownProgram(resource.data.programId)
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions']);
+      // Pinning (like announcements) is a staff action, scoped to the coach
+      // assigned to that specific program - checked separately from the
+      // reactions branch so a member can never smuggle a pin through by
+      // also including 'reactions' in the same write.
+      allow update: if (programMember() && ownProgram(resource.data.programId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions']))
+        || (programStaff(resource.data.programId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['pinned', 'pinnedBy', 'pinnedAt']));
+    }
+    // Ephemeral "X is typing..." presence, one doc per (program, member).
+    // Not field-restricted like programChatMessages since there's nothing
+    // here to protect beyond ownership - the client fully controls its own
+    // typing doc's shape, there's no cross-member field to lock down.
+    match /programTypingStatus/{id} {
+      allow read: if programMember() && ownProgram(resource.data.programId);
+      allow create, update: if programMember() && ownProgram(request.resource.data.programId) && request.resource.data.uid == request.auth.uid;
+      allow delete: if signedIn() && resource.data.uid == request.auth.uid;
     }
     match /reportedMessages/{id} {
       // Any program member can report a message they can see; reviewed by

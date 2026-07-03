@@ -143,4 +143,11 @@ class NirogState {
     // Introduction Tour State
     var shouldShowTour by mutableStateOf(true)
     var currentTourStep by mutableStateOf(0)
+
+    // Self-Update System State
+    var availableUpdate by mutableStateOf<com.nirogbhumi.app.update.UpdateInfo?>(null)
+    var updateDownloadState by mutableStateOf<com.nirogbhumi.app.update.DownloadState>(com.nirogbhumi.app.update.DownloadState.Idle)
+    var activeDownloadId by mutableStateOf<Long?>(null)
+    var updateCheckBusy by mutableStateOf(false)
+    var updateCheckError by mutableStateOf("")
 }

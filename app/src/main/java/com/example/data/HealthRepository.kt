@@ -10,6 +10,12 @@ import com.google.firebase.storage.FirebaseStorage
 import com.google.firebase.functions.FirebaseFunctions
 import java.util.UUID
 
+private fun checkinDayKey(millis: Long): String {
+    val fmt = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+    fmt.timeZone = java.util.TimeZone.getTimeZone("Asia/Kolkata")
+    return fmt.format(java.util.Date(millis))
+}
+
 data class CloudDocument(val id: String, val values: Map<String, Any?>)
 fun interface CloudSubscription { fun cancel() }
 
@@ -46,12 +52,28 @@ interface HealthRepository {
         replyToId: String? = null,
         replyToSender: String? = null,
         replyToText: String? = null,
+        photoUrl: String? = null,
+        audioUrl: String? = null,
+        audioDurationSec: Int? = null,
         done: (CloudResult<Unit>) -> Unit,
     )
+    // Uploads to a program-scoped Storage path (not the private users/{uid}
+    // one) so every batchmate - not just the sender - can view it, rules-
+    // enforced by a live Firestore membership check, not just obscurity.
+    fun uploadProgramChatPhoto(programId: String, uri: Uri, done: (CloudResult<String>) -> Unit)
+    fun uploadProgramChatAudio(programId: String, uri: Uri, done: (CloudResult<String>) -> Unit)
     fun reportChatMessage(messageId: String, programId: String, reportedText: String, reportedUserId: String, done: (CloudResult<Unit>) -> Unit)
+    // "X is typing..." presence - callers should debounce calls with
+    // isTyping=true (every keystroke would be excessive writes) but call
+    // isTyping=false immediately on send/clear/leaving the screen.
+    fun setTypingStatus(programId: String, senderName: String, isTyping: Boolean, done: (CloudResult<Unit>) -> Unit = {})
+    fun listenTypingStatus(programId: String, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription
     // Toggles the caller's own reaction on a message - add=true unions their uid
     // into reactions.<emoji>, add=false removes it. Never touches message text.
     fun toggleChatReaction(messageId: String, emoji: String, add: Boolean, done: (CloudResult<Unit>) -> Unit)
+    // Staff-only (rules-enforced via programStaff(programId), same as announcements).
+    // pinned=false clears pinnedBy/pinnedAt too, so an old pin can't linger with stale attribution.
+    fun togglePinMessage(messageId: String, programId: String, pinned: Boolean, done: (CloudResult<Unit>) -> Unit)
 
     // Batch Pulse: today's PII-free "N of M checked in" + collective walking
     // minutes for the caller's program. Written only by Cloud Functions.
@@ -77,6 +99,10 @@ interface HealthRepository {
     // caller can re-align the on-device reminder to it.
     fun recordCheckinCompletion(hourOfDay: Int, done: (CloudResult<Int>) -> Unit = {})
     fun peekCheckinHourHint(done: (CloudResult<Int?>) -> Unit)
+    // Consecutive-day check-in count (Asia/Kolkata calendar days), updated as
+    // a side effect of recordCheckinCompletion - framed warmly as a "rhythm"
+    // in the UI, never shown as a punishing streak-loss notice.
+    fun peekCheckinStreak(done: (CloudResult<Int>) -> Unit)
 }
 
 class FirebaseHealthRepository : HealthRepository {
@@ -241,6 +267,9 @@ class FirebaseHealthRepository : HealthRepository {
         replyToId: String?,
         replyToSender: String?,
         replyToText: String?,
+        photoUrl: String?,
+        audioUrl: String?,
+        audioDurationSec: Int?,
         done: (CloudResult<Unit>) -> Unit,
     ) {
         val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
@@ -258,13 +287,39 @@ class FirebaseHealthRepository : HealthRepository {
                 "userId" to uid,
                 "senderName" to senderName,
                 "text" to text,
+                "photoUrl" to photoUrl,
+                "audioUrl" to audioUrl,
+                "audioDurationSec" to audioDurationSec,
                 "replyTo" to replyTo,
                 "createdAt" to FieldValue.serverTimestamp()
             )
         ).addOnSuccessListener {
-            AnalyticsLogger.log("chat_message_sent", mapOf("program_id" to programId, "is_reply" to (replyToId != null)))
+            AnalyticsLogger.log("chat_message_sent", mapOf("program_id" to programId, "is_reply" to (replyToId != null), "has_photo" to (photoUrl != null), "has_audio" to (audioUrl != null)))
             done(CloudResult.Success(Unit))
         }.addOnFailureListener { done(CloudResult.Failure(it.message ?: "Message could not be sent", it)) }
+    }
+
+    override fun uploadProgramChatPhoto(programId: String, uri: Uri, done: (CloudResult<String>) -> Unit) {
+        val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
+        val path = "program-chat-photos/$programId/$uid/${UUID.randomUUID()}"
+        val ref = storage?.reference?.child(path) ?: return done(CloudResult.Failure("Firebase is not configured"))
+        ref.putFile(uri).continueWithTask { task ->
+            if (!task.isSuccessful) throw task.exception ?: IllegalStateException("Upload failed")
+            ref.downloadUrl
+        }.addOnSuccessListener { done(CloudResult.Success(it.toString())) }
+            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Photo could not be uploaded", it)) }
+    }
+
+    override fun uploadProgramChatAudio(programId: String, uri: Uri, done: (CloudResult<String>) -> Unit) {
+        val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
+        val path = "program-chat-audio/$programId/$uid/${UUID.randomUUID()}.m4a"
+        val ref = storage?.reference?.child(path) ?: return done(CloudResult.Failure("Firebase is not configured"))
+        val metadata = com.google.firebase.storage.StorageMetadata.Builder().setContentType("audio/mp4").build()
+        ref.putFile(uri, metadata).continueWithTask { task ->
+            if (!task.isSuccessful) throw task.exception ?: IllegalStateException("Upload failed")
+            ref.downloadUrl
+        }.addOnSuccessListener { done(CloudResult.Success(it.toString())) }
+            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Voice note could not be uploaded", it)) }
     }
 
     override fun toggleChatReaction(messageId: String, emoji: String, add: Boolean, done: (CloudResult<Unit>) -> Unit) {
@@ -275,6 +330,19 @@ class FirebaseHealthRepository : HealthRepository {
             .update("reactions.$emoji", change)
             .addOnSuccessListener { done(CloudResult.Success(Unit)) }
             .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Reaction could not be saved", it)) }
+    }
+
+    override fun togglePinMessage(messageId: String, programId: String, pinned: Boolean, done: (CloudResult<Unit>) -> Unit) {
+        val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
+        val database = db ?: return done(CloudResult.Failure("Firebase is not configured"))
+        val values = if (pinned) {
+            mapOf("pinned" to true, "pinnedBy" to uid, "pinnedAt" to FieldValue.serverTimestamp())
+        } else {
+            mapOf("pinned" to false, "pinnedBy" to FieldValue.delete(), "pinnedAt" to FieldValue.delete())
+        }
+        database.collection("programChatMessages").document(messageId).update(values)
+            .addOnSuccessListener { done(CloudResult.Success(Unit)) }
+            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Could not update pin", it)) }
     }
 
     override fun reportChatMessage(messageId: String, programId: String, reportedText: String, reportedUserId: String, done: (CloudResult<Unit>) -> Unit) {
@@ -292,6 +360,30 @@ class FirebaseHealthRepository : HealthRepository {
             )
         ).addOnSuccessListener { done(CloudResult.Success(Unit)) }
             .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Report could not be submitted", it)) }
+    }
+
+    override fun setTypingStatus(programId: String, senderName: String, isTyping: Boolean, done: (CloudResult<Unit>) -> Unit) {
+        val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
+        val database = db ?: return done(CloudResult.Failure("Firebase is not configured"))
+        val ref = database.collection("programTypingStatus").document("${programId}_$uid")
+        val task = if (isTyping) {
+            ref.set(mapOf("programId" to programId, "uid" to uid, "name" to senderName, "updatedAt" to FieldValue.serverTimestamp()))
+        } else {
+            ref.delete()
+        }
+        task.addOnSuccessListener { done(CloudResult.Success(Unit)) }
+            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Could not update typing status", it)) }
+    }
+
+    override fun listenTypingStatus(programId: String, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription {
+        val database = db ?: run { update(CloudResult.Failure("Firebase is not configured")); return CloudSubscription {} }
+        val registration = database.collection("programTypingStatus")
+            .whereEqualTo("programId", programId)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) update(CloudResult.Failure(error.message ?: "Could not load typing status", error))
+                else update(CloudResult.Success(snapshot?.documents.orEmpty().map { CloudDocument(it.id, it.data.orEmpty()) }))
+            }
+        return CloudSubscription { registration.remove() }
     }
 
     override fun listenBatchPulse(programId: String, update: (CloudResult<CloudDocument?>) -> Unit): CloudSubscription {
@@ -367,9 +459,31 @@ class FirebaseHealthRepository : HealthRepository {
                 // routine within a couple of weeks without one late night
                 // swinging the reminder time around.
                 val next = if (existing == null) hour else Math.round(existing * 0.7 + hour * 0.3).toInt()
-                ref.set(mapOf("checkinHourHint" to next, "lastCheckinAt" to FieldValue.serverTimestamp()), SetOptions.merge())
+                // Streak (warmly framed as a "rhythm", not a punishing counter):
+                // consecutive calendar days (Asia/Kolkata) with a completed
+                // check-in. Same day again keeps the count as-is rather than
+                // double-counting; any gap resets to 1 rather than 0, since the
+                // day being recorded right now always counts as day one.
+                val existingStreak = snap.getLong("checkinStreak")?.toInt() ?: 0
+                val now = System.currentTimeMillis()
+                val lastCheckinDay = snap.getTimestamp("lastCheckinAt")?.toDate()?.time?.let(::checkinDayKey)
+                val nextStreak = when (lastCheckinDay) {
+                    checkinDayKey(now) -> existingStreak.coerceAtLeast(1)
+                    // Asia/Kolkata has no DST, so subtracting exactly 24h always
+                    // lands on the correct previous calendar day.
+                    checkinDayKey(now - 86_400_000L) -> existingStreak + 1
+                    else -> 1
+                }
+                ref.set(
+                    mapOf(
+                        "checkinHourHint" to next,
+                        "lastCheckinAt" to FieldValue.serverTimestamp(),
+                        "checkinStreak" to nextStreak,
+                    ),
+                    SetOptions.merge(),
+                )
                     .addOnSuccessListener {
-                        AnalyticsLogger.log("checkin_completed", mapOf("hour" to hour))
+                        AnalyticsLogger.log("checkin_completed", mapOf("hour" to hour, "streak" to nextStreak))
                         done(CloudResult.Success(next))
                     }
                     .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Could not save", it)) }
@@ -382,6 +496,14 @@ class FirebaseHealthRepository : HealthRepository {
         val database = db ?: return done(CloudResult.Failure("Firebase is not configured"))
         database.collection("users").document(uid).get()
             .addOnSuccessListener { snap -> done(CloudResult.Success(snap.getLong("checkinHourHint")?.toInt())) }
+            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Could not load", it)) }
+    }
+
+    override fun peekCheckinStreak(done: (CloudResult<Int>) -> Unit) {
+        val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
+        val database = db ?: return done(CloudResult.Failure("Firebase is not configured"))
+        database.collection("users").document(uid).get()
+            .addOnSuccessListener { snap -> done(CloudResult.Success(snap.getLong("checkinStreak")?.toInt() ?: 0)) }
             .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Could not load", it)) }
     }
 

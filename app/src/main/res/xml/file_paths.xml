@@ -1,4 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
     <cache-path name="reports" path="reports/" />
+    <!-- Matches DownloadManager's setDestinationInExternalFilesDir(context,
+         null, "updates/...") destination for downloaded APKs - app-scoped
+         external storage, no storage permission needed. -->
+    <external-files-path name="updates" path="updates/" />
 </paths>

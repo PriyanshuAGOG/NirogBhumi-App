@@ -201,6 +201,7 @@ fun DailyCheckInScreen(state: NirogState) {
                         value = medicationName,
                         onValueChange = { medicationName = it },
                         modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Medication name (optional)") },
                         placeholder = { Text("Which one? (optional)", color = Color(0xFFC3C8C0)) },
                         singleLine = true,
                         shape = RoundedCornerShape(16.dp),
@@ -335,6 +336,7 @@ private fun BigInput(value: String, onChange: (String) -> Unit, suffix: String, 
         onValueChange = onChange,
         modifier = Modifier.fillMaxWidth(),
         textStyle = LocalTextStyle.current.copy(fontSize = 28.sp, fontWeight = FontWeight.Bold, color = DeepInk),
+        label = { Text(suffix) },
         suffix = { Text(suffix, fontSize = 14.sp, color = Muted) },
         placeholder = { Text("—", fontSize = 28.sp, color = Color(0xFFC3C8C0)) },
         keyboardOptions = KeyboardOptions(keyboardType = keyboard),
@@ -356,6 +358,11 @@ private fun ColumnScope.CheckInDone(state: NirogState, sugar: String?, bp: Strin
     // feeds the hour into checkinHourHint, then re-aligns the on-device
     // reminder to it if the member has that reminder turned on.
     val context = LocalContext.current
+    // Milestone moments: a one-time acknowledgment beat, not a persistent
+    // badge - only ever surfaces right here, right after the check-in that
+    // actually reached the milestone, so it can't repeat on a later screen
+    // view of the same day's already-completed check-in.
+    var milestoneStreak by remember { mutableStateOf<Int?>(null) }
     LaunchedEffect(Unit) {
         if (logged.isEmpty()) return@LaunchedEffect
         val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
@@ -363,6 +370,10 @@ private fun ColumnScope.CheckInDone(state: NirogState, sugar: String?, bp: Strin
             val hint = (result as? CloudResult.Success)?.value ?: return@recordCheckinCompletion
             if (com.nirogbhumi.app.notifications.ReminderScheduler.isEnabled(context, com.nirogbhumi.app.notifications.ReminderType.DAILY_CHECKIN)) {
                 com.nirogbhumi.app.notifications.ReminderScheduler.scheduleSmart(context, hint)
+            }
+            state.repository.peekCheckinStreak { streakResult ->
+                val streak = (streakResult as? CloudResult.Success)?.value ?: return@peekCheckinStreak
+                if (streak == 7 || streak == 30 || streak == 100) milestoneStreak = streak
             }
         }
     }
@@ -381,6 +392,27 @@ private fun ColumnScope.CheckInDone(state: NirogState, sugar: String?, bp: Strin
         fontSize = 14.sp, color = Muted, textAlign = TextAlign.Center,
         modifier = Modifier.align(Alignment.CenterHorizontally)
     )
+    milestoneStreak?.let { streak ->
+        Spacer(Modifier.height(16.dp))
+        Surface(
+            Modifier.fillMaxWidth(),
+            color = Color(0xFFF4E9D3),
+            shape = RoundedCornerShape(18.dp),
+        ) {
+            Column(Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("🎉", fontSize = 24.sp)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "$streak-day rhythm!",
+                    fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF7A5A1E),
+                )
+                Text(
+                    "That's a real, earned pattern - keep it going at whatever pace works for you.",
+                    fontSize = 12.sp, color = Color(0xFF8A6C2E), textAlign = TextAlign.Center,
+                )
+            }
+        }
+    }
     if (logged.isNotEmpty()) {
         Spacer(Modifier.height(8.dp))
         logged.forEach { (label, value) ->

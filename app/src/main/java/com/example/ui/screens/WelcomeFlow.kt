@@ -19,6 +19,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -763,7 +765,8 @@ fun LoginOtpScreen(state: NirogState) {
                                 },
                                 modifier = Modifier
                                     .width(42.dp)
-                                    .height(58.dp),
+                                    .height(58.dp)
+                                    .semantics { contentDescription = "OTP digit ${i + 1} of 6" },
                                 textStyle = LocalTextStyle.current.copy(
                                     fontSize = 18.sp,
                                     fontWeight = FontWeight.Bold,
@@ -995,6 +998,7 @@ fun EmailAuthScreen(state: NirogState) {
                         onValueChange = { emailInput = it },
                         modifier = Modifier.fillMaxWidth(),
                         leadingIcon = { Icon(imageVector = Icons.Outlined.Email, contentDescription = "EmailIcon", tint = Ink.copy(alpha = 0.6f)) },
+                        label = { Text("Email") },
                         placeholder = { Text("Enter your email", color = Ink.copy(alpha = 0.35f)) },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
                         shape = RoundedCornerShape(12.dp),
@@ -1022,6 +1026,7 @@ fun EmailAuthScreen(state: NirogState) {
                                 )
                             }
                         },
+                        label = { Text("Password") },
                         placeholder = { Text("Enter password", color = Ink.copy(alpha = 0.35f)) },
                         visualTransformation = if (isPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
@@ -1164,6 +1169,7 @@ fun PasswordResetScreen(state: NirogState) {
                             onValueChange = { emailResetInput = it },
                             modifier = Modifier.fillMaxWidth(),
                             leadingIcon = { Icon(imageVector = Icons.Outlined.Email, contentDescription = "Email", tint = Ink.copy(alpha = 0.6f)) },
+                            label = { Text("Email") },
                             placeholder = { Text("E-mail address", color = Ink.copy(alpha = 0.35f)) },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
                             shape = RoundedCornerShape(12.dp),
@@ -1549,7 +1555,7 @@ fun OutlinedProfileField(label: String, value: String, placeholder: String, onVa
         OutlinedTextField(
             value = value,
             onValueChange = onValueChange,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().semantics { contentDescription = label },
             placeholder = { Text(placeholder, color = Ink.copy(alpha = 0.3f)) },
             shape = RoundedCornerShape(12.dp),
             singleLine = true,
@@ -1992,6 +1998,7 @@ fun ProgramCodeOptionalScreen(state: NirogState) {
                     errorMessage = null
                 },
                 modifier = Modifier.fillMaxWidth(),
+                label = { Text("Program code") },
                 placeholder = { Text("Code e.g. NIROG6M", color = Ink.copy(alpha = 0.3f)) },
                 shape = RoundedCornerShape(12.dp),
                 singleLine = true,
