@@ -71,9 +71,13 @@ jobs:
           chmod +x gradlew
           ./gradlew --no-daemon --max-workers=2 assembleDebug \
             -PVERSION_CODE="$VERSION_CODE" -PVERSION_NAME="$VERSION_NAME" -PGIT_COMMIT="$GIT_COMMIT"
+      # Absolute path - the self-update publish step below runs with a
+      # different working-directory (firebase/functions), and a
+      # repo-root-relative path silently resolves to the wrong file there
+      # (a real bug this comment now documents: it threw ENOENT until fixed).
       - name: Compute APK checksum
         run: |
-          APK_PATH="$(find app/build/outputs/apk/debug -name '*.apk' | head -n1)"
+          APK_PATH="$(readlink -f "$(find app/build/outputs/apk/debug -name '*.apk' | head -n1)")"
           echo "APK_PATH=$APK_PATH" >> "$GITHUB_ENV"
           echo "APK_CHECKSUM=$(sha256sum "$APK_PATH" | cut -d' ' -f1)" >> "$GITHUB_ENV"
       - uses: actions/upload-artifact@v7
@@ -82,23 +86,36 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           path: app/build/outputs/apk/debug/*.apk
-      # Distribution is best-effort: its job is to deliver the APK to testers, not
-      # to gate the build. It depends on FIREBASE_TOKEN, an owner-rotated secret
-      # that expires; when it's stale this step warns but must NOT fail the run,
-      # otherwise a perfectly good compile shows up as a red build. The "Build
-      # debug APK" step above is the real compile gate.
+      # WIF auth moved ahead of both downstream steps that need it: App
+      # Distribution now authenticates via the same short-lived WIF
+      # credentials as the self-update publish step, instead of the old
+      # FIREBASE_TOKEN secret (a `firebase login:ci` personal OAuth token
+      # that silently expires - confirmed dead in production: "Your
+      # credentials are no longer valid", which is why testers stopped
+      # getting new-build emails). WIF never expires the same way, so this
+      # removes that whole class of failure rather than just rotating it
+      # once. Best-effort: a missing/misconfigured WIF secret must not turn
+      # a good compile into a red build - the "Build debug APK" step above
+      # is the real compile gate.
+      - uses: google-github-actions/auth@v3
+        id: auth
+        continue-on-error: true
+        with:
+          workload_identity_provider: ${{ secrets.FIREBASE_WIF_PROVIDER }}
+          service_account: ${{ secrets.FIREBASE_DEPLOY_SERVICE_ACCOUNT }}
       - name: Distribute to Firebase App Distribution testers
+        if: steps.auth.outcome == 'success'
         continue-on-error: true
         env:
-          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
           APP_DISTRIBUTION_TESTERS: ${{ secrets.APP_DISTRIBUTION_TESTERS }}
         run: |
-          if [ -z "$FIREBASE_TOKEN" ] || [ -z "$APP_DISTRIBUTION_TESTERS" ]; then
-            echo "FIREBASE_TOKEN and/or APP_DISTRIBUTION_TESTERS secret not set - skipping App Distribution upload."
-            echo "Set both (Settings > Environments > production) to have new builds pushed to testers automatically."
+          if [ -z "$APP_DISTRIBUTION_TESTERS" ]; then
+            echo "APP_DISTRIBUTION_TESTERS secret not set - skipping App Distribution upload."
             exit 0
           fi
-          APK_PATH="$(find app/build/outputs/apk/debug -name '*.apk' | head -n1)"
+          # No FIREBASE_TOKEN env var set here - firebase-tools falls back to
+          # GOOGLE_APPLICATION_CREDENTIALS (exported by the auth step above)
+          # automatically once FIREBASE_TOKEN is absent.
           if npx --yes firebase-tools@15.22.3 appdistribution:distribute "$APK_PATH" \
             --app 1:126409331898:android:b4e478566dcbeeb7009e83 \
             --project nirog-bhumi-app \
@@ -106,20 +123,13 @@ jobs:
             --release-notes "Automated debug build - commit ${{ github.sha }}"; then
             echo "Distributed to testers."
           else
-            echo "::warning::App Distribution upload failed (likely an expired FIREBASE_TOKEN). The APK built fine and is attached as a workflow artifact. Rotate the secret via 'firebase login:ci'."
+            echo "::warning::App Distribution upload failed. The APK built fine and is attached as a workflow artifact."
           fi
       # Publishing self-update metadata is also best-effort, same reasoning as
-      # App Distribution above: a missing/expired credential must not turn a
-      # good compile into a red build. This is what lets the app itself detect
+      # App Distribution above. This is what lets the app itself detect
       # "there's a newer version" (see docs/self-update-system.md) - every
       # push to main/claude/** here becomes visible on the "development"
       # update channel within seconds of this job finishing.
-      - uses: google-github-actions/auth@v3
-        id: auth
-        continue-on-error: true
-        with:
-          workload_identity_provider: ${{ secrets.FIREBASE_WIF_PROVIDER }}
-          service_account: ${{ secrets.FIREBASE_DEPLOY_SERVICE_ACCOUNT }}
       - uses: actions/setup-node@v6
         if: steps.auth.outcome == 'success'
         with:
