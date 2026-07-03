@@ -4,6 +4,11 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -21,6 +26,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -2698,6 +2704,47 @@ private fun VoiceNoteBubble(url: String, durationSec: Int, isMine: Boolean) {
     }
 }
 
+@Composable
+private fun TypingIndicatorRow(names: List<String>) {
+    val label = when (names.size) {
+        1 -> "${names[0]} is typing"
+        2 -> "${names[0]} and ${names[1]} are typing"
+        else -> "${names.size} people are typing"
+    }
+    Row(
+        modifier = Modifier
+            .padding(horizontal = NirogSpace.lg, vertical = NirogSpace.xs)
+            .clip(NirogRadius.pillShape)
+            .background(NirogColor.surfaceSunken)
+            .padding(horizontal = NirogSpace.md, vertical = NirogSpace.sm),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        val transition = rememberInfiniteTransition(label = "typing-dots")
+        Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+            repeat(3) { index ->
+                val bounce by transition.animateFloat(
+                    initialValue = 0f,
+                    targetValue = 1f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(durationMillis = 600, delayMillis = index * 150),
+                        repeatMode = RepeatMode.Reverse,
+                    ),
+                    label = "dot$index",
+                )
+                Box(
+                    modifier = Modifier
+                        .size(6.dp)
+                        .graphicsLayer { translationY = -bounce * 4f }
+                        .clip(CircleShape)
+                        .background(NirogColor.forestSoft)
+                )
+            }
+        }
+        Spacer(Modifier.width(8.dp))
+        Text(label, style = NirogType.caption, color = NirogColor.inkMuted)
+    }
+}
+
 // Care+ community chat - one shared room per program, not one global room, so
 // conversation stays relevant to the program a member actually joined.
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
@@ -2715,6 +2762,8 @@ fun ProgramChatScreen(state: NirogState) {
     var isRecording by remember { mutableStateOf(false) }
     var recordingElapsedSec by remember { mutableStateOf(0) }
     var uploadingAudio by remember { mutableStateOf(false) }
+    var typingStatuses by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>>(emptyList()) }
+    var typingTickMillis by remember { mutableStateOf(System.currentTimeMillis()) }
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
     val myUid = state.repository.userId
@@ -2802,6 +2851,40 @@ fun ProgramChatScreen(state: NirogState) {
         onDispose { subscription.cancel() }
     }
 
+    // "X is typing..." - listen for the whole program, then filter to recent
+    // (last 6s) and exclude the caller's own doc. Leaving without an explicit
+    // stop-typing write (crash, force-close) self-heals via that staleness
+    // window rather than needing a server-side cleanup job.
+    DisposableEffect(state.activeProgramId) {
+        val subscription = state.repository.listenTypingStatus(state.activeProgramId) { result ->
+            if (result is com.nirogbhumi.app.data.CloudResult.Success) typingStatuses = result.value
+        }
+        onDispose {
+            subscription.cancel()
+            state.repository.setTypingStatus(state.activeProgramId, "", isTyping = false) {}
+        }
+    }
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(1000)
+            typingTickMillis = System.currentTimeMillis()
+        }
+    }
+    LaunchedEffect(messageInput) {
+        if (messageInput.isBlank()) {
+            state.repository.setTypingStatus(state.activeProgramId, "", isTyping = false) {}
+        } else {
+            kotlinx.coroutines.delay(400)
+            state.repository.setTypingStatus(state.activeProgramId, state.profileName.ifBlank { "Member" }, isTyping = true) {}
+        }
+    }
+    val activeTypers = remember(typingStatuses, typingTickMillis, myUid) {
+        typingStatuses.filter { doc ->
+            doc.values["uid"] != myUid &&
+                (doc.values["updatedAt"] as? com.google.firebase.Timestamp)?.let { typingTickMillis - it.toDate().time < 6000 } == true
+        }.mapNotNull { it.values["name"]?.toString() }
+    }
+
     Column(modifier = Modifier.fillMaxSize().background(NirogColor.surface)) {
         DetailScreenHeader("General", onBack = { state.currentScreen = "dashboard" })
         Text(
@@ -2875,7 +2958,7 @@ fun ProgramChatScreen(state: NirogState) {
                     val reactions = (record.values["reactions"] as? Map<String, Any?>).orEmpty()
 
                     Column(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().animateItem(),
                         horizontalAlignment = if (isMine) Alignment.End else Alignment.Start,
                     ) {
                         Column(
@@ -2963,6 +3046,10 @@ fun ProgramChatScreen(state: NirogState) {
                     }
                 }
             }
+        }
+
+        if (activeTypers.isNotEmpty()) {
+            TypingIndicatorRow(activeTypers)
         }
 
         replyTarget?.let { target ->

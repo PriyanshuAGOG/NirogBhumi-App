@@ -126,6 +126,15 @@ service cloud.firestore {
         || (programStaff(resource.data.programId)
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['pinned', 'pinnedBy', 'pinnedAt']));
     }
+    // Ephemeral "X is typing..." presence, one doc per (program, member).
+    // Not field-restricted like programChatMessages since there's nothing
+    // here to protect beyond ownership - the client fully controls its own
+    // typing doc's shape, there's no cross-member field to lock down.
+    match /programTypingStatus/{id} {
+      allow read: if programMember() && ownProgram(resource.data.programId);
+      allow create, update: if programMember() && ownProgram(request.resource.data.programId) && request.resource.data.uid == request.auth.uid;
+      allow delete: if signedIn() && resource.data.uid == request.auth.uid;
+    }
     match /reportedMessages/{id} {
       // Any program member can report a message they can see; reviewed by
       // admin or the coach assigned to that report's program.

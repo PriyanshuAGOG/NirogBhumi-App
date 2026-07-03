@@ -151,6 +151,61 @@ describe('programChatMessages reactions-only update', () => {
   });
 });
 
+describe('programTypingStatus ("X is typing...")', () => {
+  beforeEach(async () => {
+    await seed(async (db) => {
+      await setDoc(doc(db, 'users/mem1'), { userId: 'mem1', activeProgramId: 'progA', programActive: true });
+      await setDoc(doc(db, 'users/mem2'), { userId: 'mem2', activeProgramId: 'progA', programActive: true });
+      await setDoc(doc(db, 'users/mem3'), { userId: 'mem3', activeProgramId: 'progB', programActive: true });
+    });
+  });
+
+  it('lets a member set their own typing status', async () => {
+    await assertSucceeds(setDoc(doc(member('mem1'), 'programTypingStatus/progA_mem1'), {
+      programId: 'progA', uid: 'mem1', name: 'Member One', updatedAt: serverTimestamp(),
+    }));
+  });
+
+  it("denies setting someone else's typing status", async () => {
+    await assertFails(setDoc(doc(member('mem1'), 'programTypingStatus/progA_mem2'), {
+      programId: 'progA', uid: 'mem2', name: 'Member Two', updatedAt: serverTimestamp(),
+    }));
+  });
+
+  it('denies a member setting typing status for a program they are not active in', async () => {
+    await assertFails(setDoc(doc(member('mem3'), 'programTypingStatus/progA_mem3'), {
+      programId: 'progA', uid: 'mem3', name: 'Member Three', updatedAt: serverTimestamp(),
+    }));
+  });
+
+  it('lets a batchmate read another member\'s typing status', async () => {
+    await seed(async (db) => {
+      await setDoc(doc(db, 'programTypingStatus/progA_mem1'), {
+        programId: 'progA', uid: 'mem1', name: 'Member One', updatedAt: serverTimestamp(),
+      });
+    });
+    await assertSucceeds(getDoc(doc(member('mem2'), 'programTypingStatus/progA_mem1')));
+  });
+
+  it('lets a member delete their own typing status doc', async () => {
+    await seed(async (db) => {
+      await setDoc(doc(db, 'programTypingStatus/progA_mem1'), {
+        programId: 'progA', uid: 'mem1', name: 'Member One', updatedAt: serverTimestamp(),
+      });
+    });
+    await assertSucceeds(deleteDoc(doc(member('mem1'), 'programTypingStatus/progA_mem1')));
+  });
+
+  it("denies deleting someone else's typing status doc", async () => {
+    await seed(async (db) => {
+      await setDoc(doc(db, 'programTypingStatus/progA_mem1'), {
+        programId: 'progA', uid: 'mem1', name: 'Member One', updatedAt: serverTimestamp(),
+      });
+    });
+    await assertFails(deleteDoc(doc(member('mem2'), 'programTypingStatus/progA_mem1')));
+  });
+});
+
 describe('programChatMessages pin toggle (staff-only, per-program)', () => {
   beforeEach(async () => {
     await seed(async (db) => {

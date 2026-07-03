@@ -57,6 +57,11 @@ interface HealthRepository {
     fun uploadProgramChatPhoto(programId: String, uri: Uri, done: (CloudResult<String>) -> Unit)
     fun uploadProgramChatAudio(programId: String, uri: Uri, done: (CloudResult<String>) -> Unit)
     fun reportChatMessage(messageId: String, programId: String, reportedText: String, reportedUserId: String, done: (CloudResult<Unit>) -> Unit)
+    // "X is typing..." presence - callers should debounce calls with
+    // isTyping=true (every keystroke would be excessive writes) but call
+    // isTyping=false immediately on send/clear/leaving the screen.
+    fun setTypingStatus(programId: String, senderName: String, isTyping: Boolean, done: (CloudResult<Unit>) -> Unit = {})
+    fun listenTypingStatus(programId: String, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription
     // Toggles the caller's own reaction on a message - add=true unions their uid
     // into reactions.<emoji>, add=false removes it. Never touches message text.
     fun toggleChatReaction(messageId: String, emoji: String, add: Boolean, done: (CloudResult<Unit>) -> Unit)
@@ -345,6 +350,30 @@ class FirebaseHealthRepository : HealthRepository {
             )
         ).addOnSuccessListener { done(CloudResult.Success(Unit)) }
             .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Report could not be submitted", it)) }
+    }
+
+    override fun setTypingStatus(programId: String, senderName: String, isTyping: Boolean, done: (CloudResult<Unit>) -> Unit) {
+        val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
+        val database = db ?: return done(CloudResult.Failure("Firebase is not configured"))
+        val ref = database.collection("programTypingStatus").document("${programId}_$uid")
+        val task = if (isTyping) {
+            ref.set(mapOf("programId" to programId, "uid" to uid, "name" to senderName, "updatedAt" to FieldValue.serverTimestamp()))
+        } else {
+            ref.delete()
+        }
+        task.addOnSuccessListener { done(CloudResult.Success(Unit)) }
+            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Could not update typing status", it)) }
+    }
+
+    override fun listenTypingStatus(programId: String, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription {
+        val database = db ?: run { update(CloudResult.Failure("Firebase is not configured")); return CloudSubscription {} }
+        val registration = database.collection("programTypingStatus")
+            .whereEqualTo("programId", programId)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) update(CloudResult.Failure(error.message ?: "Could not load typing status", error))
+                else update(CloudResult.Success(snapshot?.documents.orEmpty().map { CloudDocument(it.id, it.data.orEmpty()) }))
+            }
+        return CloudSubscription { registration.remove() }
     }
 
     override fun listenBatchPulse(programId: String, update: (CloudResult<CloudDocument?>) -> Unit): CloudSubscription {
