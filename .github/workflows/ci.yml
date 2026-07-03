@@ -1,8 +1,13 @@
 name: CI
 
+# All work on this repo happens directly on claude/** branches, not via PRs
+# into main - so a push-trigger scoped to [main] only never actually fires
+# in practice, and every run up to this point had to be started by hand
+# via workflow_dispatch. Adding claude/** here is what makes CI actually
+# automatic for the branch this repo really uses.
 on:
   push:
-    branches: [main]
+    branches: [main, 'claude/**']
   pull_request:
   workflow_dispatch:
 
