@@ -29,7 +29,6 @@ interface HealthRepository {
     fun listenPublicCollection(collection: String, limit: Long = 30, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription
     fun requestDataExport(done: (CloudResult<Unit>) -> Unit)
     fun requestAccountDeletion(done: (CloudResult<Unit>) -> Unit)
-    fun createPaymentOrder(kind: String, entityId: String, done: (CloudResult<Map<String, Any?>>) -> Unit)
     fun upsertUserRecord(collection: String, documentId: String, values: Map<String, Any?>, done: (CloudResult<Unit>) -> Unit = {})
     fun deleteUserRecord(collection: String, documentId: String, done: (CloudResult<Unit>) -> Unit)
     fun getPrivateDownloadUrl(storagePath: String, done: (CloudResult<String>) -> Unit)
@@ -139,16 +138,6 @@ class FirebaseHealthRepository : HealthRepository {
 
     override fun requestDataExport(done: (CloudResult<Unit>) -> Unit) = createRequest("dataExportRequests", done)
     override fun requestAccountDeletion(done: (CloudResult<Unit>) -> Unit) = createRequest("deletionRequests", done)
-
-    override fun createPaymentOrder(kind: String, entityId: String, done: (CloudResult<Map<String, Any?>>) -> Unit) {
-        val callable = functions?.getHttpsCallable("createPaymentOrder") ?: return done(CloudResult.Failure("Firebase is not configured"))
-        callable.call(mapOf("kind" to kind, "entityId" to entityId))
-            .addOnSuccessListener { result ->
-                @Suppress("UNCHECKED_CAST")
-                done(CloudResult.Success(result.data as? Map<String, Any?> ?: emptyMap()))
-            }
-            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Payment could not be initialized", it)) }
-    }
 
     override fun getPrivateDownloadUrl(storagePath: String, done: (CloudResult<String>) -> Unit) {
         val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))

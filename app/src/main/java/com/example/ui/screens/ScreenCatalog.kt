@@ -41,7 +41,6 @@ import kotlinx.coroutines.launch
 import com.nirogbhumi.app.ui.NirogState
 import com.nirogbhumi.app.data.CloudResult
 import com.google.firebase.firestore.FieldValue
-import com.nirogbhumi.app.payments.RazorpayPaymentLauncher
 import com.nirogbhumi.app.reports.ReportShare
 
 data class ScreenSpec(
@@ -457,15 +456,12 @@ fun CatalogScreen(state: NirogState, route: String) {
                                 state.selectedDocumentValues["name"]?.toString()?.let { state.profileName = it }
                                 state.currentScreen = "dashboard"
                             } else if (spec.route == "payment_confirmation") {
-                                if (state.pendingConsultationId.isBlank()) { message = "Please complete the consultation form first"; return@Button }
-                                saving = true
-                                state.repository.createPaymentOrder("consultation", state.pendingConsultationId) { result ->
-                                    saving = false
-                                    when (result) {
-                                        is CloudResult.Success -> runCatching { RazorpayPaymentLauncher.open(requireNotNull(activity), result.value, state.profileName, state.userEmail, state.userMobile) }.onFailure { message = it.message ?: "Payment could not open" }
-                                        is CloudResult.Failure -> message = result.message
-                                    }
-                                }
+                                // Paid consultation booking was removed along with Razorpay; this
+                                // whole chain (care_hub -> consultation_types -> consult_stepper ->
+                                // pre_consultation -> payment_confirmation) has no live entry point
+                                // in the current navigation, so this is an honest dead-end rather
+                                // than a call into a payment provider that no longer exists.
+                                message = "Consultation booking isn't available yet."
                             } else if (spec.route == "privacy_consent") {
                                 val selected = experience?.checklist.orEmpty().filter { "${spec.route}:$it" in state.checkedItems }
                                 state.repository.saveProfile(mapOf("privacyConsentSelections" to selected, "preferencesUpdatedAt" to FieldValue.serverTimestamp())) { result ->

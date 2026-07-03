@@ -7,6 +7,7 @@ on:
         description: Firebase project ID
         required: true
         type: string
+        default: nirog-bhumi-app
 
 permissions:
   contents: read
@@ -28,9 +29,15 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: firebase/functions/package-lock.json
+      # Workload Identity Federation: GitHub's OIDC token is exchanged for a
+      # short-lived GCP access token at run time - no service-account key is
+      # ever created or stored, so this works even where the org policy
+      # blocking key creation (see docs/deploy-wif-setup.md) blocks the
+      # credentials_json approach entirely.
       - uses: google-github-actions/auth@v3
         with:
-          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+          workload_identity_provider: ${{ secrets.FIREBASE_WIF_PROVIDER }}
+          service_account: ${{ secrets.FIREBASE_DEPLOY_SERVICE_ACCOUNT }}
       - name: Build functions
         working-directory: firebase/functions
         run: npm ci && npm test

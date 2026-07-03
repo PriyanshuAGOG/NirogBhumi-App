@@ -42,18 +42,8 @@ private val DEEP_LINK_ROUTES = setOf(
 )
 private fun sanitizedRoute(raw: String?): String = raw?.takeIf { it in DEEP_LINK_ROUTES } ?: ""
 
-class MainActivity : ComponentActivity(), com.razorpay.PaymentResultListener {
+class MainActivity : ComponentActivity() {
   private val nirogState by lazy { NirogState() }
-
-  override fun onPaymentSuccess(paymentId: String?) {
-    nirogState.cloudMessage = "Payment received securely"
-    nirogState.currentScreen = "consultation_confirmed"
-  }
-
-  override fun onPaymentError(code: Int, response: String?) {
-    nirogState.cloudMessage = response ?: "Payment was not completed. You can safely try again."
-    nirogState.currentScreen = "payment_confirmation"
-  }
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
