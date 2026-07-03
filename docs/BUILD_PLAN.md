@@ -234,8 +234,10 @@ by the user. Work sequentially, CI-verified per slice, small commits.
    `createPaymentOrder` call site. The unreachable `care_hub` →
    `consult_stepper` → `payment_confirmation` chain still exists as inert
    scaffold (confirmed no live entry point) pending item 11's real rebuild.
-6. [ ] **Medication logging** — new `medicationLogs` collection: rules,
-   indexes, Android logging UI, console/coach visibility.
+6. [x] **Medication logging** — `medicationLogs` collection (rules,
+   indexes), a 4th Daily Check-in step (taken/missed + optional name),
+   a Track-tab quick-log chip, and coach visibility (including a missed
+   dose in the Member Detail alert panel) in the console.
 7. [ ] **Analytics events, accessibility pass, Compose/rules unit tests.**
 8. [ ] **Verify console deploy** — confirm the live URL actually serves the
    latest build end to end.
