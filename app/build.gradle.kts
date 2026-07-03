@@ -8,12 +8,6 @@ if (file("google-services.json").exists()) {
   apply(plugin = "com.google.firebase.crashlytics")
 }
 
-// Razorpay checkout 1.6.41 declares standard-core as LATEST. Versions 1.7+
-// also pull a legacy core AAR with the same namespace, which AGP 9 rejects.
-configurations.configureEach {
-  resolutionStrategy.force("com.razorpay:standard-core:1.6.56")
-}
-
 android {
   namespace = "com.nirogbhumi.app"
   compileSdk { version = release(36) { minorApiLevel = 1 } }
@@ -121,7 +115,6 @@ dependencies {
   implementation(libs.firebase.appdistribution.api)
   implementation(libs.firebase.appcheck.playintegrity)
   implementation(libs.play.services.auth)
-  implementation(libs.razorpay.checkout)
   implementation(libs.androidx.health.connect)
   implementation(libs.androidx.work.runtime.ktx)
   implementation(libs.kotlinx.coroutines.android)

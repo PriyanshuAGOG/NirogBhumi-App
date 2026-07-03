@@ -69,5 +69,15 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: "22"
-      - name: Start emulators with Firestore and Storage rules
-        run: npx --yes firebase-tools@15.22.3 emulators:exec --only firestore,storage --project demo-nirog-bhumi "node -e \"console.log('Firebase rules syntax validated')\""
+          cache: npm
+          cache-dependency-path: firebase/rules-tests/package-lock.json
+      - name: Install rules test dependencies
+        working-directory: firebase/rules-tests
+        run: npm ci
+      # Runs the actual security-rules unit test suite (firebase/rules-tests)
+      # against a real emulator, not just a syntax check - this is what
+      # verifies access-control *logic* (per-coach batch scoping, the
+      # field-restricted self-update rules, the program-enrollment lock),
+      # none of which a "does it compile" check would ever catch.
+      - name: Run rules unit tests against the emulator
+        run: npx --yes firebase-tools@15.22.3 emulators:exec --only firestore,storage --project demo-nirog-bhumi "npm --prefix firebase/rules-tests test"

@@ -4,6 +4,7 @@ import { collection, onSnapshot, query } from 'firebase/firestore'
 import { httpsCallable, type HttpsCallableResult } from 'firebase/functions'
 import { FirebaseError } from 'firebase/app'
 import { db, functions } from '../lib/firebase'
+import { useAuth } from '../auth/AuthProvider'
 import { errText } from '../lib/errors'
 import { PERMISSION_KEYS, type Permission } from '../auth/AuthProvider'
 import './Users.css'
@@ -56,6 +57,13 @@ function roleTagClass(role: string | undefined): string {
 }
 
 export default function Users() {
+  const { role: viewerRole } = useAuth()
+  const isSuperAdmin = viewerRole === 'super_admin'
+  // Only a super admin may grant the admin role or change an existing
+  // admin's role - the setUserRole function enforces this server-side too;
+  // this just keeps a plain admin from attempting (and being rejected on) a
+  // change that can never succeed.
+  const roleOptions = isSuperAdmin ? ROLE_OPTIONS : (['user', 'coach'] as AssignableRole[])
   const [users, setUsers] = useState<UserRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -166,8 +174,18 @@ export default function Users() {
       ) : (
         <div className="user-list">
           {visible.map((u) => {
-            const current = (u.role as AssignableRole) ?? 'user'
+            const targetRole = u.role ?? 'user'
+            // A plain admin can't touch another admin/super_admin account
+            // (setUserRole enforces this server-side) - lock the row instead
+            // of letting them attempt a change that can only fail.
+            const isTargetElevated = targetRole === 'admin' || targetRole === 'super_admin'
+            const canEdit = isSuperAdmin || !isTargetElevated
+            const current = targetRole as AssignableRole
             const selected = pending[u.id] ?? current
+            // super_admin isn't an assignable option (setUserRole never grants
+            // it), but it needs to appear so the select shows the real current
+            // role instead of silently falling back to "user".
+            const displayOptions = targetRole === 'super_admin' ? ['super_admin' as const, ...roleOptions] : roleOptions
             const state = rowState[u.id]
             const currentPerms = u.permissions ?? PERMISSION_KEYS
             const selectedPerms = pendingPerms[u.id] ?? currentPerms
@@ -194,29 +212,35 @@ export default function Users() {
                       </Link>
                     )}
                     <span className={`tag ${roleTagClass(u.role)}`}>{u.role ?? 'user'}</span>
-                    <select
-                      className="select user-role-select"
-                      value={selected}
-                      onChange={(e) =>
-                        setPending((prev) => ({ ...prev, [u.id]: e.target.value as AssignableRole }))
-                      }
-                    >
-                      {ROLE_OPTIONS.map((r) => (
-                        <option key={r} value={r}>
-                          {r}
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      className="btn btn-forest btn-sm"
-                      disabled={!changed || state?.saving}
-                      onClick={() => void apply(u)}
-                    >
-                      {state?.saving ? 'Saving…' : 'Set role'}
-                    </button>
+                    {canEdit ? (
+                      <>
+                        <select
+                          className="select user-role-select"
+                          value={selected}
+                          onChange={(e) =>
+                            setPending((prev) => ({ ...prev, [u.id]: e.target.value as AssignableRole }))
+                          }
+                        >
+                          {displayOptions.map((r) => (
+                            <option key={r} value={r} disabled={r === 'super_admin'}>
+                              {r}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          className="btn btn-forest btn-sm"
+                          disabled={!changed || state?.saving}
+                          onClick={() => void apply(u)}
+                        >
+                          {state?.saving ? 'Saving…' : 'Set role'}
+                        </button>
+                      </>
+                    ) : (
+                      <span className="user-sub">Super admin only</span>
+                    )}
                   </div>
                 </div>
-                {selected === 'coach' && (
+                {canEdit && selected === 'coach' && (
                   <div className="perm-grid">
                     <span className="perm-label">Console access for this coach</span>
                     <div className="perm-checks">

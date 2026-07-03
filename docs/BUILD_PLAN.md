@@ -205,3 +205,88 @@ Code + security rules + indexes (if any) committed together · CI build green ·
 prototype/PRD parity on the screen · no fabricated data · warm/non-punitive
 copy · audit entry for any admin write. A slice isn't "done" until the Actions
 build passes.
+
+---
+
+## 8. Post-launch backlog (standing `/goal`, worked via `/loop`)
+
+Phases 0-3 above shipped; a full security audit (Android/Functions/rules/
+console) also found and fixed every Critical/High finding (see git log for
+the security-hardening commit). This phase is the next tranche, prioritized
+by the user. Work sequentially, CI-verified per slice, small commits.
+
+1. [x] **Deploy automation** — `deploy-firebase.yml` now uses Workload
+   Identity Federation instead of a service-account key (the org policy
+   that blocks key creation doesn't block WIF, since no key is ever
+   created). One-time `gcloud` setup documented in
+   `docs/deploy-wif-setup.md` — **owner action required** to actually run
+   it once before the workflow will authenticate successfully.
+2. [ ] **Real typography** (Fraunces + Manrope) — blocked: this sandbox's
+   network policy doesn't allow fetching font binaries from Google
+   Fonts/GitHub. Needs the font files supplied another way (owner upload,
+   or a network policy change on the environment) before this can ship.
+3. [x] **Per-coach batch scoping** — new `programStaff(programId)` rules
+   helper (admin, or the coach whose uid matches that `programs/{id}.coachId`)
+   replaces bare `staff()` on programs/programEvents/programMembers/
+   announcements/coachMessages/reportedMessages/batchStats. **Operational
+   note:** any coach account that doesn't yet have `coachId` set on their
+   program (via the console's Programs page) will see zero batches/members
+   until an admin sets it - this field existed before but was never
+   enforced, so this is a real behavior change on deploy, not just an
+   additive one. coachNotes and the health-log collection group are
+   deliberately left staff()-wide for now (documented in firestore.rules)
+   pending rules unit tests (item 7) to verify a chained
+   member->program->coach check actually behaves as intended before
+   applying it somewhere health-data-sensitive.
+4. [x] **Unread badges in Chat Hub** — a one-shot peek (not a live
+   listener) on entering Chat Hub compares the newest message/announcement
+   timestamp against the member's own `lastReadGeneralAt`/
+   `lastReadAnnouncementsAt` (written on entering each room). Rules let a
+   member touch only those two fields on their own roster doc.
+5. [x] **Razorpay cleanup** — removed `PaymentResultListener`, the
+   `razorpay-checkout` dependency, `RazorpayPaymentLauncher`, and the dead
+   `createPaymentOrder` call site. The unreachable `care_hub` →
+   `consult_stepper` → `payment_confirmation` chain still exists as inert
+   scaffold (confirmed no live entry point) pending item 11's real rebuild.
+6. [x] **Medication logging** — `medicationLogs` collection (rules,
+   indexes), a 4th Daily Check-in step (taken/missed + optional name),
+   a Track-tab quick-log chip, and coach visibility (including a missed
+   dose in the Member Detail alert panel) in the console.
+7. [~] **Rules unit tests done; analytics events and accessibility pass
+   still open.** `firebase/rules-tests` (`@firebase/rules-unit-testing`
+   against the real emulator, wired into CI's `firebase-rules` job) - 26
+   tests covering the highest-risk logic added this session: per-coach
+   `programStaff()` scoping (assigned coach passes, unassigned coach
+   denied, admin always passes), the two field-restricted self-update
+   rules (chat reactions, unread-badge read markers), the users/{uid}
+   program-field self-enrollment lock, and health-log read/delete
+   scoping. All 26 pass, which is real verification (not just "the rules
+   file compiles") for exactly the logic that had none before. Extend
+   this suite rather than re-deferring coachNotes/health-log program
+   scoping blind next time.
+8. [~] **Console deploy** — `deploy-firebase.yml` now also builds the
+   console and includes `hosting` in the deploy target, so every backend
+   deploy keeps `nirog-bhumi-app.web.app` in sync automatically (it was
+   previously a separate, easy-to-forget manual step). Not fully closed:
+   no way to independently browse/verify the Vercel URL from this sandbox
+   (no general web access) - owner should confirm that URL separately, or
+   rely on the Firebase Hosting URL going forward since it's now part of
+   the automated pipeline.
+9. [x] **Smart reminder timing** — a new `DAILY_CHECKIN` reminder type
+   (in the existing Notification Settings toggle list, no new UI needed).
+   `checkinHourHint` on `users/{uid}` is an exponential moving average
+   updated on every genuine check-in completion (not an empty skip-
+   through); `ReminderScheduler.scheduleSmart()` aligns the on-device
+   WorkManager periodic request's first fire ~15 minutes before that
+   hour, falling back to a safe elapsed-24h schedule until the hint
+   loads or if the member has none yet.
+10. [ ] **Care+ community features** — @mentions, pin-a-message, photo
+    sharing, voice notes in chat.
+11. [ ] **Consultations** — build a real non-payment booking flow
+    end to end (replaces the inert scaffold from item 5).
+12. [ ] **Health data intelligence** — basic trend correlation insight.
+13. [ ] **Shareable Health File link** (signed URL / QR).
+14. [ ] **Retention/habit formation** — streak number, first-week
+    checklist, milestone moments.
+15. [ ] **Admin console utility** — announcement templates, bulk "message
+    all quiet members," CSV roster export.

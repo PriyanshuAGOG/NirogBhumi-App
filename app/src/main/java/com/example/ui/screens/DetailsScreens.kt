@@ -33,6 +33,12 @@ import com.nirogbhumi.app.health.HealthConnectManager
 import com.nirogbhumi.app.health.HealthConnectStatus
 import com.nirogbhumi.app.ui.NirogState
 import com.nirogbhumi.app.ui.SugarLog
+import com.nirogbhumi.app.ui.components.NirogCard
+import com.nirogbhumi.app.ui.components.RowCard
+import com.nirogbhumi.app.ui.theme.NirogColor
+import com.nirogbhumi.app.ui.theme.NirogRadius
+import com.nirogbhumi.app.ui.theme.NirogSpace
+import com.nirogbhumi.app.ui.theme.NirogType
 import kotlinx.coroutines.launch
 
 // Screen 1: Sugar Metric detailed deepdive
@@ -2247,6 +2253,16 @@ fun NotificationSettingsScreen(state: NirogState) {
                     if (checked) ensureNotificationPermission()
                     com.nirogbhumi.app.notifications.ReminderScheduler.setEnabled(context, type, checked)
                     reminderStates = reminderStates + (type to checked)
+                    // setEnabled() already schedules a safe elapsed-interval
+                    // fallback; upgrade it to the learned time once the hint
+                    // loads (fire-and-forget - the fallback already covers
+                    // the case where this fails or the member has no hint yet).
+                    if (checked && type == com.nirogbhumi.app.notifications.ReminderType.DAILY_CHECKIN) {
+                        state.repository.peekCheckinHourHint { result ->
+                            val hint = (result as? CloudResult.Success)?.value
+                            com.nirogbhumi.app.notifications.ReminderScheduler.scheduleSmart(context, hint)
+                        }
+                    }
                 }
             }
         }
@@ -2502,61 +2518,65 @@ fun AnnouncementsScreen(state: NirogState) {
                 is com.nirogbhumi.app.data.CloudResult.Failure -> emptyList()
             }
         }
+        // Best-effort: opening this screen is "read" for the unread badge on
+        // Chat Hub, whether or not the member is enrolled (fails silently
+        // for non-members - they have no roster doc to mark anyway).
+        state.repository.markProgramRead(state.activeProgramId, "lastReadAnnouncementsAt") {}
         onDispose { subscription.cancel() }
     }
 
-    Column(modifier = Modifier.fillMaxSize().background(Color(0xFFF8F6EF))) {
+    Column(modifier = Modifier.fillMaxSize().background(NirogColor.surface)) {
         DetailScreenHeader(
             "Announcements",
             onBack = { state.currentScreen = "dashboard" },
             trailing = {
                 if (state.isAdmin) {
                     IconButton(onClick = { showComposer = true }) {
-                        Icon(Icons.Filled.Add, contentDescription = "New announcement", tint = Color(0xFF1B3221))
+                        Icon(Icons.Filled.Add, contentDescription = "New announcement", tint = NirogColor.forest)
                     }
                 }
             }
         )
-        Column(modifier = Modifier.fillMaxSize().weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)) {
+        Text(
+            "Updates from your coach · every member is notified",
+            style = NirogType.caption, color = NirogColor.inkMuted,
+            modifier = Modifier.padding(horizontal = NirogSpace.lg)
+        )
+        Spacer(Modifier.height(NirogSpace.sm))
+        Column(modifier = Modifier.fillMaxSize().weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = NirogSpace.lg)) {
             when {
                 records == null -> Row(modifier = Modifier.padding(vertical = 24.dp), verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Color(0xFF9CB79F))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Loading...", fontSize = 13.sp, color = Color(0xFF697169))
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = NirogColor.forestSoft)
+                    Spacer(modifier = Modifier.width(NirogSpace.sm))
+                    Text("Loading...", style = NirogType.secondary, color = NirogColor.inkSecondary)
                 }
                 records!!.isEmpty() -> EmptyStateCard(Icons.Filled.Campaign, "No announcements yet. Updates from the Nirog Bhumi team will show up here.")
-                else -> Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                else -> Column(verticalArrangement = Arrangement.spacedBy(NirogSpace.md)) {
                     records!!.forEach { record ->
                         val timestamp = (record.values["createdAt"] as? com.google.firebase.Timestamp)?.toDate()
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = CardDefaults.cardColors(containerColor = Color.White),
-                            shape = RoundedCornerShape(16.dp),
-                            border = BorderStroke(0.5.dp, Color(0xFFD8D0C0))
-                        ) {
-                            Column(modifier = Modifier.padding(16.dp)) {
-                                Text(record.values["title"]?.toString() ?: "Announcement", fontWeight = FontWeight.Bold, color = Color(0xFF1B3221), fontSize = 15.sp)
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(record.values["body"]?.toString().orEmpty(), fontSize = 13.sp, color = Color(0xFF434842), lineHeight = 18.sp)
-                                if (timestamp != null) {
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    Text(relativeTimeLabel(timestamp), fontSize = 11.sp, color = Color(0xFF9CB79F))
-                                }
+                        NirogCard {
+                            Text(record.values["title"]?.toString() ?: "Announcement", style = NirogType.bodyStrong, color = NirogColor.inkPrimary)
+                            Spacer(modifier = Modifier.height(NirogSpace.xs))
+                            Text(record.values["body"]?.toString().orEmpty(), style = NirogType.body, color = NirogColor.inkSecondary)
+                            if (timestamp != null) {
+                                Spacer(modifier = Modifier.height(NirogSpace.sm))
+                                Text(relativeTimeLabel(timestamp), style = NirogType.overline, color = NirogColor.inkMuted)
                             }
                         }
                     }
                 }
             }
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.height(NirogSpace.xxl))
         }
     }
 
     if (showComposer) {
         AlertDialog(
             onDismissRequest = { if (!posting) showComposer = false },
-            title = { Text("New Announcement", fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221)) },
+            title = { Text("New Announcement", style = NirogType.cardTitle, color = NirogColor.inkPrimary) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(NirogSpace.md)) {
+                    Text("Every member of this program gets a push notification when you post.", style = NirogType.caption, color = NirogColor.inkMuted)
                     OutlinedTextField(value = composeTitle, onValueChange = { composeTitle = it }, label = { Text("Title") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                     OutlinedTextField(value = composeBody, onValueChange = { composeBody = it }, label = { Text("Message") }, minLines = 3, modifier = Modifier.fillMaxWidth())
                 }
@@ -2573,13 +2593,15 @@ fun AnnouncementsScreen(state: NirogState) {
                             } else state.cloudMessage = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
                         }
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF314936))
-                ) { Text(if (posting) "Posting..." else "Post", color = Color.White) }
+                    colors = ButtonDefaults.buttonColors(containerColor = NirogColor.forest)
+                ) { Text(if (posting) "Posting..." else "Post", color = NirogColor.onAccent) }
             },
-            dismissButton = { TextButton(onClick = { showComposer = false }, enabled = !posting) { Text("Cancel", color = Color(0xFF737972)) } }
+            dismissButton = { TextButton(onClick = { showComposer = false }, enabled = !posting) { Text("Cancel", color = NirogColor.inkSecondary) } }
         )
     }
 }
+
+private val QUICK_REACTIONS = listOf("👍", "❤️", "😂", "🙏")
 
 // Care+ community chat - one shared room per program, not one global room, so
 // conversation stays relevant to the program a member actually joined.
@@ -2589,10 +2611,13 @@ fun ProgramChatScreen(state: NirogState) {
     var records by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>?>(null) }
     var messageInput by remember { mutableStateOf("") }
     var sending by remember { mutableStateOf(false) }
+    var actionTarget by remember { mutableStateOf<com.nirogbhumi.app.data.CloudDocument?>(null) }
+    var replyTarget by remember { mutableStateOf<com.nirogbhumi.app.data.CloudDocument?>(null) }
     var reportTarget by remember { mutableStateOf<com.nirogbhumi.app.data.CloudDocument?>(null) }
     var reporting by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
+    val myUid = state.repository.userId
 
     DisposableEffect(state.activeProgramId) {
         val subscription = state.repository.listenProgramChat(state.activeProgramId) { result ->
@@ -2601,56 +2626,135 @@ fun ProgramChatScreen(state: NirogState) {
                 is com.nirogbhumi.app.data.CloudResult.Failure -> emptyList()
             }
         }
+        state.repository.markProgramRead(state.activeProgramId, "lastReadGeneralAt") {}
         onDispose { subscription.cancel() }
     }
 
-    Column(modifier = Modifier.fillMaxSize().background(Color(0xFFF8F6EF))) {
-        DetailScreenHeader("Community Chat", onBack = { state.currentScreen = "dashboard" })
+    Column(modifier = Modifier.fillMaxSize().background(NirogColor.surface)) {
+        DetailScreenHeader("General", onBack = { state.currentScreen = "dashboard" })
         Text(
-            "${state.activeProgramName.ifBlank { "Your program" }} · long-press a message to report it",
-            fontSize = 12.sp, color = Color(0xFF697169),
-            modifier = Modifier.padding(horizontal = 20.dp)
+            "${state.activeProgramName.ifBlank { "Your program" }} · long-press a message for options",
+            style = NirogType.caption, color = NirogColor.inkMuted,
+            modifier = Modifier.padding(horizontal = NirogSpace.lg)
         )
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(NirogSpace.sm))
 
         when {
             records == null -> Box(modifier = Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = Color(0xFF9CB79F))
+                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = NirogColor.forestSoft)
             }
-            records!!.isEmpty() -> Box(modifier = Modifier.fillMaxWidth().weight(1f).padding(horizontal = 20.dp), contentAlignment = Alignment.Center) {
+            records!!.isEmpty() -> Box(modifier = Modifier.fillMaxWidth().weight(1f).padding(horizontal = NirogSpace.lg), contentAlignment = Alignment.Center) {
                 EmptyStateCard(Icons.Filled.Forum, "No messages yet. Say hello to your program community!")
             }
             else -> LazyColumn(
                 state = listState,
-                modifier = Modifier.fillMaxWidth().weight(1f).padding(horizontal = 20.dp),
+                modifier = Modifier.fillMaxWidth().weight(1f).padding(horizontal = NirogSpace.lg),
                 reverseLayout = true,
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.spacedBy(NirogSpace.sm)
             ) {
-                items(records!!) { record ->
-                    val isMine = record.values["userId"] == state.repository.userId
+                items(records!!, key = { it.id }) { record ->
+                    val isMine = record.values["userId"] == myUid
                     val senderName = record.values["senderName"]?.toString() ?: "Member"
                     val text = record.values["text"]?.toString().orEmpty()
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = if (isMine) Arrangement.End else Arrangement.Start) {
+                    @Suppress("UNCHECKED_CAST")
+                    val replyTo = record.values["replyTo"] as? Map<String, Any?>
+                    @Suppress("UNCHECKED_CAST")
+                    val reactions = (record.values["reactions"] as? Map<String, Any?>).orEmpty()
+
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = if (isMine) Alignment.End else Alignment.Start,
+                    ) {
                         Column(
                             modifier = Modifier
                                 .widthIn(max = 280.dp)
-                                .background(if (isMine) Color(0xFF314936) else Color.White, RoundedCornerShape(16.dp))
-                                .then(if (isMine) Modifier else Modifier.border(0.5.dp, Color(0xFFD8D0C0), RoundedCornerShape(16.dp)))
-                                // Long-press another member's message to report it. Own
-                                // messages aren't reportable (you can't report yourself).
-                                .then(if (isMine) Modifier else Modifier.combinedClickable(onClick = {}, onLongClick = { reportTarget = record }))
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(if (isMine) NirogColor.forest else NirogColor.surfaceCard)
+                                .then(if (isMine) Modifier else Modifier.border(0.5.dp, NirogColor.surfaceSunken, RoundedCornerShape(16.dp)))
+                                .combinedClickable(onClick = {}, onLongClick = { actionTarget = record })
                                 .padding(horizontal = 14.dp, vertical = 10.dp)
                         ) {
-                            if (!isMine) Text(senderName, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF426820))
-                            Text(text, fontSize = 14.sp, color = if (isMine) Color.White else Color(0xFF1B3221))
+                            if (!isMine) Text(senderName, style = NirogType.overline, color = NirogColor.forestSoft)
+                            if (replyTo != null) {
+                                Column(
+                                    modifier = Modifier
+                                        .padding(top = 4.dp, bottom = 6.dp)
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(
+                                            if (isMine) Color.White.copy(alpha = 0.12f) else NirogColor.surfaceSunken
+                                        )
+                                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                                ) {
+                                    Text(
+                                        replyTo["sender"]?.toString() ?: "Member",
+                                        style = NirogType.overline,
+                                        color = if (isMine) NirogColor.goldSoft else NirogColor.gold,
+                                    )
+                                    Text(
+                                        replyTo["text"]?.toString().orEmpty(),
+                                        style = NirogType.caption,
+                                        color = if (isMine) NirogColor.onAccent.copy(alpha = 0.85f) else NirogColor.inkSecondary,
+                                        maxLines = 2,
+                                    )
+                                }
+                            }
+                            Text(text, style = NirogType.body, color = if (isMine) NirogColor.onAccent else NirogColor.inkPrimary)
+                        }
+
+                        if (reactions.isNotEmpty()) {
+                            Row(
+                                modifier = Modifier.padding(top = 4.dp),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                reactions.forEach { (emoji, uidsAny) ->
+                                    val uids = (uidsAny as? List<*>)?.mapNotNull { it as? String }.orEmpty()
+                                    if (uids.isEmpty()) return@forEach
+                                    val mine = myUid != null && myUid in uids
+                                    Row(
+                                        modifier = Modifier
+                                            .clip(NirogRadius.pillShape)
+                                            .background(if (mine) NirogColor.goldSoft else NirogColor.surfaceSunken)
+                                            .clickable {
+                                                state.repository.toggleChatReaction(record.id, emoji, add = !mine) {}
+                                            }
+                                            .padding(horizontal = 8.dp, vertical = 3.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Text(emoji, style = NirogType.caption)
+                                        Spacer(Modifier.width(3.dp))
+                                        Text("${uids.size}", style = NirogType.overline, color = NirogColor.inkSecondary)
+                                    }
+                                }
+                            }
                         }
                     }
                 }
             }
         }
 
+        replyTarget?.let { target ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = NirogSpace.lg, vertical = NirogSpace.xs)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(NirogColor.surfaceSunken)
+                    .padding(horizontal = NirogSpace.md, vertical = NirogSpace.sm),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Replying to ${target.values["senderName"]?.toString() ?: "Member"}", style = NirogType.overline, color = NirogColor.forest)
+                    Text(target.values["text"]?.toString().orEmpty(), style = NirogType.caption, color = NirogColor.inkSecondary, maxLines = 1)
+                }
+                IconButton(onClick = { replyTarget = null }) {
+                    Icon(Icons.Filled.Close, contentDescription = "Cancel reply", tint = NirogColor.inkMuted, modifier = Modifier.size(18.dp))
+                }
+            }
+        }
+
         Row(
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            modifier = Modifier.fillMaxWidth().padding(NirogSpace.lg),
             verticalAlignment = Alignment.CenterVertically
         ) {
             OutlinedTextField(
@@ -2658,41 +2762,100 @@ fun ProgramChatScreen(state: NirogState) {
                 onValueChange = { messageInput = it },
                 modifier = Modifier.weight(1f),
                 placeholder = { Text("Message your program...") },
-                shape = RoundedCornerShape(24.dp),
+                shape = NirogRadius.pillShape,
                 singleLine = true,
-                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFF314936), unfocusedBorderColor = Color(0xFFD8D0C0), focusedContainerColor = Color.White, unfocusedContainerColor = Color.White)
+                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = NirogColor.forest, unfocusedBorderColor = NirogColor.surfaceSunken, focusedContainerColor = NirogColor.surfaceCard, unfocusedContainerColor = NirogColor.surfaceCard)
             )
-            Spacer(modifier = Modifier.width(8.dp))
+            Spacer(modifier = Modifier.width(NirogSpace.sm))
             IconButton(
                 onClick = {
                     val text = messageInput.trim()
                     if (text.isBlank() || sending) return@IconButton
                     sending = true
-                    state.repository.sendProgramChatMessage(state.activeProgramId, text, state.profileName.ifBlank { "Member" }) { result ->
+                    val reply = replyTarget
+                    state.repository.sendProgramChatMessage(
+                        programId = state.activeProgramId,
+                        text = text,
+                        senderName = state.profileName.ifBlank { "Member" },
+                        replyToId = reply?.id,
+                        replyToSender = reply?.values?.get("senderName")?.toString(),
+                        replyToText = reply?.values?.get("text")?.toString(),
+                    ) { result ->
                         sending = false
                         if (result is com.nirogbhumi.app.data.CloudResult.Success) {
                             messageInput = ""
+                            replyTarget = null
                             coroutineScope.launch { listState.animateScrollToItem(0) }
                         } else state.cloudMessage = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
                     }
                 },
-                modifier = Modifier.size(48.dp).background(Color(0xFF314936), CircleShape)
+                modifier = Modifier.size(48.dp).background(NirogColor.forest, CircleShape)
             ) {
-                Icon(Icons.Filled.Send, contentDescription = "Send", tint = Color.White, modifier = Modifier.size(20.dp))
+                Icon(Icons.Filled.Send, contentDescription = "Send", tint = NirogColor.onAccent, modifier = Modifier.size(20.dp))
             }
         }
+    }
+
+    actionTarget?.let { target ->
+        val isMine = target.values["userId"] == myUid
+        AlertDialog(
+            onDismissRequest = { actionTarget = null },
+            title = { Text("Message options", style = NirogType.cardTitle, color = NirogColor.inkPrimary) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(NirogSpace.md)) {
+                    Text("React", style = NirogType.overline, color = NirogColor.inkMuted)
+                    Row(horizontalArrangement = Arrangement.spacedBy(NirogSpace.md)) {
+                        @Suppress("UNCHECKED_CAST")
+                        val reactions = (target.values["reactions"] as? Map<String, Any?>).orEmpty()
+                        QUICK_REACTIONS.forEach { emoji ->
+                            val already = ((reactions[emoji] as? List<*>)?.contains(myUid)) == true
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .background(if (already) NirogColor.goldSoft else NirogColor.surfaceSunken)
+                                    .clickable {
+                                        state.repository.toggleChatReaction(target.id, emoji, add = !already) {}
+                                        actionTarget = null
+                                    },
+                                contentAlignment = Alignment.Center,
+                            ) { Text(emoji, style = NirogType.cardTitle) }
+                        }
+                    }
+                    RowCard(
+                        title = "Reply",
+                        leading = {
+                            Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {
+                                Text("↩", style = NirogType.cardTitle, color = NirogColor.forest)
+                            }
+                        },
+                        onClick = { replyTarget = target; actionTarget = null },
+                    )
+                    if (!isMine) {
+                        RowCard(
+                            title = "Report",
+                            leading = { Icon(Icons.Filled.Flag, contentDescription = null, tint = NirogColor.statusCritical) },
+                            onClick = { reportTarget = target; actionTarget = null },
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { actionTarget = null }) { Text("Close", color = NirogColor.inkSecondary) }
+            },
+        )
     }
 
     reportTarget?.let { target ->
         AlertDialog(
             onDismissRequest = { if (!reporting) reportTarget = null },
-            icon = { Icon(Icons.Filled.Flag, contentDescription = null, tint = Color(0xFF8B3E36)) },
-            title = { Text("Report message?", fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221)) },
-            text = { Text("This message will be sent to the Nirog Bhumi team to review. Thanks for helping keep the community safe.", fontSize = 14.sp, color = Color(0xFF434842)) },
+            icon = { Icon(Icons.Filled.Flag, contentDescription = null, tint = NirogColor.statusCritical) },
+            title = { Text("Report message?", style = NirogType.cardTitle, color = NirogColor.inkPrimary) },
+            text = { Text("This message will be sent to the Nirog Bhumi team to review. Thanks for helping keep the community safe.", style = NirogType.body, color = NirogColor.inkSecondary) },
             confirmButton = {
                 Button(
                     enabled = !reporting,
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8B3E36)),
+                    colors = ButtonDefaults.buttonColors(containerColor = NirogColor.statusCritical),
                     onClick = {
                         reporting = true
                         state.repository.reportChatMessage(
@@ -2706,9 +2869,9 @@ fun ProgramChatScreen(state: NirogState) {
                             state.cloudMessage = if (result is com.nirogbhumi.app.data.CloudResult.Success) "Thanks — this message has been reported." else (result as com.nirogbhumi.app.data.CloudResult.Failure).message
                         }
                     }
-                ) { Text(if (reporting) "Reporting..." else "Report", color = Color.White) }
+                ) { Text(if (reporting) "Reporting..." else "Report", color = NirogColor.onAccent) }
             },
-            dismissButton = { TextButton(onClick = { reportTarget = null }, enabled = !reporting) { Text("Cancel", color = Color(0xFF737972)) } }
+            dismissButton = { TextButton(onClick = { reportTarget = null }, enabled = !reporting) { Text("Cancel", color = NirogColor.inkSecondary) } }
         )
     }
 }

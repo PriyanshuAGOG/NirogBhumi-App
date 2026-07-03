@@ -23,11 +23,13 @@ export type LogKind =
   | 'labReports'
   | 'checklistLogs'
   | 'dailyCheckins'
+  | 'medicationLogs'
 
 export const LOG_COLLECTIONS: { kind: LogKind; label: string; icon: string }[] = [
   { kind: 'glucoseReadings', label: 'Blood sugar', icon: '🩸' },
   { kind: 'bpReadings', label: 'Blood pressure', icon: '❤️' },
   { kind: 'weightLogs', label: 'Weight', icon: '⚖️' },
+  { kind: 'medicationLogs', label: 'Medication', icon: '💊' },
   { kind: 'sleepLogs', label: 'Sleep', icon: '🌙' },
   { kind: 'walkLogs', label: 'Activity', icon: '🚶' },
   { kind: 'labReports', label: 'Lab report', icon: '🧪' },
@@ -71,12 +73,17 @@ export function summarizeLog(entry: LogEntry): string {
       return typeof d.item === 'string' ? d.item : typeof d.title === 'string' ? d.title : 'Ritual logged'
     case 'dailyCheckins':
       return 'Completed daily check-in'
+    case 'medicationLogs': {
+      const name = typeof d.name === 'string' && d.name ? ` · ${d.name}` : ''
+      return `${d.taken === false ? 'Missed' : 'Taken'}${name}`
+    }
     default:
       return '—'
   }
 }
 
-/** True if this entry looks like it needs a coach's eyes (critical vitals). */
+/** True if this entry looks like it needs a coach's eyes (critical vitals, or a missed dose). */
 export function isAlertLog(entry: LogEntry): boolean {
+  if (entry.kind === 'medicationLogs') return entry.data.taken === false
   return entry.data.status === 'critical'
 }

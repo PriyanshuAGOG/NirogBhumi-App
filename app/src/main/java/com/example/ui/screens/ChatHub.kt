@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.Icons
@@ -19,11 +20,18 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import com.google.firebase.Timestamp
+import com.nirogbhumi.app.data.CloudResult
 import com.nirogbhumi.app.ui.NirogState
 import com.nirogbhumi.app.ui.components.PrimaryButton
 import com.nirogbhumi.app.ui.components.RowCard
@@ -42,6 +50,29 @@ import com.nirogbhumi.app.ui.theme.NirogType
  */
 @Composable
 fun ChatHubScreen(state: NirogState) {
+  // One-shot unread check (not a live listener - a badge only needs to be
+  // current when this menu is opened): compare the newest message/
+  // announcement timestamp against the caller's own read markers.
+  var unreadGeneral by remember { mutableStateOf(false) }
+  var unreadAnnouncements by remember { mutableStateOf(false) }
+  LaunchedEffect(state.activeProgramId, state.isProgramActive) {
+    val programId = state.activeProgramId
+    if (!state.isProgramActive || programId.isBlank()) return@LaunchedEffect
+    state.repository.peekMembership(programId) { membershipResult ->
+      val membership = (membershipResult as? CloudResult.Success)?.value
+      val lastReadGeneral = (membership?.values?.get("lastReadGeneralAt") as? Timestamp)?.toDate()?.time
+      val lastReadAnnouncements = (membership?.values?.get("lastReadAnnouncementsAt") as? Timestamp)?.toDate()?.time
+      state.repository.peekLatestActivity(programId, "programChatMessages") { r ->
+        val latest = (r as? CloudResult.Success)?.value
+        unreadGeneral = latest != null && (lastReadGeneral == null || latest > lastReadGeneral)
+      }
+      state.repository.peekLatestActivity(programId, "announcements") { r ->
+        val latest = (r as? CloudResult.Success)?.value
+        unreadAnnouncements = latest != null && (lastReadAnnouncements == null || latest > lastReadAnnouncements)
+      }
+    }
+  }
+
   Column(
     Modifier
       .fillMaxSize()
@@ -108,6 +139,7 @@ fun ChatHubScreen(state: NirogState) {
         tintBg = NirogColor.statusAttentionBg,
         title = "Announcements",
         subtitle = "Updates from your coach · read-only",
+        unread = unreadAnnouncements,
         onClick = { state.currentScreen = "announcements" },
       )
       Spacer(Modifier.size(NirogSpace.md))
@@ -117,6 +149,7 @@ fun ChatHubScreen(state: NirogState) {
         tintBg = NirogColor.statusInRangeBg,
         title = "General",
         subtitle = "Chat with everyone in your batch",
+        unread = unreadGeneral,
         onClick = { state.currentScreen = "program_chat" },
       )
 
@@ -137,6 +170,7 @@ private fun RoomRow(
   tintBg: Color,
   title: String,
   subtitle: String,
+  unread: Boolean = false,
   onClick: () -> Unit,
 ) {
   RowCard(
@@ -144,14 +178,25 @@ private fun RoomRow(
     subtitle = subtitle,
     onClick = onClick,
     leading = {
-      Box(
-        Modifier
-          .size(44.dp)
-          .clip(RoundedCornerShape(NirogSpace.md))
-          .background(tintBg),
-        contentAlignment = Alignment.Center,
-      ) {
-        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
+      Box(Modifier.size(44.dp)) {
+        Box(
+          Modifier
+            .fillMaxSize()
+            .clip(RoundedCornerShape(NirogSpace.md))
+            .background(tintBg),
+          contentAlignment = Alignment.Center,
+        ) {
+          Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
+        }
+        if (unread) {
+          Box(
+            Modifier
+              .align(Alignment.TopEnd)
+              .size(10.dp)
+              .clip(CircleShape)
+              .background(NirogColor.terracotta),
+          )
+        }
       }
     },
   )

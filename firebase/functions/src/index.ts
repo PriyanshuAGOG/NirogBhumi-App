@@ -18,6 +18,11 @@ export const onUserCreate = functions.region(region).auth.user().onCreate(async 
 });
 
 function glucoseStatus(value: number, type: string) {
+  // A missing/non-numeric value must never resolve to the reassuring
+  // default - every comparison against NaN is false, so without this guard
+  // a malformed reading would silently read as 'in_range' and skip the
+  // critical-alert path entirely.
+  if (!Number.isFinite(value)) return 'invalid';
   if (value >= 300 || value <= 54) return 'critical';
   if ((type === 'fasting' && value > 125) || (type !== 'fasting' && value > 180)) return 'needs_attention';
   return 'in_range';
@@ -53,17 +58,53 @@ export const onGlucoseReadingCreate = onDocumentCreated({ document: 'glucoseRead
   const snap = event.data; if (!snap) return;
   const data = snap.data(); const value = Number(data.value); const status = glucoseStatus(value, String(data.readingType));
   await snap.ref.set({ status, categorizedAt: FieldValue.serverTimestamp() }, { merge: true });
-  await db.doc(`users/${data.userId}`).set({ latestMetrics: { fastingSugar: value, glucoseStatus: status, glucoseUpdatedAt: FieldValue.serverTimestamp() }, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
-  if (status === 'critical') await db.collection('notifications').add({ userId: data.userId, profileId: data.profileId, title: 'Please review this reading', body: 'Repeat the measurement and contact your doctor promptly, especially if you feel unwell.', type: 'reminder', status: 'scheduled', scheduledFor: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp() });
+  // Don't overwrite the user's last-known-good reading with a NaN from a
+  // malformed entry - only mirror it forward once it's actually a number.
+  if (Number.isFinite(value)) {
+    await db.doc(`users/${data.userId}`).set({ latestMetrics: { fastingSugar: value, glucoseStatus: status, glucoseUpdatedAt: FieldValue.serverTimestamp() }, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  }
+  // Critical alerts use their own notification type so sendPendingNotifications()
+  // never defers them for quiet hours or the daily reminder cap - see there.
+  if (status === 'critical') await db.collection('notifications').add({ userId: data.userId, profileId: data.profileId, title: 'Please review this reading', body: 'Repeat the measurement and contact your doctor promptly, especially if you feel unwell.', type: 'critical_alert', status: 'scheduled', scheduledFor: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp() });
   await recordBatchCheckin(String(data.userId));
 });
 
 export const onBPReadingCreate = onDocumentCreated({ document: 'bpReadings/{readingId}', region }, async event => {
   const snap = event.data; if (!snap) return; const d = snap.data();
-  const critical = Number(d.systolic) >= 180 || Number(d.diastolic) >= 120;
-  await snap.ref.set({ status: critical ? 'critical' : 'recorded', categorizedAt: FieldValue.serverTimestamp() }, { merge: true });
-  if (critical) await db.collection('notifications').add({ userId: d.userId, profileId: d.profileId, title: 'Please review your BP reading', body: 'Repeat the measurement and seek urgent medical advice, especially if you feel unwell.', type: 'reminder', status: 'scheduled', scheduledFor: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp() });
+  const systolic = Number(d.systolic); const diastolic = Number(d.diastolic);
+  const valid = Number.isFinite(systolic) && Number.isFinite(diastolic);
+  const critical = valid && (systolic >= 180 || diastolic >= 120);
+  await snap.ref.set({ status: !valid ? 'invalid' : critical ? 'critical' : 'recorded', categorizedAt: FieldValue.serverTimestamp() }, { merge: true });
+  if (critical) await db.collection('notifications').add({ userId: d.userId, profileId: d.profileId, title: 'Please review your BP reading', body: 'Repeat the measurement and seek urgent medical advice, especially if you feel unwell.', type: 'critical_alert', status: 'scheduled', scheduledFor: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp() });
   await recordBatchCheckin(String(d.userId));
+});
+
+// Fans a new coach/admin announcement out to every member of that program as
+// a push notification. type:'announcement' (like 'critical_alert') bypasses
+// sendPendingNotifications()'s quiet-hours defer and daily cap, since an
+// announcement is a deliberate one-off staff broadcast, not a routine
+// reminder - a member should never miss "class moved to 6pm" because it
+// landed during quiet hours or after their 3rd reminder that day.
+export const onAnnouncementCreate = onDocumentCreated({ document: 'announcements/{id}', region }, async event => {
+  const snap = event.data; if (!snap) return;
+  const data = snap.data();
+  const programId = String(data.programId ?? ''); if (!programId) return;
+  const authorId = String(data.authorId ?? '');
+  const title = String(data.title ?? 'New announcement').slice(0, 120);
+  const body = String(data.body ?? '').slice(0, 200);
+  const members = await db.collection('programMembers').where('programId', '==', programId).get();
+  for (let offset = 0; offset < members.docs.length; offset += 400) {
+    const batch = db.batch();
+    members.docs.slice(offset, offset + 400).forEach(member => {
+      const uid = String(member.get('uid') ?? '');
+      if (!uid || uid === authorId) return; // the author doesn't need a push about their own post
+      batch.set(db.collection('notifications').doc(), {
+        userId: uid, profileId: null, title, body, type: 'announcement',
+        status: 'scheduled', scheduledFor: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp(),
+      });
+    });
+    await batch.commit();
+  }
 });
 
 // Daily maintenance job. Runs once a day; on Mondays it also builds weekly
@@ -128,14 +169,65 @@ export const sendPendingNotifications = onSchedule({ schedule: 'every 15 minutes
     try {
       await getMessaging().send({ token, notification: { title: notification.title, body: notification.body }, data: { type: String(notification.type ?? 'reminder'), notificationId: doc.id } });
       await doc.ref.set({ status: 'sent', sentAt: FieldValue.serverTimestamp() }, { merge: true });
-    } catch (error) { await doc.ref.set({ status: 'failed', failureReason: String(error), updatedAt: FieldValue.serverTimestamp() }, { merge: true }); }
+    } catch (error) { console.error('FCM send failed', doc.id, error); await doc.ref.set({ status: 'failed', failureReason: 'send_failed', updatedAt: FieldValue.serverTimestamp() }, { merge: true }); }
   }
 });
 
 function requireUser(request: { auth?: { uid: string; token: Record<string, unknown> } }) { if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in required'); return request.auth; }
 
+// Redeems a Care+ program invite code. This used to be a client-side
+// Firestore query + self-scoped write (programs.code was publicly readable,
+// and users/{uid}.programActive/activeProgramId were owner-writable) - that
+// let any signed-in user list every program's code and self-enroll without
+// ever redeeming one, and forge their own programMembers roster stats. Now
+// the lookup and both writes happen here, under the Admin SDK, so
+// firestore.rules can lock 'programs' reads to staff() and make
+// 'programMembers' writes staff()-only.
+export const redeemProgramCode = onCall({ region }, async request => {
+  const auth = requireUser(request);
+  const code = String(request.data?.code ?? '').trim().toUpperCase();
+  if (!code) throw new HttpsError('invalid-argument', 'A program code is required');
+
+  const matches = await db.collection('programs').where('code', '==', code).limit(1).get();
+  const programDoc = matches.docs[0];
+  if (!programDoc) throw new HttpsError('not-found', "That program code wasn't recognized");
+
+  const programId = programDoc.id;
+  const programName = String(programDoc.get('name') ?? 'Nirog Bhumi Program');
+  const durationDays = Math.round(Number(programDoc.get('durationDays') ?? 0)) || 0;
+
+  const userDoc = await db.doc(`users/${auth.uid}`).get();
+  const memberName = String(userDoc.get('fullName') ?? '').trim() || 'Member';
+
+  // Enrollment and the roster entry the coach console reads from must land
+  // together, or the console shows a phantom program with no members.
+  const batch = db.batch();
+  batch.set(db.doc(`users/${auth.uid}`), {
+    programActive: true,
+    activeProgramId: programId,
+    activeProgramName: programName,
+    programDurationDays: durationDays,
+    programStartedAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+  }, { merge: true });
+  batch.set(db.doc(`programMembers/${programId}_${auth.uid}`), {
+    programId, uid: auth.uid, name: memberName, status: 'active', joinedAt: FieldValue.serverTimestamp(),
+  }, { merge: true });
+  await batch.commit();
+
+  return { activeProgramId: programId, activeProgramName: programName, programDurationDays: durationDays, programActive: true };
+});
+
 export const requestDataExport = onCall({ region }, async request => {
-  const auth = requireUser(request); await db.collection('dataExportRequests').add({ userId: auth.uid, status: 'requested', createdAt: FieldValue.serverTimestamp() }); return { accepted: true };
+  const auth = requireUser(request);
+  // Each request triggers exportUserData, which reads ~19 collections and
+  // writes a Storage file - unthrottled, a user could loop this call to
+  // burn reads/writes/invocations at will. One export per hour is plenty
+  // for the legitimate "download my data" use case.
+  const cooldown = Timestamp.fromMillis(Date.now() - 60 * 60000);
+  const recent = await db.collection('dataExportRequests').where('userId', '==', auth.uid).where('createdAt', '>=', cooldown).limit(1).get();
+  if (!recent.empty) throw new HttpsError('resource-exhausted', 'You can request one export per hour - please try again later.');
+  await db.collection('dataExportRequests').add({ userId: auth.uid, status: 'requested', createdAt: FieldValue.serverTimestamp() }); return { accepted: true };
 });
 export const requestAccountDeletion = onCall({ region }, async request => {
   const auth = requireUser(request); await db.collection('deletionRequests').add({ userId: auth.uid, status: 'requested', createdAt: FieldValue.serverTimestamp() }); return { accepted: true };
@@ -144,7 +236,7 @@ export const requestAccountDeletion = onCall({ region }, async request => {
 export const exportUserData = onDocumentCreated({ document: 'dataExportRequests/{requestId}', region }, async event => {
   const request = event.data; if (!request) return; const uid = request.get('userId'); if (!uid) return;
   await request.ref.set({ status: 'processing', updatedAt: FieldValue.serverTimestamp() }, { merge: true });
-  const names = ['users','profiles','glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','labReports','dailyCheckins','dailyActions','weeklyReports','sugarStories','consultations','userPrograms','programPlans','checklistLogs','expertNotes','notifications','deviceConnections'];
+  const names = ['users','profiles','glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','labReports','dailyCheckins','dailyActions','weeklyReports','sugarStories','consultations','userPrograms','programPlans','checklistLogs','expertNotes','notifications','deviceConnections','medicationLogs'];
   const exported: Record<string, unknown> = { exportedAt: new Date().toISOString(), formatVersion: 1 };
   for (const name of names) {
     if (name === 'users') { const user = await db.doc(`users/${uid}`).get(); exported.users = user.exists ? [{ id: user.id, ...user.data() }] : []; continue; }
@@ -156,9 +248,17 @@ export const exportUserData = onDocumentCreated({ document: 'dataExportRequests/
   await db.collection('notifications').add({ userId: uid, profileId: null, title: 'Your data export is ready', body: 'Open Privacy and Data Controls to access your export.', type: 'report', status: 'scheduled', scheduledFor: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp() });
 });
 export const createAuditLog = onCall({ region }, async request => {
-  const auth = requireUser(request); const roles = Array.isArray(auth.token.roles) ? auth.token.roles : [];
-  if (auth.token.role !== 'admin' && auth.token.role !== 'expert' && !roles.includes('admin')) throw new HttpsError('permission-denied', 'Staff role required');
-  const data = request.data as Record<string, unknown>; await db.collection('auditLogs').add({ actorId: auth.uid, actorRole: auth.token.role ?? 'staff', action: data.action, entityType: data.entityType, entityId: data.entityId, metadata: data.metadata ?? {}, createdAt: FieldValue.serverTimestamp() }); return { logged: true };
+  const auth = requireUser(request);
+  if (auth.token.role !== 'admin' && auth.token.role !== 'super_admin') throw new HttpsError('permission-denied', 'Admin only');
+  const data = request.data as Record<string, unknown>;
+  const action = String(data.action ?? '').slice(0, 100);
+  const entityType = String(data.entityType ?? '').slice(0, 100);
+  const entityId = String(data.entityId ?? '').slice(0, 200);
+  if (!action || !entityType || !entityId) throw new HttpsError('invalid-argument', 'action, entityType and entityId are required');
+  const metadata = data.metadata && typeof data.metadata === 'object' ? data.metadata : {};
+  if (JSON.stringify(metadata).length > 4000) throw new HttpsError('invalid-argument', 'metadata is too large');
+  await db.collection('auditLogs').add({ actorId: auth.uid, actorRole: auth.token.role, action, entityType, entityId, metadata, createdAt: FieldValue.serverTimestamp() });
+  return { logged: true };
 });
 export const queueDeletionRequest = onDocumentCreated({ document: 'deletionRequests/{requestId}', region }, async event => {
   await event.data?.ref.set({ status: 'awaiting_verification', updatedAt: FieldValue.serverTimestamp() }, { merge: true });
@@ -177,11 +277,25 @@ type PermissionKey = typeof PERMISSION_KEYS[number];
 // claim (`perms`) so it's part of the enforcement source, not just UI dressing.
 export const setUserRole = onCall({ region }, async request => {
   const auth = requireUser(request);
-  if (auth.token.role !== 'admin' && auth.token.role !== 'super_admin') throw new HttpsError('permission-denied', 'Admin only');
+  const callerRole = auth.token.role;
+  if (callerRole !== 'admin' && callerRole !== 'super_admin') throw new HttpsError('permission-denied', 'Admin only');
   const uid = String(request.data?.uid ?? '');
   const role = String(request.data?.role ?? '');
   if (!uid || !['user', 'coach', 'admin'].includes(role)) throw new HttpsError('invalid-argument', 'A uid and a valid role (user|coach|admin) are required');
   if (uid === auth.uid && role !== 'admin') throw new HttpsError('failed-precondition', 'You cannot remove your own admin role');
+
+  // A plain admin and super_admin were previously equal in enforcement here,
+  // meaning any one admin account (compromised or malicious) could mint or
+  // demote unlimited other admins. Only super_admin may now grant the admin
+  // role, or change the role of an account that's already admin/super_admin.
+  if (callerRole !== 'super_admin') {
+    if (role === 'admin') throw new HttpsError('permission-denied', 'Only a super admin can grant the admin role');
+    const target = await getAuth().getUser(uid).catch(() => null);
+    const targetRole = target?.customClaims?.role;
+    if (targetRole === 'admin' || targetRole === 'super_admin') {
+      throw new HttpsError('permission-denied', "Only a super admin can change another admin's role");
+    }
+  }
 
   let perms: PermissionKey[] | null = null;
   if (role === 'coach') {
@@ -199,13 +313,34 @@ export const setUserRole = onCall({ region }, async request => {
 
 export const processApprovedDeletions = onSchedule({ schedule: 'every 60 minutes', timeZone: 'Asia/Kolkata', region }, async () => {
   const requests = await db.collection('deletionRequests').where('status', '==', 'approved').limit(10).get();
-  const ownedCollections = ['profiles','glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','labReports','dailyCheckins','dailyActions','weeklyReports','sugarStories','consultations','userPrograms','programPlans','checklistLogs','expertNotes','notifications','deviceConnections'];
+  // programMembers and the batchStats/checkedInMembers marker were missing
+  // from this list - both key documents by/contain the raw uid, so without
+  // this a "completed" deletion still left the person's roster entry (and
+  // their daily check-in marker) behind after userId was hashed off the
+  // request doc, an incomplete-erasure bug for a health app.
+  const ownedCollections = ['profiles','glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','labReports','dailyCheckins','dailyActions','weeklyReports','sugarStories','consultations','userPrograms','programPlans','checklistLogs','expertNotes','notifications','deviceConnections','programMembers','medicationLogs'];
   for (const request of requests.docs) {
     const uid = request.get('userId'); if (!uid) continue;
     await request.ref.set({ status: 'processing', updatedAt: FieldValue.serverTimestamp() }, { merge: true });
     for (const name of ownedCollections) {
       const docs = await db.collection(name).where('userId', '==', uid).get();
       for (let offset = 0; offset < docs.docs.length; offset += 400) { const batch = db.batch(); docs.docs.slice(offset, offset + 400).forEach(doc => batch.delete(doc.ref)); await batch.commit(); }
+    }
+    // programMembers is keyed by "uid" on the roster doc itself (see
+    // redeemProgramCode), not "userId" - the pass above won't match those.
+    const roster = await db.collection('programMembers').where('uid', '==', uid).get();
+    const programIds = new Set(roster.docs.map(doc => String(doc.get('programId') ?? '')).filter(Boolean));
+    for (let offset = 0; offset < roster.docs.length; offset += 400) { const batch = db.batch(); roster.docs.slice(offset, offset + 400).forEach(doc => batch.delete(doc.ref)); await batch.commit(); }
+    // Sweep this user's daily check-in marker out of every batchStats day for
+    // every program they were ever in (marker doc id is the uid itself -
+    // deleting a non-existent doc is a safe no-op).
+    for (const programId of programIds) {
+      const days = await db.collection('batchStats').where('programId', '==', programId).get();
+      for (let offset = 0; offset < days.docs.length; offset += 400) {
+        const batch = db.batch();
+        days.docs.slice(offset, offset + 400).forEach(day => batch.delete(day.ref.collection('checkedInMembers').doc(uid)));
+        await batch.commit();
+      }
     }
     for (const prefix of [`users/${uid}/`, `lab-reports/${uid}/`, `consultation-attachments/${uid}/`, `reports/${uid}/`]) await getStorage().bucket().deleteFiles({ prefix });
     await db.doc(`users/${uid}`).delete();

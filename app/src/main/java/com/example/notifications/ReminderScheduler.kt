@@ -18,7 +18,10 @@ enum class ReminderType(
     FASTING_SUGAR("reminder_sugar", "nirog_reminder_sugar", 24, "Fasting sugar check-in", "Log today's fasting sugar reading before breakfast."),
     BP("reminder_bp", "nirog_reminder_bp", 24, "Blood pressure check-in", "A quiet moment to measure and log your blood pressure."),
     WALK("reminder_walk", "nirog_reminder_walk", 24, "Evening walk or activity", "A 15-minute walk after dinner can help your sugar overnight."),
-    SLEEP("reminder_sleep", "nirog_reminder_sleep", 24, "Wind down for sleep", "Start winding down soon for consistent, restful sleep.")
+    SLEEP("reminder_sleep", "nirog_reminder_sleep", 24, "Wind down for sleep", "Start winding down soon for consistent, restful sleep."),
+    // Timed via scheduleSmart(), not the generic elapsed-interval schedule()
+    // every other type uses - see there for why.
+    DAILY_CHECKIN("reminder_checkin", "nirog_reminder_checkin", 24, "Daily check-in", "A gentle nudge around your usual time to log today's numbers.")
 }
 
 /**
@@ -56,6 +59,37 @@ object ReminderScheduler {
             .build()
         WorkManager.getInstance(context).enqueueUniquePeriodicWork(
             type.workName, ExistingPeriodicWorkPolicy.UPDATE, request
+        )
+    }
+
+    /**
+     * DAILY_CHECKIN only: instead of firing every 24h from whenever the toggle was
+     * flipped (schedule()'s behavior, used as the fallback until this resolves),
+     * align the first fire - and so every fire after it, since it's still a 24h
+     * periodic request - to just before the hour the member actually tends to
+     * check in (users/{uid}.checkinHourHint, learned in
+     * HealthRepository.recordCheckinCompletion). Reads no Firestore itself - the
+     * caller (which already has repository access) passes the hint in, keeping
+     * this object free of the cloud boundary like every other on-device piece here.
+     */
+    fun scheduleSmart(context: Context, hourHint: Int?) {
+        val targetHour = (hourHint ?: 19).coerceIn(0, 23)
+        val now = java.util.Calendar.getInstance()
+        val target = (now.clone() as java.util.Calendar).apply {
+            set(java.util.Calendar.HOUR_OF_DAY, targetHour)
+            set(java.util.Calendar.MINUTE, 0)
+            set(java.util.Calendar.SECOND, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+            add(java.util.Calendar.MINUTE, -15) // nudge a little before their usual time, not at it
+        }
+        if (!target.after(now)) target.add(java.util.Calendar.DAY_OF_YEAR, 1)
+        val initialDelayMs = target.timeInMillis - now.timeInMillis
+        val request = PeriodicWorkRequestBuilder<ReminderWorker>(ReminderType.DAILY_CHECKIN.intervalHours, TimeUnit.HOURS)
+            .setInitialDelay(initialDelayMs, TimeUnit.MILLISECONDS)
+            .setInputData(ReminderWorker.inputFor(ReminderType.DAILY_CHECKIN))
+            .build()
+        WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+            ReminderType.DAILY_CHECKIN.workName, ExistingPeriodicWorkPolicy.UPDATE, request
         )
     }
 

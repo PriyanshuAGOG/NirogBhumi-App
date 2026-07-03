@@ -1046,6 +1046,7 @@ fun TrackTab(state: NirogState) {
                 QuickLogChip("Sugar", Icons.Filled.Bloodtype, Color(0xFFBA1A1A)) { state.checkinStartStep = 0; state.currentScreen = "daily_checkin" }
                 QuickLogChip("BP", Icons.Filled.Favorite, Color(0xFF1B3221)) { state.checkinStartStep = 1; state.currentScreen = "daily_checkin" }
                 QuickLogChip("Weight", Icons.Filled.MonitorWeight, Color(0xFF4B6450)) { state.checkinStartStep = 2; state.currentScreen = "daily_checkin" }
+                QuickLogChip("Medication", Icons.Filled.Medication, Color(0xFF6D4C1E)) { state.checkinStartStep = 3; state.currentScreen = "daily_checkin" }
                 QuickLogChip("Activity", Icons.Filled.DirectionsWalk, Color(0xFF426820)) { showActivityLog = true }
             }
         }

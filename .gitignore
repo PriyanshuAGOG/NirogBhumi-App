@@ -19,6 +19,7 @@ debug.keystore
 app/google-services.json
 firebase/functions/node_modules/
 firebase/functions/lib/
+firebase/rules-tests/node_modules/
 firebase-debug.log
 *.jks
 *.keystore

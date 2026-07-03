@@ -35,6 +35,20 @@ interface ProgramEvent {
   updatedAt?: unknown
 }
 
+// Only http(s) links are ever written or rendered as a real href - any
+// staff member (all of batches/announcements/calendar/programs is
+// coach-writable, not just admin) could otherwise set link to a
+// javascript: URI, which would execute in whichever admin's session later
+// clicks "Join link" since it's rendered as a real <a href>.
+function safeHttpUrl(value: string): string | null {
+  try {
+    const url = new URL(value)
+    return url.protocol === 'http:' || url.protocol === 'https:' ? value : null
+  } catch {
+    return null
+  }
+}
+
 const TYPE_META: Record<EventType, { label: string; cls: string }> = {
   live: { label: 'Live session', cls: 'ev-live' },
   walk: { label: 'Group walk', cls: 'ev-walk' },
@@ -147,6 +161,12 @@ export default function Calendar() {
     }
     setSaving(true)
     setSaveError(null)
+    const trimmedLink = draft.link.trim()
+    if (trimmedLink && !safeHttpUrl(trimmedLink)) {
+      setSaveError('Join link must be a valid http:// or https:// URL.')
+      setSaving(false)
+      return
+    }
     const end = fromInputDateTime(draft.endsAt)
     const payload = {
       programId,
@@ -155,7 +175,7 @@ export default function Calendar() {
       startsAt: Timestamp.fromDate(start),
       endsAt: end ? Timestamp.fromDate(end) : null,
       location: draft.location.trim() || null,
-      link: draft.link.trim() || null,
+      link: trimmedLink || null,
       description: draft.description.trim() || null,
       bring: draft.bring.trim() || null,
       updatedAt: serverTimestamp(),
@@ -300,7 +320,7 @@ export default function Calendar() {
                         {ev.description && <p className="ev-desc">{ev.description}</p>}
                         <div className="ev-meta">
                           {ev.location && <span>📍 {ev.location}</span>}
-                          {ev.link && (
+                          {ev.link && safeHttpUrl(ev.link) && (
                             <a href={ev.link} target="_blank" rel="noreferrer" className="ev-link">
                               Join link
                             </a>

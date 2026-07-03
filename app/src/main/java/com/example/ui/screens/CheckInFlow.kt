@@ -46,9 +46,11 @@ private val Muted = Color(0xFF697169)
 @Composable
 fun DailyCheckInScreen(state: NirogState) {
     val context = LocalContext.current
-    // step: 0 = sugar, 1 = bp, 2 = weight, 3 = done summary. Quick-log entry points
-    // (a chip, a tile) can jump straight to the relevant step via checkinStartStep,
-    // so there's exactly one logging flow instead of parallel per-metric dialogs.
+    // step: 0 = sugar, 1 = bp, 2 = weight, 3 = medication, 4 = done summary. Quick-log
+    // entry points (a chip, a tile) can jump straight to the relevant step via
+    // checkinStartStep, so there's exactly one logging flow instead of parallel
+    // per-metric dialogs. Medication was appended last (not inserted earlier) so
+    // existing checkinStartStep=0/1/2 jump targets never shifted.
     var step by remember { mutableStateOf(state.checkinStartStep) }
     var saving by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -76,6 +78,9 @@ fun DailyCheckInScreen(state: NirogState) {
     var systolic by remember { mutableStateOf("") }
     var diastolic by remember { mutableStateOf("") }
     var weightInput by remember { mutableStateOf("") }
+    var medicationTaken by remember { mutableStateOf<Boolean?>(null) }
+    var medicationName by remember { mutableStateOf("") }
+    var medicationResult by remember { mutableStateOf<String?>(null) }
 
     fun advance() { error = null; step++ }
 
@@ -90,20 +95,20 @@ fun DailyCheckInScreen(state: NirogState) {
             IconButton(onClick = { state.currentScreen = "dashboard" }) {
                 Icon(Icons.Filled.Close, contentDescription = "Close", tint = DeepInk)
             }
-            if (step < 3) {
+            if (step < 4) {
                 Text("Daily Check-in", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = DeepInk)
                 Spacer(Modifier.weight(1f))
-                Text("Step ${step + 1} of 3", fontSize = 13.sp, color = Muted)
+                Text("Step ${step + 1} of 4", fontSize = 13.sp, color = Muted)
             }
         }
 
-        if (step < 3) {
+        if (step < 4) {
             // Progress bar
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                repeat(3) { i ->
+                repeat(4) { i ->
                     Box(
                         modifier = Modifier
                             .weight(1f)
@@ -115,7 +120,7 @@ fun DailyCheckInScreen(state: NirogState) {
         }
 
         syncSummary?.let { summary ->
-            if (step < 3) {
+            if (step < 4) {
                 Surface(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 10.dp),
                     color = Color(0xFFE4EFE4),
@@ -181,7 +186,28 @@ fun DailyCheckInScreen(state: NirogState) {
                 ) {
                     BigInput(weightInput, { weightInput = it.filter { c -> c.isDigit() || c == '.' } }, "kg", KeyboardType.Decimal)
                 }
-                else -> CheckInDone(state, sugarResult, bpResult, weightResult)
+                3 -> CheckInStep(
+                    icon = Icons.Filled.Medication,
+                    tint = Color(0xFF6D4C1E),
+                    title = "Medication",
+                    helper = "Did you take today's medication?"
+                ) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TypeChip("Taken", medicationTaken == true) { medicationTaken = true }
+                        TypeChip("Missed", medicationTaken == false) { medicationTaken = false }
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    OutlinedTextField(
+                        value = medicationName,
+                        onValueChange = { medicationName = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("Which one? (optional)", color = Color(0xFFC3C8C0)) },
+                        singleLine = true,
+                        shape = RoundedCornerShape(16.dp),
+                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Green, unfocusedBorderColor = Color(0xFFD8D0C0), focusedContainerColor = Color.White, unfocusedContainerColor = Color.White)
+                    )
+                }
+                else -> CheckInDone(state, sugarResult, bpResult, weightResult, medicationResult)
             }
 
             error?.let {
@@ -191,7 +217,7 @@ fun DailyCheckInScreen(state: NirogState) {
             }
         }
 
-        if (step < 3) {
+        if (step < 4) {
             Column(modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
                     onClick = {
@@ -201,6 +227,7 @@ fun DailyCheckInScreen(state: NirogState) {
                                 if (sugarInput.isBlank()) { advance(); return@Button }
                                 if (sugarType == "HbA1c") {
                                     val v = sugarInput.toDoubleOrNull() ?: run { error = "Enter a valid value"; return@Button }
+                                    if (v < 3.0 || v > 20.0) { error = "Enter a value between 3 and 20%"; return@Button }
                                     saving = true
                                     state.repository.addHealthLog("glucoseReadings", mapOf("value" to v, "unit" to "%", "readingType" to "hba1c", "measuredAt" to FieldValue.serverTimestamp(), "source" to "manual")) { r ->
                                         saving = false
@@ -208,6 +235,7 @@ fun DailyCheckInScreen(state: NirogState) {
                                     }
                                 } else {
                                     val v = sugarInput.toIntOrNull() ?: run { error = "Enter a valid number"; return@Button }
+                                    if (v < 20 || v > 800) { error = "Enter a value between 20 and 800 mg/dL"; return@Button }
                                     saving = true
                                     state.repository.addHealthLog("glucoseReadings", mapOf("value" to v, "unit" to "mg/dL", "readingType" to if (sugarType == "Fasting") "fasting" else "post_meal", "measuredAt" to FieldValue.serverTimestamp(), "source" to "manual")) { r ->
                                         saving = false
@@ -223,6 +251,7 @@ fun DailyCheckInScreen(state: NirogState) {
                                 if (systolic.isBlank() && diastolic.isBlank()) { advance(); return@Button }
                                 val sys = systolic.toIntOrNull(); val dia = diastolic.toIntOrNull()
                                 if (sys == null || dia == null) { error = "Enter both numbers, or skip"; return@Button }
+                                if (sys < 60 || sys > 260 || dia < 30 || dia > 180) { error = "Enter a plausible BP (systolic 60-260, diastolic 30-180)"; return@Button }
                                 saving = true
                                 state.repository.addHealthLog("bpReadings", mapOf("systolic" to sys, "diastolic" to dia, "measuredAt" to FieldValue.serverTimestamp(), "source" to "manual")) { r ->
                                     saving = false
@@ -232,10 +261,23 @@ fun DailyCheckInScreen(state: NirogState) {
                             2 -> {
                                 if (weightInput.isBlank()) { advance(); return@Button }
                                 val w = weightInput.toDoubleOrNull() ?: run { error = "Enter a valid weight"; return@Button }
+                                if (w < 20.0 || w > 300.0) { error = "Enter a weight between 20 and 300 kg"; return@Button }
                                 saving = true
                                 state.repository.addHealthLog("weightLogs", mapOf("valueKg" to w, "measuredAt" to FieldValue.serverTimestamp(), "source" to "manual")) { r ->
                                     saving = false
                                     if (r is CloudResult.Success) { state.profileWeight = weightInput; weightResult = "$w kg"; advance() } else error = (r as CloudResult.Failure).message
+                                }
+                            }
+                            3 -> {
+                                val taken = medicationTaken ?: run { advance(); return@Button }
+                                saving = true
+                                val name = medicationName.trim().take(80)
+                                state.repository.addHealthLog("medicationLogs", mapOf("taken" to taken, "name" to name.ifBlank { null }, "measuredAt" to FieldValue.serverTimestamp(), "source" to "manual")) { r ->
+                                    saving = false
+                                    if (r is CloudResult.Success) {
+                                        medicationResult = (if (taken) "Taken" else "Missed") + if (name.isNotBlank()) " · $name" else ""
+                                        advance()
+                                    } else error = (r as CloudResult.Failure).message
                                 }
                             }
                         }
@@ -246,10 +288,10 @@ fun DailyCheckInScreen(state: NirogState) {
                     shape = RoundedCornerShape(27.dp)
                 ) {
                     if (saving) CircularProgressIndicator(Modifier.size(20.dp), color = Color.White, strokeWidth = 2.dp)
-                    else Text(if (step == 2) "Finish" else "Save & next", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 16.sp)
+                    else Text(if (step == 3) "Finish" else "Save & next", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 16.sp)
                 }
                 TextButton(onClick = { if (!saving) advance() }, modifier = Modifier.fillMaxWidth()) {
-                    Text(if (step == 2) "Skip & finish" else "Skip this", color = Muted, fontWeight = FontWeight.SemiBold)
+                    Text(if (step == 3) "Skip & finish" else "Skip this", color = Muted, fontWeight = FontWeight.SemiBold)
                 }
             }
         }
@@ -303,12 +345,27 @@ private fun BigInput(value: String, onChange: (String) -> Unit, suffix: String, 
 }
 
 @Composable
-private fun ColumnScope.CheckInDone(state: NirogState, sugar: String?, bp: String?, weight: String?) {
+private fun ColumnScope.CheckInDone(state: NirogState, sugar: String?, bp: String?, weight: String?, medication: String?) {
     val logged = listOfNotNull(
         sugar?.let { "Blood sugar" to it },
         bp?.let { "Blood pressure" to it },
-        weight?.let { "Weight" to it }
+        weight?.let { "Weight" to it },
+        medication?.let { "Medication" to it }
     )
+    // Smart reminder timing: a genuine completion (not an empty skip-through)
+    // feeds the hour into checkinHourHint, then re-aligns the on-device
+    // reminder to it if the member has that reminder turned on.
+    val context = LocalContext.current
+    LaunchedEffect(Unit) {
+        if (logged.isEmpty()) return@LaunchedEffect
+        val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        state.repository.recordCheckinCompletion(hour) { result ->
+            val hint = (result as? CloudResult.Success)?.value ?: return@recordCheckinCompletion
+            if (com.nirogbhumi.app.notifications.ReminderScheduler.isEnabled(context, com.nirogbhumi.app.notifications.ReminderType.DAILY_CHECKIN)) {
+                com.nirogbhumi.app.notifications.ReminderScheduler.scheduleSmart(context, hint)
+            }
+        }
+    }
     Spacer(Modifier.height(32.dp))
     Box(
         modifier = Modifier.size(80.dp).background(Color(0xFFE4EFDB), CircleShape).align(Alignment.CenterHorizontally),
