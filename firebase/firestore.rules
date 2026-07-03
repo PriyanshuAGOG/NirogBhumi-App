@@ -7,10 +7,20 @@ service cloud.firestore {
     function admin() { return role('admin') || role('super_admin'); }
     function expert() { return role('expert'); }
     function coach() { return role('coach'); }
-    // Program-management staff: admins and coaches. Fine-grained per-batch coach
-    // scoping (a coach only manages their assigned program) is a later refinement;
-    // for now any staff member can manage program content via the console.
+    // Program-management staff: admins and coaches. staff() alone is
+    // deliberately still used for platform-wide surfaces (moderation review
+    // queue routing, support inbox) where any staff member handling any
+    // ticket is fine. For anything scoped to a specific program (roster,
+    // calendar, announcements, batch stats, coach-to-member messages),
+    // programStaff(programId) is the real boundary: admin always passes,
+    // a coach only passes for the program(s) they're assigned via
+    // programs/{programId}.coachId.
     function staff() { return admin() || coach(); }
+    function assignedCoach(programId) {
+      return coach() && programId is string && programId != ''
+        && get(/databases/$(database)/documents/programs/$(programId)).data.coachId == request.auth.uid;
+    }
+    function programStaff(programId) { return admin() || assignedCoach(programId); }
     function assigned(uid) { return expert() && exists(/databases/$(database)/documents/expertAssignments/$(request.auth.uid + '_' + uid)); }
     function ownsResource() { return owner(resource.data.userId); }
     function ownsRequest() { return owner(request.resource.data.userId); }
@@ -50,6 +60,13 @@ service cloud.firestore {
       // Coaches get read-only access to their members' day-to-day logs (Care+
       // console health monitoring) alongside the member and the admin/expert
       // paths; only admin (not coach) may delete or edit another member's entry.
+      // Deliberately staff()-wide rather than programStaff()-scoped, unlike
+      // programs/programEvents/programMembers/announcements/coachMessages
+      // above: scoping this to "coach assigned to this member's program"
+      // would need chaining member uid -> activeProgramId -> that program's
+      // coachId, and health data read access is exactly where an untested
+      // rule bug would be worst - revisit alongside coachNotes once rules
+      // unit tests exist.
       allow read: if collection in ['glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','labReports','dailyCheckins','checklistLogs','medicationLogs'] && (ownsResource() || staff() || assigned(resource.data.userId));
       allow delete: if collection in ['glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','labReports','dailyCheckins','checklistLogs','medicationLogs'] && (ownsResource() || admin() || assigned(resource.data.userId));
       allow update: if collection in ['glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','labReports','dailyCheckins','checklistLogs','medicationLogs'] && (admin() || (ownsResource() && ownsRequest() && preservesUserId()) || (assigned(resource.data.userId) && preservesUserId()));
@@ -83,10 +100,16 @@ service cloud.firestore {
     // signedIn() read would let anyone list every program's code and
     // self-enroll - staff-only read; redemption goes through the
     // redeemProgramCode Cloud Function instead of a direct client read.
-    match /programs/{id} { allow read: if staff(); allow write: if staff(); }
+    // A coach only sees/edits the program(s) they're assigned to (per-batch
+    // scoping); only admin creates/deletes programs or reassigns a coach.
+    match /programs/{id} {
+      allow read: if admin() || (coach() && resource.data.coachId == request.auth.uid);
+      allow create, delete: if admin();
+      allow update: if admin() || (coach() && resource.data.coachId == request.auth.uid && request.resource.data.coachId == resource.data.coachId);
+    }
     match /announcements/{id} {
-      allow read: if programMember() || staff();
-      allow create: if staff() && request.resource.data.authorId == request.auth.uid && request.resource.data.createdAt == request.time;
+      allow read: if programMember() || programStaff(resource.data.programId);
+      allow create: if programStaff(request.resource.data.programId) && request.resource.data.authorId == request.auth.uid && request.resource.data.createdAt == request.time;
     }
     match /programChatMessages/{id} {
       allow read: if programMember() && ownProgram(resource.data.programId);
@@ -98,9 +121,10 @@ service cloud.firestore {
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions']);
     }
     match /reportedMessages/{id} {
-      // Any program member can report a message they can see; only admins review them.
+      // Any program member can report a message they can see; reviewed by
+      // admin or the coach assigned to that report's program.
       allow create: if programMember() && request.resource.data.reporterId == request.auth.uid && request.resource.data.createdAt == request.time;
-      allow read, update: if staff();
+      allow read, update: if programStaff(resource.data.programId);
     }
     match /consultationSlots/{id} {
       allow read: if signedIn() && resource.data.active == true;
@@ -122,28 +146,29 @@ service cloud.firestore {
       allow update: if staff();
     }
     // Care+ program calendar. Members read events for the program they're
-    // enrolled in; only staff (admin/coach) create or edit them.
+    // enrolled in; only admin or that program's assigned coach create/edit.
     match /programEvents/{id} {
-      allow read: if staff() || ownProgram(resource.data.programId);
-      allow create: if staff() && request.resource.data.createdBy == request.auth.uid;
-      allow update, delete: if staff();
+      allow read: if programStaff(resource.data.programId) || ownProgram(resource.data.programId);
+      allow create: if programStaff(request.resource.data.programId) && request.resource.data.createdBy == request.auth.uid;
+      allow update, delete: if programStaff(resource.data.programId);
     }
     // Batch roster. A member may read only their own membership doc (the
     // roster itself is staff-only, so member names never leak between members);
     // batch-level presence reaches members via batchStats, not this collection.
     match /programMembers/{id} {
-      allow read: if staff() || (signedIn() && resource.data.uid == request.auth.uid);
+      allow read: if programStaff(resource.data.programId) || (signedIn() && resource.data.uid == request.auth.uid);
       // Enrollment goes through the redeemProgramCode Cloud Function (Admin
       // SDK, bypasses rules), which validates the code and creates this
       // roster entry itself - the roster is never client-writable, so a
       // member can't plant a doc for a program they didn't redeem a code
       // for, or forge their own contributionKm/lastCheckinAt stats.
-      allow create, update, delete: if staff();
+      allow create: if programStaff(request.resource.data.programId);
+      allow update, delete: if programStaff(resource.data.programId);
     }
     // Aggregated, PII-free batch counts written by Cloud Functions only. Members
     // read the stats for the program they're enrolled in (cooperative presence).
     match /batchStats/{id} {
-      allow read: if staff() || ownProgram(resource.data.programId);
+      allow read: if programStaff(resource.data.programId) || ownProgram(resource.data.programId);
       allow write: if false;
     }
     // Program access codes - sensitive, staff-managed only.
@@ -151,14 +176,20 @@ service cloud.firestore {
       allow read, write: if staff();
     }
     // Private coach-to-member notes. The recipient may read their own; only
-    // staff can send.
+    // admin or that program's assigned coach can send.
     match /coachMessages/{id} {
-      allow read: if staff() || (signedIn() && resource.data.toUid == request.auth.uid);
-      allow create: if staff() && request.resource.data.fromUid == request.auth.uid;
-      allow update, delete: if staff();
+      allow read: if programStaff(resource.data.programId) || (signedIn() && resource.data.toUid == request.auth.uid);
+      allow create: if programStaff(request.resource.data.programId) && request.resource.data.fromUid == request.auth.uid;
+      allow update, delete: if programStaff(resource.data.programId);
     }
     // Coach-only case notes on a member, for consultation prep. Members never
-    // see these - staff-only end to end.
+    // see these - staff-only end to end. Deliberately not scoped to
+    // programStaff() like the collections above: that would need chaining
+    // two get() calls (member uid -> their activeProgramId -> that
+    // program's coachId) per note, and this is lower-stakes than a coach
+    // being able to broadcast/manage a batch they don't own. Revisit once
+    // rules unit tests exist to verify a chained check like that actually
+    // behaves as intended.
     match /coachNotes/{id} {
       allow read, delete: if staff();
       allow create: if staff() && request.resource.data.authorId == request.auth.uid && request.resource.data.createdAt == request.time;

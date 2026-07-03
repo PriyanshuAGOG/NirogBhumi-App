@@ -225,8 +225,19 @@ by the user. Work sequentially, CI-verified per slice, small commits.
    network policy doesn't allow fetching font binaries from Google
    Fonts/GitHub. Needs the font files supplied another way (owner upload,
    or a network policy change on the environment) before this can ship.
-3. [ ] **Per-coach batch scoping** — rules + console + data model so a
-   coach only manages their assigned program(s), not any program.
+3. [x] **Per-coach batch scoping** — new `programStaff(programId)` rules
+   helper (admin, or the coach whose uid matches that `programs/{id}.coachId`)
+   replaces bare `staff()` on programs/programEvents/programMembers/
+   announcements/coachMessages/reportedMessages/batchStats. **Operational
+   note:** any coach account that doesn't yet have `coachId` set on their
+   program (via the console's Programs page) will see zero batches/members
+   until an admin sets it - this field existed before but was never
+   enforced, so this is a real behavior change on deploy, not just an
+   additive one. coachNotes and the health-log collection group are
+   deliberately left staff()-wide for now (documented in firestore.rules)
+   pending rules unit tests (item 7) to verify a chained
+   member->program->coach check actually behaves as intended before
+   applying it somewhere health-data-sensitive.
 4. [ ] **Unread badges in Chat Hub** — wire
    `programMembers.lastReadGeneralAt`/`lastReadAnnouncementsAt`.
 5. [x] **Razorpay cleanup** — removed `PaymentResultListener`, the
