@@ -96,6 +96,14 @@ service cloud.firestore {
         && !('type' in request.resource.data);
     }
     match /contentItems/{id} { allow read: if resource.data.status == 'published' || admin(); allow write: if admin() || role('content_manager'); }
+    // Self-update system release metadata, one doc per channel (id ==
+    // channel name: 'production'|'testing'|'development'). Public read since
+    // this is non-sensitive release info the app needs before the user is
+    // necessarily signed in (or even mid-login); writes only ever come from
+    // CI's WIF-authenticated Admin SDK, which bypasses rules entirely - the
+    // admin()-only write here is defense-in-depth against a compromised
+    // client, not the real write path.
+    match /appUpdates/{channel} { allow read: if true; allow write: if admin(); }
     // Program docs hold the plaintext invite/redemption code, so a public
     // signedIn() read would let anyone list every program's code and
     // self-enroll - staff-only read; redemption goes through the

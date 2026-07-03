@@ -38,5 +38,16 @@ service firebase.storage {
     match /reports/{uid}/{allPaths=**} { allow read: if owner(uid) || admin(); allow write: if admin(); }
     match /content/{allPaths=**} { allow read: if true; allow write: if admin() && smallEnough() && safeType(); }
     match /products/{allPaths=**} { allow read: if true; allow write: if admin() && smallEnough() && safeType(); }
+    // Self-update APK releases. Public read (the in-app updater downloads
+    // before/without necessarily being freshly signed in), admin()-only
+    // write as defense-in-depth - the real write path is CI's WIF-
+    // authenticated Admin SDK, which bypasses these rules entirely. A much
+    // higher size cap than the other paths since a real APK is tens of MB,
+    // and its own content-type check rather than reusing safeType()/
+    // safeAudioType() so an APK can never be smuggled through an image/PDF/
+    // audio upload path or vice versa.
+    function releaseSizeOk() { return request.resource == null || request.resource.size < 200 * 1024 * 1024; }
+    function safeApkType() { return request.resource == null || request.resource.contentType.matches('application/(vnd\\.android\\.package-archive|octet-stream)'); }
+    match /releases/{channel}/{allPaths=**} { allow read: if true; allow write: if admin() && releaseSizeOk() && safeApkType(); }
   }
 }

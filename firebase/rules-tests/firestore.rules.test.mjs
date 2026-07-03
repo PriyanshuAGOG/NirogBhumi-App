@@ -328,6 +328,40 @@ describe('coachNotes stay staff-wide (documented, not per-program scoped)', () =
   });
 });
 
+describe('appUpdates (self-update system release metadata)', () => {
+  beforeEach(async () => {
+    await seed(async (db) => {
+      await setDoc(doc(db, 'appUpdates/production'), {
+        channel: 'production', latestVersionCode: 42, latestVersionName: '1.0.42',
+        minSupportedVersionCode: 30, apkUrl: 'https://example.com/app.apk',
+        checksum: 'abc123', forceUpdate: false, releaseNotes: 'Bug fixes',
+      });
+    });
+  });
+
+  it('lets an anonymous (signed-out) caller read release metadata', async () => {
+    await assertSucceeds(getDoc(doc(anon(), 'appUpdates/production')));
+  });
+
+  it('lets a plain signed-in member read release metadata', async () => {
+    await assertSucceeds(getDoc(doc(member('mem1'), 'appUpdates/production')));
+  });
+
+  it('denies a plain member writing release metadata', async () => {
+    await assertFails(setDoc(doc(member('mem1'), 'appUpdates/production'), {
+      channel: 'production', latestVersionCode: 999, latestVersionName: '9.9.9',
+    }));
+  });
+
+  it('lets admin write release metadata', async () => {
+    await assertSucceeds(setDoc(doc(admin(), 'appUpdates/production'), {
+      channel: 'production', latestVersionCode: 43, latestVersionName: '1.0.43',
+      minSupportedVersionCode: 30, apkUrl: 'https://example.com/app43.apk',
+      checksum: 'def456', forceUpdate: false, releaseNotes: 'More fixes',
+    }));
+  });
+});
+
 // Sanity check that the suite itself is wired up, independent of rules content.
 describe('test harness sanity', () => {
   it('ran at least one assertion', () => assert.ok(true));

@@ -37,6 +37,8 @@ beforeEach(async () => {
 });
 
 const memberStorage = (uid) => testEnv.authenticatedContext(uid).storage();
+const adminStorage = () => testEnv.authenticatedContext('admin-uid', { role: 'admin' }).storage();
+const anonStorage = () => testEnv.unauthenticatedContext().storage();
 // Not a real decodable PNG - the rules only ever inspect the upload's
 // declared contentType/size metadata, never the byte content itself.
 const tinyBytes = new Uint8Array([137, 80, 78, 71]);
@@ -117,5 +119,31 @@ describe('program-chat-audio storage rules', () => {
     });
     const readerRef = ref(memberStorage('mem3'), 'program-chat-audio/progA/mem1/note1.m4a');
     await assertSucceeds(getBytes(readerRef));
+  });
+});
+
+describe('releases storage rules (self-update APKs)', () => {
+  it('lets an anonymous (signed-out) caller read a release APK', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const seedRef = ref(ctx.storage(), 'releases/production/42.apk');
+      await uploadBytes(seedRef, tinyBytes, { contentType: 'application/vnd.android.package-archive' });
+    });
+    const readerRef = ref(anonStorage(), 'releases/production/42.apk');
+    await assertSucceeds(getBytes(readerRef));
+  });
+
+  it('denies a plain member uploading a release APK', async () => {
+    const storageRef = ref(memberStorage('mem1'), 'releases/production/43.apk');
+    await assertFails(uploadBytes(storageRef, tinyBytes, { contentType: 'application/vnd.android.package-archive' }));
+  });
+
+  it('lets admin upload a release APK', async () => {
+    const storageRef = ref(adminStorage(), 'releases/production/43.apk');
+    await assertSucceeds(uploadBytes(storageRef, tinyBytes, { contentType: 'application/vnd.android.package-archive' }));
+  });
+
+  it('denies a non-APK content type on the releases path (safeApkType, not safeType)', async () => {
+    const storageRef = ref(adminStorage(), 'releases/production/44.apk');
+    await assertFails(uploadBytes(storageRef, tinyBytes, { contentType: 'image/jpeg' }));
   });
 });
