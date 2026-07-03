@@ -79,6 +79,34 @@ export const onBPReadingCreate = onDocumentCreated({ document: 'bpReadings/{read
   await recordBatchCheckin(String(d.userId));
 });
 
+// Fans a new coach/admin announcement out to every member of that program as
+// a push notification. type:'announcement' (like 'critical_alert') bypasses
+// sendPendingNotifications()'s quiet-hours defer and daily cap, since an
+// announcement is a deliberate one-off staff broadcast, not a routine
+// reminder - a member should never miss "class moved to 6pm" because it
+// landed during quiet hours or after their 3rd reminder that day.
+export const onAnnouncementCreate = onDocumentCreated({ document: 'announcements/{id}', region }, async event => {
+  const snap = event.data; if (!snap) return;
+  const data = snap.data();
+  const programId = String(data.programId ?? ''); if (!programId) return;
+  const authorId = String(data.authorId ?? '');
+  const title = String(data.title ?? 'New announcement').slice(0, 120);
+  const body = String(data.body ?? '').slice(0, 200);
+  const members = await db.collection('programMembers').where('programId', '==', programId).get();
+  for (let offset = 0; offset < members.docs.length; offset += 400) {
+    const batch = db.batch();
+    members.docs.slice(offset, offset + 400).forEach(member => {
+      const uid = String(member.get('uid') ?? '');
+      if (!uid || uid === authorId) return; // the author doesn't need a push about their own post
+      batch.set(db.collection('notifications').doc(), {
+        userId: uid, profileId: null, title, body, type: 'announcement',
+        status: 'scheduled', scheduledFor: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp(),
+      });
+    });
+    await batch.commit();
+  }
+});
+
 // Daily maintenance job. Runs once a day; on Mondays it also builds weekly
 // reports. Keeping daily + weekly in one schedule keeps us to 3 Cloud
 // Scheduler jobs total (this + notifications + deletions), inside the free tier.

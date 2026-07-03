@@ -91,6 +91,11 @@ service cloud.firestore {
     match /programChatMessages/{id} {
       allow read: if programMember() && ownProgram(resource.data.programId);
       allow create: if programMember() && ownProgram(request.resource.data.programId) && request.resource.data.userId == request.auth.uid && request.resource.data.createdAt == request.time;
+      // Reactions are the one thing any batchmate (not just the author) can
+      // touch on someone else's message - restricted to only that field so
+      // a member can never edit another member's text via this path.
+      allow update: if programMember() && ownProgram(resource.data.programId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions']);
     }
     match /reportedMessages/{id} {
       // Any program member can report a message they can see; only admins review them.

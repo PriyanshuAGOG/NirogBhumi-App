@@ -38,7 +38,7 @@ private const val IS_PRODUCTION_APK = true
 // screen key (e.g. skipping past the consent screen).
 private val DEEP_LINK_ROUTES = setOf(
   "dashboard", "weekly_report", "consultation_detail", "active_journey",
-  "order_detail", "expert_notes", "program_calendar",
+  "order_detail", "expert_notes", "program_calendar", "announcements",
 )
 private fun sanitizedRoute(raw: String?): String = raw?.takeIf { it in DEEP_LINK_ROUTES } ?: ""
 

@@ -40,8 +40,19 @@ interface HealthRepository {
     fun listenAnnouncements(programId: String, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription
     fun postAnnouncement(programId: String, title: String, body: String, done: (CloudResult<Unit>) -> Unit)
     fun listenProgramChat(programId: String, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription
-    fun sendProgramChatMessage(programId: String, text: String, senderName: String, done: (CloudResult<Unit>) -> Unit)
+    fun sendProgramChatMessage(
+        programId: String,
+        text: String,
+        senderName: String,
+        replyToId: String? = null,
+        replyToSender: String? = null,
+        replyToText: String? = null,
+        done: (CloudResult<Unit>) -> Unit,
+    )
     fun reportChatMessage(messageId: String, programId: String, reportedText: String, reportedUserId: String, done: (CloudResult<Unit>) -> Unit)
+    // Toggles the caller's own reaction on a message - add=true unions their uid
+    // into reactions.<emoji>, add=false removes it. Never touches message text.
+    fun toggleChatReaction(messageId: String, emoji: String, add: Boolean, done: (CloudResult<Unit>) -> Unit)
 
     // Batch Pulse: today's PII-free "N of M checked in" + collective walking
     // minutes for the caller's program. Written only by Cloud Functions.
@@ -210,19 +221,45 @@ class FirebaseHealthRepository : HealthRepository {
         return CloudSubscription { registration.remove() }
     }
 
-    override fun sendProgramChatMessage(programId: String, text: String, senderName: String, done: (CloudResult<Unit>) -> Unit) {
+    override fun sendProgramChatMessage(
+        programId: String,
+        text: String,
+        senderName: String,
+        replyToId: String?,
+        replyToSender: String?,
+        replyToText: String?,
+        done: (CloudResult<Unit>) -> Unit,
+    ) {
         val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
         val database = db ?: return done(CloudResult.Failure("Firebase is not configured"))
+        val replyTo = if (replyToId != null) mapOf(
+            "id" to replyToId,
+            "sender" to replyToSender,
+            // Quoted preview only - trimmed so a reply can't smuggle an
+            // unbounded copy of an old message into every new one.
+            "text" to replyToText?.take(160),
+        ) else null
         database.collection("programChatMessages").add(
             mapOf(
                 "programId" to programId,
                 "userId" to uid,
                 "senderName" to senderName,
                 "text" to text,
+                "replyTo" to replyTo,
                 "createdAt" to FieldValue.serverTimestamp()
             )
         ).addOnSuccessListener { done(CloudResult.Success(Unit)) }
             .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Message could not be sent", it)) }
+    }
+
+    override fun toggleChatReaction(messageId: String, emoji: String, add: Boolean, done: (CloudResult<Unit>) -> Unit) {
+        val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
+        val database = db ?: return done(CloudResult.Failure("Firebase is not configured"))
+        val change = if (add) FieldValue.arrayUnion(uid) else FieldValue.arrayRemove(uid)
+        database.collection("programChatMessages").document(messageId)
+            .update("reactions.$emoji", change)
+            .addOnSuccessListener { done(CloudResult.Success(Unit)) }
+            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Reaction could not be saved", it)) }
     }
 
     override fun reportChatMessage(messageId: String, programId: String, reportedText: String, reportedUserId: String, done: (CloudResult<Unit>) -> Unit) {
