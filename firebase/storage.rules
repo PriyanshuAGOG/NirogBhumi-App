@@ -11,6 +11,10 @@ service firebase.storage {
     // execute script in that origin - not worth the risk for a format none
     // of the upload flows (photos, lab reports, attachments) actually need.
     function safeType() { return request.resource == null || request.resource.contentType.matches('(image/(png|jpe?g|webp|heic|heif|gif)|application/pdf)'); }
+    // Separate from safeType() rather than folding audio into it, so image/PDF
+    // upload paths (lab reports, profile photos) can never be used to smuggle
+    // an audio file in, and vice versa.
+    function safeAudioType() { return request.resource == null || request.resource.contentType.matches('audio/.*'); }
     // Program chat photos are visible to the whole batch, not just the
     // uploader - a Firestore cross-service read of the caller's own user
     // doc (never anyone else's) confirms they're an active member of the
@@ -22,6 +26,10 @@ service firebase.storage {
     match /program-chat-photos/{programId}/{uid}/{allPaths=**} {
       allow read: if programMember(programId) || admin();
       allow write: if owner(uid) && programMember(programId) && smallEnough() && safeType();
+    }
+    match /program-chat-audio/{programId}/{uid}/{allPaths=**} {
+      allow read: if programMember(programId) || admin();
+      allow write: if owner(uid) && programMember(programId) && smallEnough() && safeAudioType();
     }
     match /users/{uid}/{allPaths=**} { allow read, write: if (owner(uid) || admin()) && smallEnough() && safeType(); }
     match /meal-photos/{uid}/{allPaths=**} { allow read, write: if (owner(uid) || admin()) && smallEnough() && safeType(); }

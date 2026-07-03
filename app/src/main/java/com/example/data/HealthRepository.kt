@@ -47,12 +47,15 @@ interface HealthRepository {
         replyToSender: String? = null,
         replyToText: String? = null,
         photoUrl: String? = null,
+        audioUrl: String? = null,
+        audioDurationSec: Int? = null,
         done: (CloudResult<Unit>) -> Unit,
     )
     // Uploads to a program-scoped Storage path (not the private users/{uid}
     // one) so every batchmate - not just the sender - can view it, rules-
     // enforced by a live Firestore membership check, not just obscurity.
     fun uploadProgramChatPhoto(programId: String, uri: Uri, done: (CloudResult<String>) -> Unit)
+    fun uploadProgramChatAudio(programId: String, uri: Uri, done: (CloudResult<String>) -> Unit)
     fun reportChatMessage(messageId: String, programId: String, reportedText: String, reportedUserId: String, done: (CloudResult<Unit>) -> Unit)
     // Toggles the caller's own reaction on a message - add=true unions their uid
     // into reactions.<emoji>, add=false removes it. Never touches message text.
@@ -250,6 +253,8 @@ class FirebaseHealthRepository : HealthRepository {
         replyToSender: String?,
         replyToText: String?,
         photoUrl: String?,
+        audioUrl: String?,
+        audioDurationSec: Int?,
         done: (CloudResult<Unit>) -> Unit,
     ) {
         val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
@@ -268,11 +273,13 @@ class FirebaseHealthRepository : HealthRepository {
                 "senderName" to senderName,
                 "text" to text,
                 "photoUrl" to photoUrl,
+                "audioUrl" to audioUrl,
+                "audioDurationSec" to audioDurationSec,
                 "replyTo" to replyTo,
                 "createdAt" to FieldValue.serverTimestamp()
             )
         ).addOnSuccessListener {
-            AnalyticsLogger.log("chat_message_sent", mapOf("program_id" to programId, "is_reply" to (replyToId != null), "has_photo" to (photoUrl != null)))
+            AnalyticsLogger.log("chat_message_sent", mapOf("program_id" to programId, "is_reply" to (replyToId != null), "has_photo" to (photoUrl != null), "has_audio" to (audioUrl != null)))
             done(CloudResult.Success(Unit))
         }.addOnFailureListener { done(CloudResult.Failure(it.message ?: "Message could not be sent", it)) }
     }
@@ -286,6 +293,18 @@ class FirebaseHealthRepository : HealthRepository {
             ref.downloadUrl
         }.addOnSuccessListener { done(CloudResult.Success(it.toString())) }
             .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Photo could not be uploaded", it)) }
+    }
+
+    override fun uploadProgramChatAudio(programId: String, uri: Uri, done: (CloudResult<String>) -> Unit) {
+        val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
+        val path = "program-chat-audio/$programId/$uid/${UUID.randomUUID()}.m4a"
+        val ref = storage?.reference?.child(path) ?: return done(CloudResult.Failure("Firebase is not configured"))
+        val metadata = com.google.firebase.storage.StorageMetadata.Builder().setContentType("audio/mp4").build()
+        ref.putFile(uri, metadata).continueWithTask { task ->
+            if (!task.isSuccessful) throw task.exception ?: IllegalStateException("Upload failed")
+            ref.downloadUrl
+        }.addOnSuccessListener { done(CloudResult.Success(it.toString())) }
+            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Voice note could not be uploaded", it)) }
     }
 
     override fun toggleChatReaction(messageId: String, emoji: String, add: Boolean, done: (CloudResult<Unit>) -> Unit) {

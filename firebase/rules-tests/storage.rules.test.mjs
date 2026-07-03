@@ -84,3 +84,38 @@ describe('program-chat-photos storage rules', () => {
     await assertFails(getBytes(readerRef));
   });
 });
+
+describe('program-chat-audio storage rules', () => {
+  beforeEach(async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      await setDoc(doc(db, 'users/mem1'), { userId: 'mem1', activeProgramId: 'progA', programActive: true });
+      await setDoc(doc(db, 'users/mem2'), { userId: 'mem2', activeProgramId: 'progB', programActive: true });
+      await setDoc(doc(db, 'users/mem3'), { userId: 'mem3', activeProgramId: 'progA', programActive: true });
+    });
+  });
+
+  it('lets a program member upload a voice note under their own uid in their own program', async () => {
+    const storageRef = ref(memberStorage('mem1'), 'program-chat-audio/progA/mem1/note1.m4a');
+    await assertSucceeds(uploadBytes(storageRef, tinyBytes, { contentType: 'audio/mp4' }));
+  });
+
+  it('denies an image content type on the audio path (safeAudioType, not safeType)', async () => {
+    const storageRef = ref(memberStorage('mem1'), 'program-chat-audio/progA/mem1/note1.m4a');
+    await assertFails(uploadBytes(storageRef, tinyBytes, { contentType: 'image/jpeg' }));
+  });
+
+  it('denies a member uploading a voice note into a program they are not an active member of', async () => {
+    const storageRef = ref(memberStorage('mem2'), 'program-chat-audio/progA/mem2/note1.m4a');
+    await assertFails(uploadBytes(storageRef, tinyBytes, { contentType: 'audio/mp4' }));
+  });
+
+  it('lets a batchmate read a voice note another member uploaded to the same program', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const seedRef = ref(ctx.storage(), 'program-chat-audio/progA/mem1/note1.m4a');
+      await uploadBytes(seedRef, tinyBytes, { contentType: 'audio/mp4' });
+    });
+    const readerRef = ref(memberStorage('mem3'), 'program-chat-audio/progA/mem1/note1.m4a');
+    await assertSucceeds(getBytes(readerRef));
+  });
+});

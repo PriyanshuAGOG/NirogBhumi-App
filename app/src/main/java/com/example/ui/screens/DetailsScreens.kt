@@ -2629,6 +2629,75 @@ private fun mentionAnnotatedText(text: String, mentionColor: Color): androidx.co
         append(text.substring(last))
     }
 
+// One MediaPlayer per visible bubble (released via DisposableEffect when the
+// item scrolls out of the LazyColumn) - deliberately doesn't pause other
+// bubbles' playback when one starts, unlike WhatsApp. Acceptable v1 scope
+// cut: voice notes are short and this is a rare multi-tap scenario.
+@Composable
+private fun VoiceNoteBubble(url: String, durationSec: Int, isMine: Boolean) {
+    var isPlaying by remember { mutableStateOf(false) }
+    var isPrepared by remember { mutableStateOf(false) }
+    var elapsedSec by remember { mutableStateOf(0) }
+    val player = remember { android.media.MediaPlayer() }
+
+    DisposableEffect(url) {
+        onDispose { runCatching { player.release() } }
+    }
+
+    LaunchedEffect(isPlaying) {
+        while (isPlaying) {
+            kotlinx.coroutines.delay(500)
+            elapsedSec = runCatching { player.currentPosition / 1000 }.getOrDefault(elapsedSec)
+        }
+    }
+
+    fun togglePlayback() {
+        if (isPlaying) {
+            runCatching { player.pause() }
+            isPlaying = false
+            return
+        }
+        if (isPrepared) {
+            runCatching { player.start() }
+            isPlaying = true
+            return
+        }
+        runCatching {
+            player.setDataSource(url)
+            player.setOnPreparedListener {
+                isPrepared = true
+                it.start()
+                isPlaying = true
+            }
+            player.setOnCompletionListener {
+                isPlaying = false
+                elapsedSec = 0
+                runCatching { player.seekTo(0) }
+            }
+            player.prepareAsync()
+        }
+    }
+
+    Row(
+        modifier = Modifier
+            .clip(NirogRadius.pillShape)
+            .background(if (isMine) Color.White.copy(alpha = 0.12f) else NirogColor.surfaceSunken)
+            .clickable { togglePlayback() }
+            .semantics { contentDescription = if (isPlaying) "Pause voice note" else "Play voice note" }
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(if (isPlaying) "⏸" else "▶", style = NirogType.cardTitle, color = if (isMine) NirogColor.onAccent else NirogColor.forest)
+        Spacer(Modifier.width(8.dp))
+        val shownSec = if (isPlaying || elapsedSec > 0) elapsedSec else durationSec
+        Text(
+            "%d:%02d".format(shownSec / 60, shownSec % 60),
+            style = NirogType.caption,
+            color = if (isMine) NirogColor.onAccent.copy(alpha = 0.85f) else NirogColor.inkSecondary,
+        )
+    }
+}
+
 // Care+ community chat - one shared room per program, not one global room, so
 // conversation stays relevant to the program a member actually joined.
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
@@ -2643,11 +2712,83 @@ fun ProgramChatScreen(state: NirogState) {
     var reporting by remember { mutableStateOf(false) }
     var pendingPhotoUri by remember { mutableStateOf<Uri?>(null) }
     var uploadingPhoto by remember { mutableStateOf(false) }
+    var isRecording by remember { mutableStateOf(false) }
+    var recordingElapsedSec by remember { mutableStateOf(0) }
+    var uploadingAudio by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
     val myUid = state.repository.userId
+    val context = LocalContext.current
+    val recorderHolder = remember { mutableStateOf<android.media.MediaRecorder?>(null) }
+    val recordingFileHolder = remember { mutableStateOf<java.io.File?>(null) }
     val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) pendingPhotoUri = uri
+    }
+
+    fun startRecording() {
+        val file = java.io.File.createTempFile("voice_note_", ".m4a", context.cacheDir)
+        @Suppress("DEPRECATION")
+        val recorder = android.media.MediaRecorder().apply {
+            setAudioSource(android.media.MediaRecorder.AudioSource.MIC)
+            setOutputFormat(android.media.MediaRecorder.OutputFormat.MPEG_4)
+            setAudioEncoder(android.media.MediaRecorder.AudioEncoder.AAC)
+            setOutputFile(file.absolutePath)
+            runCatching { prepare(); start() }
+        }
+        recorderHolder.value = recorder
+        recordingFileHolder.value = file
+        recordingElapsedSec = 0
+        isRecording = true
+    }
+
+    fun stopRecordingAndSend() {
+        isRecording = false
+        val recorder = recorderHolder.value
+        val file = recordingFileHolder.value
+        recorderHolder.value = null
+        recordingFileHolder.value = null
+        val durationSec = recordingElapsedSec
+        val stopped = runCatching { recorder?.apply { stop(); release() } }.isSuccess
+        if (!stopped || file == null || durationSec < 1) {
+            file?.delete()
+            state.cloudMessage = if (durationSec < 1) "Voice note was too short to send" else "Could not record - please try again"
+            return
+        }
+        uploadingAudio = true
+        state.repository.uploadProgramChatAudio(state.activeProgramId, Uri.fromFile(file)) { result ->
+            file.delete()
+            when (result) {
+                is com.nirogbhumi.app.data.CloudResult.Success -> {
+                    state.repository.sendProgramChatMessage(
+                        programId = state.activeProgramId,
+                        text = "",
+                        senderName = state.profileName.ifBlank { "Member" },
+                        audioUrl = result.value,
+                        audioDurationSec = durationSec,
+                    ) { sendResult ->
+                        uploadingAudio = false
+                        if (sendResult is com.nirogbhumi.app.data.CloudResult.Success) {
+                            coroutineScope.launch { listState.animateScrollToItem(0) }
+                        } else state.cloudMessage = (sendResult as com.nirogbhumi.app.data.CloudResult.Failure).message
+                    }
+                }
+                is com.nirogbhumi.app.data.CloudResult.Failure -> {
+                    uploadingAudio = false
+                    state.cloudMessage = result.message
+                }
+            }
+        }
+    }
+
+    val micPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) startRecording() else state.cloudMessage = "Microphone permission is needed to send a voice note"
+    }
+
+    LaunchedEffect(isRecording) {
+        while (isRecording) {
+            kotlinx.coroutines.delay(1000)
+            recordingElapsedSec += 1
+        }
     }
 
     DisposableEffect(state.activeProgramId) {
@@ -2726,6 +2867,8 @@ fun ProgramChatScreen(state: NirogState) {
                     val senderName = record.values["senderName"]?.toString() ?: "Member"
                     val text = record.values["text"]?.toString().orEmpty()
                     val photoUrl = record.values["photoUrl"]?.toString()
+                    val audioUrl = record.values["audioUrl"]?.toString()
+                    val audioDurationSec = (record.values["audioDurationSec"] as? Number)?.toInt() ?: 0
                     @Suppress("UNCHECKED_CAST")
                     val replyTo = record.values["replyTo"] as? Map<String, Any?>
                     @Suppress("UNCHECKED_CAST")
@@ -2779,6 +2922,9 @@ fun ProgramChatScreen(state: NirogState) {
                                         .then(if (text.isNotBlank()) Modifier.padding(bottom = 6.dp) else Modifier),
                                     contentScale = androidx.compose.ui.layout.ContentScale.Crop,
                                 )
+                            }
+                            if (audioUrl != null) {
+                                VoiceNoteBubble(audioUrl, audioDurationSec, isMine)
                             }
                             if (text.isNotBlank()) {
                                 Text(
@@ -2867,28 +3013,55 @@ fun ProgramChatScreen(state: NirogState) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(
-                enabled = !uploadingPhoto && !sending,
+                enabled = !uploadingPhoto && !sending && !isRecording && !uploadingAudio,
                 onClick = { photoPicker.launch("image/*") },
                 modifier = Modifier.semantics { contentDescription = "Attach a photo" },
             ) {
                 Text("📷", style = NirogType.cardTitle)
             }
+            IconButton(
+                enabled = !uploadingPhoto && !sending && !uploadingAudio,
+                onClick = {
+                    if (isRecording) {
+                        stopRecordingAndSend()
+                    } else if (androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                        startRecording()
+                    } else {
+                        micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                    }
+                },
+                modifier = Modifier.semantics { contentDescription = if (isRecording) "Stop and send voice note" else "Record a voice note" },
+            ) {
+                if (uploadingAudio) {
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = NirogColor.forestSoft)
+                } else {
+                    Text(if (isRecording) "⏹" else "🎤", style = NirogType.cardTitle, color = if (isRecording) NirogColor.statusCritical else Color.Unspecified)
+                }
+            }
+            if (isRecording) {
+                Text(
+                    "%d:%02d".format(recordingElapsedSec / 60, recordingElapsedSec % 60),
+                    style = NirogType.caption, color = NirogColor.statusCritical,
+                    modifier = Modifier.padding(end = NirogSpace.xs),
+                )
+            }
             OutlinedTextField(
                 value = messageInput,
                 onValueChange = { messageInput = it },
+                enabled = !isRecording,
                 modifier = Modifier.weight(1f).semantics { contentDescription = "Message your program" },
-                placeholder = { Text("Message your program...") },
+                placeholder = { Text(if (isRecording) "Recording..." else "Message your program...") },
                 shape = NirogRadius.pillShape,
                 singleLine = true,
                 colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = NirogColor.forest, unfocusedBorderColor = NirogColor.surfaceSunken, focusedContainerColor = NirogColor.surfaceCard, unfocusedContainerColor = NirogColor.surfaceCard)
             )
             Spacer(modifier = Modifier.width(NirogSpace.sm))
             IconButton(
-                enabled = !sending && !uploadingPhoto,
+                enabled = !sending && !uploadingPhoto && !isRecording && !uploadingAudio,
                 onClick = {
                     val text = messageInput.trim()
                     val photo = pendingPhotoUri
-                    if ((text.isBlank() && photo == null) || sending || uploadingPhoto) return@IconButton
+                    if ((text.isBlank() && photo == null) || sending || uploadingPhoto || isRecording || uploadingAudio) return@IconButton
                     val reply = replyTarget
 
                     fun send(photoUrl: String?) {
