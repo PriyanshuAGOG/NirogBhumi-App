@@ -11,6 +11,18 @@ service firebase.storage {
     // execute script in that origin - not worth the risk for a format none
     // of the upload flows (photos, lab reports, attachments) actually need.
     function safeType() { return request.resource == null || request.resource.contentType.matches('(image/(png|jpe?g|webp|heic|heif|gif)|application/pdf)'); }
+    // Program chat photos are visible to the whole batch, not just the
+    // uploader - a Firestore cross-service read of the caller's own user
+    // doc (never anyone else's) confirms they're an active member of the
+    // exact program in the path before granting read OR write.
+    function programMember(programId) {
+      let profile = firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data;
+      return signedIn() && profile.activeProgramId == programId && profile.programActive == true;
+    }
+    match /program-chat-photos/{programId}/{uid}/{allPaths=**} {
+      allow read: if programMember(programId) || admin();
+      allow write: if owner(uid) && programMember(programId) && smallEnough() && safeType();
+    }
     match /users/{uid}/{allPaths=**} { allow read, write: if (owner(uid) || admin()) && smallEnough() && safeType(); }
     match /meal-photos/{uid}/{allPaths=**} { allow read, write: if (owner(uid) || admin()) && smallEnough() && safeType(); }
     match /lab-reports/{uid}/{allPaths=**} { allow read, write: if (owner(uid) || admin()) && smallEnough() && safeType(); }

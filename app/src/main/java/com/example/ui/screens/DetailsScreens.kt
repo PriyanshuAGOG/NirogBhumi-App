@@ -1,6 +1,8 @@
 package com.nirogbhumi.app.ui.screens
 
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
@@ -2639,9 +2641,14 @@ fun ProgramChatScreen(state: NirogState) {
     var replyTarget by remember { mutableStateOf<com.nirogbhumi.app.data.CloudDocument?>(null) }
     var reportTarget by remember { mutableStateOf<com.nirogbhumi.app.data.CloudDocument?>(null) }
     var reporting by remember { mutableStateOf(false) }
+    var pendingPhotoUri by remember { mutableStateOf<Uri?>(null) }
+    var uploadingPhoto by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
     val myUid = state.repository.userId
+    val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) pendingPhotoUri = uri
+    }
 
     DisposableEffect(state.activeProgramId) {
         val subscription = state.repository.listenProgramChat(state.activeProgramId) { result ->
@@ -2718,6 +2725,7 @@ fun ProgramChatScreen(state: NirogState) {
                     val isMine = record.values["userId"] == myUid
                     val senderName = record.values["senderName"]?.toString() ?: "Member"
                     val text = record.values["text"]?.toString().orEmpty()
+                    val photoUrl = record.values["photoUrl"]?.toString()
                     @Suppress("UNCHECKED_CAST")
                     val replyTo = record.values["replyTo"] as? Map<String, Any?>
                     @Suppress("UNCHECKED_CAST")
@@ -2761,10 +2769,23 @@ fun ProgramChatScreen(state: NirogState) {
                                     )
                                 }
                             }
-                            Text(
-                                mentionAnnotatedText(text, mentionColor = if (isMine) NirogColor.goldSoft else NirogColor.gold),
-                                style = NirogType.body.copy(color = if (isMine) NirogColor.onAccent else NirogColor.inkPrimary),
-                            )
+                            if (photoUrl != null) {
+                                coil.compose.AsyncImage(
+                                    model = photoUrl, contentDescription = "Photo from $senderName",
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(max = 220.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .then(if (text.isNotBlank()) Modifier.padding(bottom = 6.dp) else Modifier),
+                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                )
+                            }
+                            if (text.isNotBlank()) {
+                                Text(
+                                    mentionAnnotatedText(text, mentionColor = if (isMine) NirogColor.goldSoft else NirogColor.gold),
+                                    style = NirogType.body.copy(color = if (isMine) NirogColor.onAccent else NirogColor.inkPrimary),
+                                )
+                            }
                         }
 
                         if (reactions.isNotEmpty()) {
@@ -2818,10 +2839,40 @@ fun ProgramChatScreen(state: NirogState) {
             }
         }
 
+        pendingPhotoUri?.let { uri ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = NirogSpace.lg, vertical = NirogSpace.xs)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(NirogColor.surfaceSunken)
+                    .padding(horizontal = NirogSpace.md, vertical = NirogSpace.sm),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                coil.compose.AsyncImage(
+                    model = uri, contentDescription = "Photo to send",
+                    modifier = Modifier.size(40.dp).clip(RoundedCornerShape(8.dp)),
+                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text("Photo ready to send", style = NirogType.caption, color = NirogColor.inkSecondary, modifier = Modifier.weight(1f))
+                IconButton(onClick = { pendingPhotoUri = null }, enabled = !uploadingPhoto) {
+                    Icon(Icons.Filled.Close, contentDescription = "Remove photo", tint = NirogColor.inkMuted, modifier = Modifier.size(18.dp))
+                }
+            }
+        }
+
         Row(
             modifier = Modifier.fillMaxWidth().padding(NirogSpace.lg),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            IconButton(
+                enabled = !uploadingPhoto && !sending,
+                onClick = { photoPicker.launch("image/*") },
+                modifier = Modifier.semantics { contentDescription = "Attach a photo" },
+            ) {
+                Text("📷", style = NirogType.cardTitle)
+            }
             OutlinedTextField(
                 value = messageInput,
                 onValueChange = { messageInput = it },
@@ -2833,25 +2884,45 @@ fun ProgramChatScreen(state: NirogState) {
             )
             Spacer(modifier = Modifier.width(NirogSpace.sm))
             IconButton(
+                enabled = !sending && !uploadingPhoto,
                 onClick = {
                     val text = messageInput.trim()
-                    if (text.isBlank() || sending) return@IconButton
-                    sending = true
+                    val photo = pendingPhotoUri
+                    if ((text.isBlank() && photo == null) || sending || uploadingPhoto) return@IconButton
                     val reply = replyTarget
-                    state.repository.sendProgramChatMessage(
-                        programId = state.activeProgramId,
-                        text = text,
-                        senderName = state.profileName.ifBlank { "Member" },
-                        replyToId = reply?.id,
-                        replyToSender = reply?.values?.get("senderName")?.toString(),
-                        replyToText = reply?.values?.get("text")?.toString(),
-                    ) { result ->
-                        sending = false
-                        if (result is com.nirogbhumi.app.data.CloudResult.Success) {
-                            messageInput = ""
-                            replyTarget = null
-                            coroutineScope.launch { listState.animateScrollToItem(0) }
-                        } else state.cloudMessage = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
+
+                    fun send(photoUrl: String?) {
+                        sending = true
+                        state.repository.sendProgramChatMessage(
+                            programId = state.activeProgramId,
+                            text = text,
+                            senderName = state.profileName.ifBlank { "Member" },
+                            replyToId = reply?.id,
+                            replyToSender = reply?.values?.get("senderName")?.toString(),
+                            replyToText = reply?.values?.get("text")?.toString(),
+                            photoUrl = photoUrl,
+                        ) { result ->
+                            sending = false
+                            if (result is com.nirogbhumi.app.data.CloudResult.Success) {
+                                messageInput = ""
+                                replyTarget = null
+                                pendingPhotoUri = null
+                                coroutineScope.launch { listState.animateScrollToItem(0) }
+                            } else state.cloudMessage = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
+                        }
+                    }
+
+                    if (photo != null) {
+                        uploadingPhoto = true
+                        state.repository.uploadProgramChatPhoto(state.activeProgramId, photo) { result ->
+                            uploadingPhoto = false
+                            when (result) {
+                                is com.nirogbhumi.app.data.CloudResult.Success -> send(result.value)
+                                is com.nirogbhumi.app.data.CloudResult.Failure -> state.cloudMessage = result.message
+                            }
+                        }
+                    } else {
+                        send(null)
                     }
                 },
                 modifier = Modifier.size(48.dp).background(NirogColor.forest, CircleShape)
