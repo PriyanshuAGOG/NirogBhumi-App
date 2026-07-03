@@ -301,8 +301,13 @@ by the user. Work sequentially, CI-verified per slice, small commits.
    WorkManager periodic request's first fire ~15 minutes before that
    hour, falling back to a safe elapsed-24h schedule until the hint
    loads or if the member has none yet.
-10. [ ] **Care+ community features** — @mentions, pin-a-message, photo
-    sharing, voice notes in chat.
+10. [~] **Care+ community features** — @mentions (rendering-only
+    highlighting of "@Name" tokens, no roster autocomplete yet) and
+    pin-a-message (staff-only, rules-enforced via `programStaff()`, banner
+    at top of General, 6 new rules-unit tests) shipped. Photo sharing and
+    voice notes still open - need Storage upload plumbing wired into the
+    chat composer specifically (the general upload path already exists
+    for Health File/lab reports).
 11. [ ] **Consultations** — build a real non-payment booking flow
     end to end (replaces the inert scaffold from item 5).
 12. [ ] **Health data intelligence** — basic trend correlation insight.
