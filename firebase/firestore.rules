@@ -117,8 +117,14 @@ service cloud.firestore {
       // Reactions are the one thing any batchmate (not just the author) can
       // touch on someone else's message - restricted to only that field so
       // a member can never edit another member's text via this path.
-      allow update: if programMember() && ownProgram(resource.data.programId)
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions']);
+      // Pinning (like announcements) is a staff action, scoped to the coach
+      // assigned to that specific program - checked separately from the
+      // reactions branch so a member can never smuggle a pin through by
+      // also including 'reactions' in the same write.
+      allow update: if (programMember() && ownProgram(resource.data.programId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions']))
+        || (programStaff(resource.data.programId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['pinned', 'pinnedBy', 'pinnedAt']));
     }
     match /reportedMessages/{id} {
       // Any program member can report a message they can see; reviewed by

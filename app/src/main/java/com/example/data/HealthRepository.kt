@@ -52,6 +52,9 @@ interface HealthRepository {
     // Toggles the caller's own reaction on a message - add=true unions their uid
     // into reactions.<emoji>, add=false removes it. Never touches message text.
     fun toggleChatReaction(messageId: String, emoji: String, add: Boolean, done: (CloudResult<Unit>) -> Unit)
+    // Staff-only (rules-enforced via programStaff(programId), same as announcements).
+    // pinned=false clears pinnedBy/pinnedAt too, so an old pin can't linger with stale attribution.
+    fun togglePinMessage(messageId: String, programId: String, pinned: Boolean, done: (CloudResult<Unit>) -> Unit)
 
     // Batch Pulse: today's PII-free "N of M checked in" + collective walking
     // minutes for the caller's program. Written only by Cloud Functions.
@@ -275,6 +278,19 @@ class FirebaseHealthRepository : HealthRepository {
             .update("reactions.$emoji", change)
             .addOnSuccessListener { done(CloudResult.Success(Unit)) }
             .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Reaction could not be saved", it)) }
+    }
+
+    override fun togglePinMessage(messageId: String, programId: String, pinned: Boolean, done: (CloudResult<Unit>) -> Unit) {
+        val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
+        val database = db ?: return done(CloudResult.Failure("Firebase is not configured"))
+        val values = if (pinned) {
+            mapOf("pinned" to true, "pinnedBy" to uid, "pinnedAt" to FieldValue.serverTimestamp())
+        } else {
+            mapOf("pinned" to false, "pinnedBy" to FieldValue.delete(), "pinnedAt" to FieldValue.delete())
+        }
+        database.collection("programChatMessages").document(messageId).update(values)
+            .addOnSuccessListener { done(CloudResult.Success(Unit)) }
+            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Could not update pin", it)) }
     }
 
     override fun reportChatMessage(messageId: String, programId: String, reportedText: String, reportedUserId: String, done: (CloudResult<Unit>) -> Unit) {

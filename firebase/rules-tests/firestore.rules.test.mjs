@@ -143,6 +143,54 @@ describe('programChatMessages reactions-only update', () => {
       text: 'edited by someone else',
     }));
   });
+
+  it('denies a member pinning a message via the reactions-only branch', async () => {
+    await assertFails(updateDoc(doc(member('mem2'), 'programChatMessages/msg1'), {
+      pinned: true,
+    }));
+  });
+});
+
+describe('programChatMessages pin toggle (staff-only, per-program)', () => {
+  beforeEach(async () => {
+    await seed(async (db) => {
+      await setDoc(doc(db, 'programs/progA'), { name: 'Program A', coachId: 'coach-a' });
+      await setDoc(doc(db, 'users/mem1'), { userId: 'mem1', activeProgramId: 'progA', programActive: true });
+      await setDoc(doc(db, 'programChatMessages/msg1'), {
+        programId: 'progA', userId: 'mem1', text: 'Walk at 6pm today', createdAt: serverTimestamp(),
+      });
+    });
+  });
+
+  it('lets the assigned coach pin a message', async () => {
+    await assertSucceeds(updateDoc(doc(coach('coach-a'), 'programChatMessages/msg1'), {
+      pinned: true, pinnedBy: 'coach-a', pinnedAt: serverTimestamp(),
+    }));
+  });
+
+  it('lets admin pin a message regardless of coachId', async () => {
+    await assertSucceeds(updateDoc(doc(admin(), 'programChatMessages/msg1'), {
+      pinned: true, pinnedBy: 'admin-uid', pinnedAt: serverTimestamp(),
+    }));
+  });
+
+  it('denies an unassigned coach pinning a message in another program', async () => {
+    await assertFails(updateDoc(doc(coach('coach-b'), 'programChatMessages/msg1'), {
+      pinned: true, pinnedBy: 'coach-b', pinnedAt: serverTimestamp(),
+    }));
+  });
+
+  it('denies a member (even the author) pinning their own message', async () => {
+    await assertFails(updateDoc(doc(member('mem1'), 'programChatMessages/msg1'), {
+      pinned: true, pinnedBy: 'mem1', pinnedAt: serverTimestamp(),
+    }));
+  });
+
+  it('denies a coach smuggling a text edit in through the pin branch', async () => {
+    await assertFails(updateDoc(doc(coach('coach-a'), 'programChatMessages/msg1'), {
+      pinned: true, text: 'rewritten by staff',
+    }));
+  });
 });
 
 describe('users/{uid} program-field lock (self-enrollment bypass fix)', () => {

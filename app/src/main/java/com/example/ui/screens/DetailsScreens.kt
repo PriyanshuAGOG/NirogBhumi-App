@@ -25,9 +25,12 @@ import androidx.compose.ui.semantics.semantics
 import com.google.firebase.Timestamp
 import com.nirogbhumi.app.data.CloudResult
 import com.nirogbhumi.app.notifications.EventReminderWorker
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.health.connect.client.PermissionController
@@ -2606,6 +2609,24 @@ fun AnnouncementsScreen(state: NirogState) {
 
 private val QUICK_REACTIONS = listOf("👍", "❤️", "😂", "🙏")
 
+// Single-token @mentions ("@Priya", not "@Priya Sharma") - there's no roster
+// autocomplete yet, so this is rendering-only highlighting of whatever the
+// sender typed, not a validated reference to a real member.
+private val MENTION_REGEX = Regex("(?<=^|\\s)@[\\p{L}0-9_]+")
+
+private fun mentionAnnotatedText(text: String, mentionColor: Color): androidx.compose.ui.text.AnnotatedString =
+    buildAnnotatedString {
+        var last = 0
+        for (match in MENTION_REGEX.findAll(text)) {
+            append(text.substring(last, match.range.first))
+            withStyle(SpanStyle(color = mentionColor, fontWeight = FontWeight.Bold)) {
+                append(match.value)
+            }
+            last = match.range.last + 1
+        }
+        append(text.substring(last))
+    }
+
 // Care+ community chat - one shared room per program, not one global room, so
 // conversation stays relevant to the program a member actually joined.
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
@@ -2641,6 +2662,44 @@ fun ProgramChatScreen(state: NirogState) {
             modifier = Modifier.padding(horizontal = NirogSpace.lg)
         )
         Spacer(modifier = Modifier.height(NirogSpace.sm))
+
+        // records is already ordered newest-first by createdAt, so the first
+        // pinned hit is the most recently *sent* pinned message - not
+        // necessarily the most recently *pinned* one, but close enough for a
+        // single-banner v1 without needing to parse pinnedAt timestamps.
+        records?.firstOrNull { it.values["pinned"] == true }?.let { pinned ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = NirogSpace.lg, vertical = NirogSpace.xs)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(NirogColor.goldSoft.copy(alpha = 0.25f))
+                    .padding(horizontal = NirogSpace.md, vertical = NirogSpace.sm),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("📌", style = NirogType.body)
+                Spacer(Modifier.width(8.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        pinned.values["senderName"]?.toString() ?: "Member",
+                        style = NirogType.overline, color = NirogColor.forest,
+                    )
+                    Text(
+                        pinned.values["text"]?.toString().orEmpty(),
+                        style = NirogType.caption, color = NirogColor.inkSecondary, maxLines = 2,
+                    )
+                }
+                if (state.isAdmin) {
+                    IconButton(onClick = {
+                        state.repository.togglePinMessage(pinned.id, state.activeProgramId, pinned = false) { result ->
+                            if (result is com.nirogbhumi.app.data.CloudResult.Failure) state.cloudMessage = result.message
+                        }
+                    }) {
+                        Icon(Icons.Filled.Close, contentDescription = "Unpin message", tint = NirogColor.inkMuted, modifier = Modifier.size(18.dp))
+                    }
+                }
+            }
+        }
 
         when {
             records == null -> Box(modifier = Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
@@ -2702,7 +2761,10 @@ fun ProgramChatScreen(state: NirogState) {
                                     )
                                 }
                             }
-                            Text(text, style = NirogType.body, color = if (isMine) NirogColor.onAccent else NirogColor.inkPrimary)
+                            Text(
+                                mentionAnnotatedText(text, mentionColor = if (isMine) NirogColor.goldSoft else NirogColor.gold),
+                                style = NirogType.body.copy(color = if (isMine) NirogColor.onAccent else NirogColor.inkPrimary),
+                            )
                         }
 
                         if (reactions.isNotEmpty()) {
@@ -2834,6 +2896,23 @@ fun ProgramChatScreen(state: NirogState) {
                         },
                         onClick = { replyTarget = target; actionTarget = null },
                     )
+                    if (state.isAdmin) {
+                        val isPinned = target.values["pinned"] == true
+                        RowCard(
+                            title = if (isPinned) "Unpin message" else "Pin message",
+                            leading = {
+                                Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {
+                                    Text("📌", style = NirogType.cardTitle)
+                                }
+                            },
+                            onClick = {
+                                state.repository.togglePinMessage(target.id, state.activeProgramId, pinned = !isPinned) { result ->
+                                    if (result is com.nirogbhumi.app.data.CloudResult.Failure) state.cloudMessage = result.message
+                                }
+                                actionTarget = null
+                            },
+                        )
+                    }
                     if (!isMine) {
                         RowCard(
                             title = "Report",
