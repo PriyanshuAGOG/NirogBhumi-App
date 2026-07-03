@@ -24,7 +24,19 @@ service cloud.firestore {
     match /users/{uid} {
       allow create: if owner(uid) && request.resource.data.userId == uid && (!('role' in request.resource.data) || request.resource.data.role == 'user');
       allow read: if owner(uid) || staff() || assigned(uid);
-      allow update: if admin() || (owner(uid) && (!('role' in resource.data) || request.resource.data.role == resource.data.role) && (!('status' in resource.data) || request.resource.data.status == resource.data.status));
+      // Role/status/enrollment fields are the actual security and billing
+      // boundary of this doc, so the owner can never change them directly -
+      // only admin(), or a Cloud Function via the Admin SDK (which bypasses
+      // rules entirely - see redeemProgramCode / setUserRole), may set them.
+      // .get(field, default) makes this airtight even when the field is
+      // absent from the existing doc, unlike a plain 'in' presence check.
+      allow update: if admin() || (owner(uid)
+        && request.resource.data.role == resource.data.get('role', 'user')
+        && request.resource.data.status == resource.data.get('status', 'active')
+        && request.resource.data.get('programActive', false) == resource.data.get('programActive', false)
+        && request.resource.data.get('activeProgramId', null) == resource.data.get('activeProgramId', null)
+        && request.resource.data.get('activeProgramName', null) == resource.data.get('activeProgramName', null)
+        && request.resource.data.get('programDurationDays', null) == resource.data.get('programDurationDays', null));
       allow delete: if admin();
     }
     match /profiles/{id} {
@@ -44,8 +56,8 @@ service cloud.firestore {
     }
     match /consultations/{id} {
       allow create: if validCreate() && request.resource.data.paymentStatus == 'pending' && request.resource.data.status in ['pending', 'payment_pending'];
-      allow read: if ownsResource() || admin() || (expert() && resource.data.expertId == request.auth.uid);
-      allow update: if admin() || (expert() && resource.data.expertId == request.auth.uid && preservesUserId()) || (ownsResource() && ownsRequest() && preservesUserId() && request.resource.data.paymentStatus == resource.data.paymentStatus && request.resource.data.status == resource.data.status);
+      allow read: if ownsResource() || staff() || (expert() && resource.data.expertId == request.auth.uid);
+      allow update: if admin() || (expert() && resource.data.expertId == request.auth.uid && request.resource.data.expertId == resource.data.expertId && preservesUserId()) || (ownsResource() && ownsRequest() && preservesUserId() && request.resource.data.paymentStatus == resource.data.paymentStatus && request.resource.data.status == resource.data.status);
     }
     match /{collection}/{id} {
       allow read: if collection in ['dailyActions','weeklyReports','sugarStories','userPrograms','programPlans','expertNotes','notifications','deviceConnections','orders'] && (ownsResource() || admin() || assigned(resource.data.userId));
@@ -54,11 +66,24 @@ service cloud.firestore {
       allow create: if collection == 'orders' && validCreate() && request.resource.data.paymentStatus == 'pending' && request.resource.data.orderStatus == 'pending';
       // The device itself (local reminder fired, FCM message received) is the
       // one recording that a notification happened, so a self-scoped create
-      // is safe - it can only ever write an entry claiming to be its own user.
-      allow create: if collection == 'notifications' && validCreate();
+      // is safe - it can only ever write an entry claiming to be its own
+      // user. It must never be able to set status/scheduledFor/type though:
+      // those are what makes sendPendingNotifications() pick a doc up and
+      // push it, so without this guard a client could self-create a
+      // status:'scheduled' doc to flood the shared 100-per-15-minute
+      // processing queue and crowd out (or bypass quiet hours/caps for)
+      // other users' - including critical health - alerts.
+      allow create: if collection == 'notifications' && validCreate()
+        && !('status' in request.resource.data)
+        && !('scheduledFor' in request.resource.data)
+        && !('type' in request.resource.data);
     }
     match /contentItems/{id} { allow read: if resource.data.status == 'published' || admin(); allow write: if admin() || role('content_manager'); }
-    match /programs/{id} { allow read: if signedIn(); allow write: if admin(); }
+    // Program docs hold the plaintext invite/redemption code, so a public
+    // signedIn() read would let anyone list every program's code and
+    // self-enroll - staff-only read; redemption goes through the
+    // redeemProgramCode Cloud Function instead of a direct client read.
+    match /programs/{id} { allow read: if staff(); allow write: if staff(); }
     match /announcements/{id} {
       allow read: if programMember() || staff();
       allow create: if staff() && request.resource.data.authorId == request.auth.uid && request.resource.data.createdAt == request.time;
@@ -70,9 +95,15 @@ service cloud.firestore {
     match /reportedMessages/{id} {
       // Any program member can report a message they can see; only admins review them.
       allow create: if programMember() && request.resource.data.reporterId == request.auth.uid && request.resource.data.createdAt == request.time;
-      allow read, update: if admin();
+      allow read, update: if staff();
     }
-    match /consultationSlots/{id} { allow read: if signedIn() && resource.data.active == true; allow write: if admin() || expert(); }
+    match /consultationSlots/{id} {
+      allow read: if signedIn() && resource.data.active == true;
+      // Scoped to the owning expert - expert() alone would let any expert
+      // edit or disable a colleague's availability slots.
+      allow create: if admin() || (expert() && request.resource.data.expertId == request.auth.uid);
+      allow update, delete: if admin() || (expert() && resource.data.expertId == request.auth.uid);
+    }
     match /expertAssignments/{id} { allow read: if admin() || (expert() && resource.data.expertId == request.auth.uid); allow write: if admin(); }
     match /{collection}/{id} {
       allow create: if collection in ['dataExportRequests','deletionRequests'] && validCreate();
@@ -82,8 +113,8 @@ service cloud.firestore {
     match /auditLogs/{id} { allow read: if admin(); allow write: if false; }
     match /supportRequests/{id} {
       allow create: if validCreate() && request.resource.data.status == 'open';
-      allow read: if ownsResource() || admin();
-      allow update: if admin();
+      allow read: if ownsResource() || staff();
+      allow update: if staff();
     }
     // Care+ program calendar. Members read events for the program they're
     // enrolled in; only staff (admin/coach) create or edit them.
@@ -97,12 +128,12 @@ service cloud.firestore {
     // batch-level presence reaches members via batchStats, not this collection.
     match /programMembers/{id} {
       allow read: if staff() || (signedIn() && resource.data.uid == request.auth.uid);
-      // Self-enrollment: redeeming a program code writes the caller's own
-      // roster entry (id must be "{programId}_{uid}" so a member can never
-      // plant a doc claiming to be someone else or in a program they didn't
-      // redeem a code for).
-      allow create: if staff() || (signedIn() && request.resource.data.uid == request.auth.uid && id == request.resource.data.programId + '_' + request.auth.uid);
-      allow update, delete: if staff();
+      // Enrollment goes through the redeemProgramCode Cloud Function (Admin
+      // SDK, bypasses rules), which validates the code and creates this
+      // roster entry itself - the roster is never client-writable, so a
+      // member can't plant a doc for a program they didn't redeem a code
+      // for, or forge their own contributionKm/lastCheckinAt stats.
+      allow create, update, delete: if staff();
     }
     // Aggregated, PII-free batch counts written by Cloud Functions only. Members
     // read the stats for the program they're enrolled in (cooperative presence).
@@ -124,8 +155,14 @@ service cloud.firestore {
     // Coach-only case notes on a member, for consultation prep. Members never
     // see these - staff-only end to end.
     match /coachNotes/{id} {
-      allow read, update, delete: if staff();
+      allow read, delete: if staff();
       allow create: if staff() && request.resource.data.authorId == request.auth.uid && request.resource.data.createdAt == request.time;
+      // Editing a note can't reassign who wrote it or which member it's
+      // about - otherwise any staff member could rewrite authorship history
+      // or quietly move a note onto a different member's file.
+      allow update: if staff()
+        && request.resource.data.authorId == resource.data.authorId
+        && request.resource.data.targetUid == resource.data.targetUid;
     }
     match /{document=**} { allow read, write: if false; }
   }

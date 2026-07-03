@@ -201,6 +201,7 @@ fun DailyCheckInScreen(state: NirogState) {
                                 if (sugarInput.isBlank()) { advance(); return@Button }
                                 if (sugarType == "HbA1c") {
                                     val v = sugarInput.toDoubleOrNull() ?: run { error = "Enter a valid value"; return@Button }
+                                    if (v < 3.0 || v > 20.0) { error = "Enter a value between 3 and 20%"; return@Button }
                                     saving = true
                                     state.repository.addHealthLog("glucoseReadings", mapOf("value" to v, "unit" to "%", "readingType" to "hba1c", "measuredAt" to FieldValue.serverTimestamp(), "source" to "manual")) { r ->
                                         saving = false
@@ -208,6 +209,7 @@ fun DailyCheckInScreen(state: NirogState) {
                                     }
                                 } else {
                                     val v = sugarInput.toIntOrNull() ?: run { error = "Enter a valid number"; return@Button }
+                                    if (v < 20 || v > 800) { error = "Enter a value between 20 and 800 mg/dL"; return@Button }
                                     saving = true
                                     state.repository.addHealthLog("glucoseReadings", mapOf("value" to v, "unit" to "mg/dL", "readingType" to if (sugarType == "Fasting") "fasting" else "post_meal", "measuredAt" to FieldValue.serverTimestamp(), "source" to "manual")) { r ->
                                         saving = false
@@ -223,6 +225,7 @@ fun DailyCheckInScreen(state: NirogState) {
                                 if (systolic.isBlank() && diastolic.isBlank()) { advance(); return@Button }
                                 val sys = systolic.toIntOrNull(); val dia = diastolic.toIntOrNull()
                                 if (sys == null || dia == null) { error = "Enter both numbers, or skip"; return@Button }
+                                if (sys < 60 || sys > 260 || dia < 30 || dia > 180) { error = "Enter a plausible BP (systolic 60-260, diastolic 30-180)"; return@Button }
                                 saving = true
                                 state.repository.addHealthLog("bpReadings", mapOf("systolic" to sys, "diastolic" to dia, "measuredAt" to FieldValue.serverTimestamp(), "source" to "manual")) { r ->
                                     saving = false
@@ -232,6 +235,7 @@ fun DailyCheckInScreen(state: NirogState) {
                             2 -> {
                                 if (weightInput.isBlank()) { advance(); return@Button }
                                 val w = weightInput.toDoubleOrNull() ?: run { error = "Enter a valid weight"; return@Button }
+                                if (w < 20.0 || w > 300.0) { error = "Enter a weight between 20 and 300 kg"; return@Button }
                                 saving = true
                                 state.repository.addHealthLog("weightLogs", mapOf("valueKg" to w, "measuredAt" to FieldValue.serverTimestamp(), "source" to "manual")) { r ->
                                     saving = false

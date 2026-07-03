@@ -148,60 +148,23 @@ class FirebaseHealthRepository : HealthRepository {
             ?: done(CloudResult.Failure("Firebase is not configured"))
     }
 
-    // Validated directly against the public "programs" collection instead of a Cloud
-    // Function - this project's Cloud Functions can't be deployed without Blaze billing,
-    // and a client-side lookup plus a self-scoped profile write is a reasonable tradeoff
-    // for a small, invite-only beta rather than leaving enrollment entirely broken.
+    // Goes through the redeemProgramCode Cloud Function rather than a direct
+    // client-side lookup + self-scoped write: "programs" now requires staff
+    // access to read (its code field would otherwise let any signed-in user
+    // list every program's invite code and self-enroll), and
+    // "programMembers" is staff-write-only (otherwise a member could plant a
+    // roster entry with forged consistency stats). The function validates
+    // the code and performs both writes itself under the Admin SDK.
     override fun redeemProgramCode(code: String, done: (CloudResult<Map<String, Any?>>) -> Unit) {
-        val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
-        val database = db ?: return done(CloudResult.Failure("Firebase is not configured"))
-        database.collection("programs")
-            .whereEqualTo("code", code.trim().uppercase())
-            .limit(1)
-            .get()
-            .addOnSuccessListener { snapshot ->
-                val programDoc = snapshot.documents.firstOrNull()
-                if (programDoc == null) {
-                    done(CloudResult.Failure("That program code wasn't recognized"))
-                    return@addOnSuccessListener
-                }
-                val programId = programDoc.id
-                val programName = programDoc.getString("name") ?: "Nirog Bhumi Program"
-                val durationDays = (programDoc.get("durationDays") as? Number)?.toLong() ?: 0L
-                val enrollment = mapOf(
-                    "programActive" to true,
-                    "activeProgramId" to programId,
-                    "activeProgramName" to programName,
-                    "programDurationDays" to durationDays,
-                    "programStartedAt" to FieldValue.serverTimestamp()
-                )
-                database.collection("users").document(uid).get()
-                    .addOnSuccessListener { userDoc ->
-                        val memberName = userDoc.getString("fullName")?.takeIf { it.isNotBlank() } ?: "Member"
-                        // Enrollment and the roster entry the coach console reads from
-                        // must land together, or the admin console shows a phantom
-                        // program with no members - a single batched commit keeps
-                        // them consistent even if one write would otherwise fail.
-                        val batch = database.batch()
-                        batch.set(database.collection("users").document(uid), enrollment, SetOptions.merge())
-                        batch.set(
-                            database.collection("programMembers").document("${programId}_$uid"),
-                            mapOf(
-                                "programId" to programId,
-                                "uid" to uid,
-                                "name" to memberName,
-                                "status" to "active",
-                                "joinedAt" to FieldValue.serverTimestamp()
-                            ),
-                            SetOptions.merge()
-                        )
-                        batch.commit()
-                            .addOnSuccessListener { done(CloudResult.Success(enrollment)) }
-                            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Enrollment could not be saved", it)) }
-                    }
-                    .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Could not read your profile", it)) }
+        val callable = functions?.getHttpsCallable("redeemProgramCode")
+            ?: return done(CloudResult.Failure("Firebase is not configured"))
+        callable.call(mapOf("code" to code.trim().uppercase()))
+            .addOnSuccessListener { result ->
+                @Suppress("UNCHECKED_CAST")
+                val value = result.data as? Map<String, Any?> ?: emptyMap()
+                done(CloudResult.Success(value))
             }
-            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Program code could not be verified", it)) }
+            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "That program code wasn't recognized", it)) }
     }
 
     override fun listenAnnouncements(programId: String, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription {

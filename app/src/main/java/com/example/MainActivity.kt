@@ -29,6 +29,19 @@ import com.nirogbhumi.app.ui.theme.MyApplicationTheme
 
 private const val IS_PRODUCTION_APK = true
 
+// MainActivity is exported (it's the launcher), so any other app on the
+// device can start it with an arbitrary "route" extra. The only legitimate
+// producers of this extra are internal (NirogMessagingService's fixed
+// type->route map, ReminderWorker, EventReminderWorker) and only ever emit
+// one of these values - validating against this allowlist stops a
+// crafted external intent from forcing navigation to an arbitrary internal
+// screen key (e.g. skipping past the consent screen).
+private val DEEP_LINK_ROUTES = setOf(
+  "dashboard", "weekly_report", "consultation_detail", "active_journey",
+  "order_detail", "expert_notes", "program_calendar",
+)
+private fun sanitizedRoute(raw: String?): String = raw?.takeIf { it in DEEP_LINK_ROUTES } ?: ""
+
 class MainActivity : ComponentActivity(), com.razorpay.PaymentResultListener {
   private val nirogState by lazy { NirogState() }
 
@@ -52,7 +65,7 @@ class MainActivity : ComponentActivity(), com.razorpay.PaymentResultListener {
         .updateIfNewReleaseAvailable()
         .addOnFailureListener { /* not signed in as a tester yet, or no newer release - nothing to show */ }
     }
-    nirogState.pendingDeepLink = intent.getStringExtra("route").orEmpty()
+    nirogState.pendingDeepLink = sanitizedRoute(intent.getStringExtra("route"))
     val tourSeen = getSharedPreferences("nirog_prefs", MODE_PRIVATE).getBoolean("onboarding_tour_seen", false)
     nirogState.shouldShowTour = !tourSeen
     enableEdgeToEdge()
@@ -245,7 +258,7 @@ class MainActivity : ComponentActivity(), com.razorpay.PaymentResultListener {
 
   override fun onNewIntent(intent: Intent) {
     super.onNewIntent(intent)
-    intent.getStringExtra("route")?.takeIf { it.isNotBlank() }?.let {
+    sanitizedRoute(intent.getStringExtra("route")).takeIf { it.isNotBlank() }?.let {
       nirogState.pendingDeepLink = it
       nirogState.currentScreen = it
     }
