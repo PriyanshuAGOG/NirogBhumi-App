@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.sp
 import androidx.health.connect.client.PermissionController
 import com.nirogbhumi.app.health.HealthConnectManager
 import com.nirogbhumi.app.health.HealthConnectStatus
+import com.nirogbhumi.app.health.computeSleepGlucoseInsight
 import com.nirogbhumi.app.ui.NirogState
 import com.nirogbhumi.app.ui.SugarLog
 import com.nirogbhumi.app.ui.components.NirogCard
@@ -719,6 +720,19 @@ fun ActiveJourneyScreen(state: NirogState) {
 // Screen 5: Detailed Insight sleeping-correlation dashboard
 @Composable
 fun InsightDetailScreen(state: NirogState) {
+    var sleepLogs by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>>(emptyList()) }
+    var glucoseReadings by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>>(emptyList()) }
+    DisposableEffect(state.repository.userId) {
+        val sleepSub = state.repository.listenUserCollection("sleepLogs", limit = 60) { result ->
+            if (result is CloudResult.Success) sleepLogs = result.value
+        }
+        val glucoseSub = state.repository.listenUserCollection("glucoseReadings", limit = 60) { result ->
+            if (result is CloudResult.Success) glucoseReadings = result.value
+        }
+        onDispose { sleepSub.cancel(); glucoseSub.cancel() }
+    }
+    val insight = remember(sleepLogs, glucoseReadings) { computeSleepGlucoseInsight(sleepLogs, glucoseReadings) }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -761,7 +775,24 @@ fun InsightDetailScreen(state: NirogState) {
                 lineHeight = 20.sp
             )
 
-            if (state.sugarLogs.size < 5) {
+            if (insight != null) {
+                Card(
+                    modifier = Modifier.fillMaxWidth().border(width = 0.5.dp, color = Color(0xFF9CB79F).copy(alpha = 0.3f), shape = RoundedCornerShape(20.dp)),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFF4E9D3)),
+                    shape = RoundedCornerShape(20.dp)
+                ) {
+                    Column(modifier = Modifier.padding(20.dp)) {
+                        Text("YOUR OWN DATA", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFFB9832B))
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            "Fasting sugar has averaged %.0f mg/dL after shorter nights (under 6h, %d logged) vs %.0f mg/dL after longer ones (%d logged).".format(
+                                insight.shortSleepAvg, insight.shortNights, insight.longSleepAvg, insight.longNights
+                            ),
+                            fontSize = 14.sp, color = Color(0xFF4B3B1B), lineHeight = 20.sp,
+                        )
+                    }
+                }
+            } else if (state.sugarLogs.size < 5) {
                 Card(
                     modifier = Modifier.fillMaxWidth().border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.35f), shape = RoundedCornerShape(20.dp)),
                     colors = CardDefaults.cardColors(containerColor = Color.White),

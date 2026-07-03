@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.nirogbhumi.app.data.CloudResult
+import com.nirogbhumi.app.health.computeSleepGlucoseInsight
 import com.nirogbhumi.app.ui.NirogState
 import com.nirogbhumi.app.ui.SugarLog
 import com.nirogbhumi.app.ui.components.SectionLabel
@@ -765,6 +766,8 @@ fun TodayTab(state: NirogState) {
             }
         }
 
+        SleepGlucoseInsightCard(state)
+
         Card(
             modifier = Modifier
                 .fillMaxWidth()
@@ -800,6 +803,58 @@ fun TodayTab(state: NirogState) {
         }
 
         Spacer(modifier = Modifier.height(24.dp))
+    }
+}
+
+/**
+ * Basic trend correlation insight: cross-references the member's own
+ * glucoseReadings and sleepLogs (a fasting reading against sleep logged the
+ * previous night) rather than showing a generic tip. Renders nothing at all
+ * - not a "not enough data yet" filler - until there's both enough logged
+ * nights in each bucket and a difference large enough to be worth surfacing,
+ * consistent with the app's no-fabricated-data principle.
+ */
+@Composable
+private fun SleepGlucoseInsightCard(state: NirogState) {
+    var sleepLogs by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>>(emptyList()) }
+    var glucoseReadings by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>>(emptyList()) }
+
+    DisposableEffect(state.repository.userId) {
+        val sleepSub = state.repository.listenUserCollection("sleepLogs", limit = 60) { result ->
+            if (result is CloudResult.Success) sleepLogs = result.value
+        }
+        val glucoseSub = state.repository.listenUserCollection("glucoseReadings", limit = 60) { result ->
+            if (result is CloudResult.Success) glucoseReadings = result.value
+        }
+        onDispose { sleepSub.cancel(); glucoseSub.cancel() }
+    }
+
+    val insight = remember(sleepLogs, glucoseReadings) { computeSleepGlucoseInsight(sleepLogs, glucoseReadings) } ?: return
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { state.currentScreen = "insight_detail" }
+            .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.3f), shape = RoundedCornerShape(24.dp)),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFFF4E9D3)),
+        shape = RoundedCornerShape(24.dp)
+    ) {
+        Row(modifier = Modifier.padding(16.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier.size(36.dp).clip(RoundedCornerShape(12.dp)).background(Color(0xFFB9832B).copy(alpha = 0.16f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Outlined.Insights, contentDescription = null, tint = Color(0xFFB9832B), modifier = Modifier.size(18.dp))
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text("A pattern in your logs", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B2219))
+                Text(
+                    "Your fasting sugar has averaged %.0f mg/dL after shorter nights (under 6h) vs %.0f mg/dL after longer ones, based on your own logs.".format(insight.shortSleepAvg, insight.longSleepAvg),
+                    fontSize = 12.sp, color = Color(0xFF4B6450), lineHeight = 17.sp,
+                )
+            }
+        }
     }
 }
 
