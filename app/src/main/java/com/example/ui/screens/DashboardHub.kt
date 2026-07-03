@@ -1761,6 +1761,7 @@ fun LearnTab(state: NirogState) {
             onValueChange = { state.searchQuery = it },
             modifier = Modifier.fillMaxWidth(),
             leadingIcon = { Icon(Icons.Filled.Search, "Search", tint = Color(0xFF737972)) },
+            label = { Text("Search articles, guides, or products") },
             placeholder = { Text("Search articles, guides, or products...", color = Color(0xFFC3C8C0)) },
             shape = RoundedCornerShape(12.dp),
             colors = OutlinedTextFieldDefaults.colors(

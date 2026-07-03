@@ -20,6 +20,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import com.google.firebase.Timestamp
 import com.nirogbhumi.app.data.CloudResult
 import com.nirogbhumi.app.notifications.EventReminderWorker
@@ -432,6 +434,7 @@ fun BookConsultationStepper(state: NirogState) {
                     OutlinedTextField(
                         value = state.userConcernText,
                         onValueChange = { state.userConcernText = it },
+                        label = { Text("Wellness concerns") },
                         placeholder = { Text("List any current issues, blood pressure metrics etc.", color = Color(0xFFC3C8C0)) },
                         modifier = Modifier.fillMaxWidth().height(100.dp),
                         colors = OutlinedTextFieldDefaults.colors(
@@ -2760,7 +2763,7 @@ fun ProgramChatScreen(state: NirogState) {
             OutlinedTextField(
                 value = messageInput,
                 onValueChange = { messageInput = it },
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).semantics { contentDescription = "Message your program" },
                 placeholder = { Text("Message your program...") },
                 shape = NirogRadius.pillShape,
                 singleLine = true,
