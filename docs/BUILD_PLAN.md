@@ -349,3 +349,26 @@ by the user. Work sequentially, CI-verified per slice, small commits.
     day's already-completed check-in.
 15. [ ] **Admin console utility** — announcement templates, bulk "message
     all quiet members," CSV roster export.
+16. [x] **Self-update system** — the app now detects, downloads, verifies,
+    and installs new builds over itself without a manual APK reinstall
+    cycle. `appUpdates/{channel}` (public-read, admin-write) and
+    `releases/{channel}/*` Storage rules, both with passing
+    `firebase/rules-tests`. Android: `VersionChecker` (numeric semver
+    compare), `UpdateManager`/`UpdateRepository`/`ApkDownloader`/
+    `UpdateInstaller` (SHA-256 verify + `FileProvider` install intent),
+    a lifecycle-scoped on-launch/on-foreground/every-30-min check loop
+    plus a 6-hourly WorkManager backstop, a Material `UpdateDialog`
+    (mandatory updates omit "Later"), and a Developer Settings screen
+    (version/build/git-commit, channel picker, manual check, release
+    notes). `build-firebase-debug-apk.yml` now stamps a real
+    `versionCode`/`versionName`/git-commit onto every build and
+    (best-effort, via WIF) publishes release metadata + the APK to the
+    `development` channel. Full architecture/testing-checklist/future-
+    work writeup in `docs/self-update-system.md`. **Owner action
+    required**: the CI publish step needs the same one-time WIF
+    `gcloud` setup as `deploy-firebase.yml` (`docs/deploy-wif-setup.md`)
+    — confirmed via a live CI run that `FIREBASE_WIF_PROVIDER`/
+    `FIREBASE_DEPLOY_SERVICE_ACCOUNT` aren't populated yet, so the
+    publish step currently skips itself cleanly (by design) rather than
+    failing the build; everything else (detection, download, verify,
+    install, Developer Settings) works today independent of that setup.
