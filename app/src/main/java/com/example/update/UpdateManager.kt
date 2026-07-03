@@ -52,13 +52,23 @@ object UpdateManager {
     fun isMandatory(context: Context, info: UpdateInfo, currentVersionCode: Int): Boolean =
         info.forceUpdate || currentVersionCode < info.minSupportedVersionCode
 
-    /** Backstop only - the on-launch/on-foreground/every-30-min-while-open checks are the primary path. */
+    /**
+     * Backstop only - the on-launch/on-foreground/every-30-min-while-open
+     * checks are the primary path. Called unconditionally from
+     * Application.onCreate, so this must not throw: WorkManager.getInstance
+     * throws IllegalStateException if the library's auto-init ContentProvider
+     * never ran (e.g. under Robolectric's default test environment, which
+     * doesn't wire up WorkManagerInitializer) - losing this background
+     * backstop silently is far better than crashing app startup.
+     */
     fun schedulePeriodicCheck(context: Context) {
-        val request = PeriodicWorkRequestBuilder<UpdateCheckWorker>(BACKSTOP_INTERVAL_HOURS, TimeUnit.HOURS)
-            .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
-            .build()
-        WorkManager.getInstance(context).enqueueUniquePeriodicWork(
-            WORK_NAME, ExistingPeriodicWorkPolicy.KEEP, request
-        )
+        runCatching {
+            val request = PeriodicWorkRequestBuilder<UpdateCheckWorker>(BACKSTOP_INTERVAL_HOURS, TimeUnit.HOURS)
+                .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+                .build()
+            WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+                WORK_NAME, ExistingPeriodicWorkPolicy.KEEP, request
+            )
+        }
     }
 }
