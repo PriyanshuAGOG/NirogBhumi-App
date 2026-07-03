@@ -24,6 +24,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write
 
 concurrency:
   group: debug-apk-${{ github.ref }}
@@ -37,6 +38,8 @@ jobs:
     environment: production
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -52,10 +55,27 @@ jobs:
         run: |
           printf '%s' "$GOOGLE_SERVICES_JSON_BASE64" | base64 --decode --ignore-garbage > app/google-services.json
           python3 -c "import json,sys; json.load(open('app/google-services.json'))"
+      # A monotonically-increasing versionCode is what lets the self-update
+      # system (VersionChecker) detect "is there a newer build" at all - a
+      # commit count is a simple, always-increasing source for it since this
+      # workflow runs on every push. fetch-depth: 0 above is required for
+      # rev-list --count to see full history instead of a 1-commit shallow clone.
+      - name: Compute version metadata
+        run: |
+          VERSION_CODE="$(git rev-list --count HEAD)"
+          echo "VERSION_CODE=$VERSION_CODE" >> "$GITHUB_ENV"
+          echo "VERSION_NAME=1.0.$VERSION_CODE" >> "$GITHUB_ENV"
+          echo "GIT_COMMIT=$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
       - name: Build debug APK
         run: |
           chmod +x gradlew
-          ./gradlew --no-daemon --max-workers=2 assembleDebug
+          ./gradlew --no-daemon --max-workers=2 assembleDebug \
+            -PVERSION_CODE="$VERSION_CODE" -PVERSION_NAME="$VERSION_NAME" -PGIT_COMMIT="$GIT_COMMIT"
+      - name: Compute APK checksum
+        run: |
+          APK_PATH="$(find app/build/outputs/apk/debug -name '*.apk' | head -n1)"
+          echo "APK_PATH=$APK_PATH" >> "$GITHUB_ENV"
+          echo "APK_CHECKSUM=$(sha256sum "$APK_PATH" | cut -d' ' -f1)" >> "$GITHUB_ENV"
       - uses: actions/upload-artifact@v7
         with:
           name: nirog-bhumi-firebase-debug-apk
@@ -88,3 +108,33 @@ jobs:
           else
             echo "::warning::App Distribution upload failed (likely an expired FIREBASE_TOKEN). The APK built fine and is attached as a workflow artifact. Rotate the secret via 'firebase login:ci'."
           fi
+      # Publishing self-update metadata is also best-effort, same reasoning as
+      # App Distribution above: a missing/expired credential must not turn a
+      # good compile into a red build. This is what lets the app itself detect
+      # "there's a newer version" (see docs/self-update-system.md) - every
+      # push to main/claude/** here becomes visible on the "development"
+      # update channel within seconds of this job finishing.
+      - uses: google-github-actions/auth@v3
+        id: auth
+        continue-on-error: true
+        with:
+          workload_identity_provider: ${{ secrets.FIREBASE_WIF_PROVIDER }}
+          service_account: ${{ secrets.FIREBASE_DEPLOY_SERVICE_ACCOUNT }}
+      - uses: actions/setup-node@v6
+        if: steps.auth.outcome == 'success'
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: firebase/functions/package-lock.json
+      - name: Publish self-update release metadata
+        if: steps.auth.outcome == 'success'
+        continue-on-error: true
+        working-directory: firebase/functions
+        env:
+          FIREBASE_PROJECT_ID: nirog-bhumi-app
+          FIREBASE_STORAGE_BUCKET: nirog-bhumi-app.firebasestorage.app
+          RELEASE_CHANNEL: development
+          RELEASE_NOTES: "Automated debug build - commit ${{ github.sha }}"
+        run: |
+          npm ci
+          node scripts/publish-release.mjs
