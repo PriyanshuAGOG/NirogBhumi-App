@@ -84,7 +84,8 @@ class FirebaseHealthRepository : HealthRepository {
     override fun addHealthLog(collection: String, values: Map<String, Any?>, done: (CloudResult<String>) -> Unit) {
         val allowed = setOf(
             "profiles", "glucoseReadings", "bpReadings", "sleepLogs", "walkLogs", "weightLogs",
-            "labReports", "consultations", "orders", "checklistLogs", "supportRequests", "notifications"
+            "labReports", "consultations", "orders", "checklistLogs", "supportRequests", "notifications",
+            "medicationLogs"
         )
         if (collection !in allowed) return done(CloudResult.Failure("Unsupported health log"))
         val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
@@ -108,7 +109,7 @@ class FirebaseHealthRepository : HealthRepository {
 
     override fun listenUserCollection(collection: String, limit: Long, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription {
         val uid = userId ?: run { update(CloudResult.Failure("Sign in is required")); return CloudSubscription {} }
-        val allowed = setOf("profiles", "glucoseReadings", "bpReadings", "sleepLogs", "walkLogs", "weightLogs", "labReports", "dailyActions", "weeklyReports", "sugarStories", "consultations", "userPrograms", "programPlans", "checklistLogs", "expertNotes", "notifications", "deviceConnections", "orders", "supportRequests", "dataExportRequests", "deletionRequests")
+        val allowed = setOf("profiles", "glucoseReadings", "bpReadings", "sleepLogs", "walkLogs", "weightLogs", "labReports", "dailyActions", "weeklyReports", "sugarStories", "consultations", "userPrograms", "programPlans", "checklistLogs", "expertNotes", "notifications", "deviceConnections", "orders", "supportRequests", "dataExportRequests", "deletionRequests", "medicationLogs")
         if (collection !in allowed) { update(CloudResult.Failure("Unsupported collection")); return CloudSubscription {} }
         val query = db?.collection(collection)?.whereEqualTo("userId", uid)?.limit(limit)
             ?: run { update(CloudResult.Failure("Firebase is not configured")); return CloudSubscription {} }

@@ -120,14 +120,15 @@ export default function MemberDetail() {
   const glucose = useLogFeed('glucoseReadings', uid)
   const bp = useLogFeed('bpReadings', uid)
   const weight = useLogFeed('weightLogs', uid)
+  const medication = useLogFeed('medicationLogs', uid)
   const sleep = useLogFeed('sleepLogs', uid)
   const walk = useLogFeed('walkLogs', uid)
   const labs = useLogFeed('labReports', uid)
   const checklist = useLogFeed('checklistLogs', uid)
   const checkins = useLogFeed('dailyCheckins', uid)
   const feeds = useMemo(
-    () => ({ glucoseReadings: glucose, bpReadings: bp, weightLogs: weight, sleepLogs: sleep, walkLogs: walk, labReports: labs, checklistLogs: checklist, dailyCheckins: checkins }),
-    [glucose, bp, weight, sleep, walk, labs, checklist, checkins],
+    () => ({ glucoseReadings: glucose, bpReadings: bp, weightLogs: weight, medicationLogs: medication, sleepLogs: sleep, walkLogs: walk, labReports: labs, checklistLogs: checklist, dailyCheckins: checkins }),
+    [glucose, bp, weight, medication, sleep, walk, labs, checklist, checkins],
   )
 
   const timeline = useMemo(() => {

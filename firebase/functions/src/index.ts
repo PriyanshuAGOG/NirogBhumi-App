@@ -236,7 +236,7 @@ export const requestAccountDeletion = onCall({ region }, async request => {
 export const exportUserData = onDocumentCreated({ document: 'dataExportRequests/{requestId}', region }, async event => {
   const request = event.data; if (!request) return; const uid = request.get('userId'); if (!uid) return;
   await request.ref.set({ status: 'processing', updatedAt: FieldValue.serverTimestamp() }, { merge: true });
-  const names = ['users','profiles','glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','labReports','dailyCheckins','dailyActions','weeklyReports','sugarStories','consultations','userPrograms','programPlans','checklistLogs','expertNotes','notifications','deviceConnections'];
+  const names = ['users','profiles','glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','labReports','dailyCheckins','dailyActions','weeklyReports','sugarStories','consultations','userPrograms','programPlans','checklistLogs','expertNotes','notifications','deviceConnections','medicationLogs'];
   const exported: Record<string, unknown> = { exportedAt: new Date().toISOString(), formatVersion: 1 };
   for (const name of names) {
     if (name === 'users') { const user = await db.doc(`users/${uid}`).get(); exported.users = user.exists ? [{ id: user.id, ...user.data() }] : []; continue; }
@@ -318,7 +318,7 @@ export const processApprovedDeletions = onSchedule({ schedule: 'every 60 minutes
   // this a "completed" deletion still left the person's roster entry (and
   // their daily check-in marker) behind after userId was hashed off the
   // request doc, an incomplete-erasure bug for a health app.
-  const ownedCollections = ['profiles','glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','labReports','dailyCheckins','dailyActions','weeklyReports','sugarStories','consultations','userPrograms','programPlans','checklistLogs','expertNotes','notifications','deviceConnections','programMembers'];
+  const ownedCollections = ['profiles','glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','labReports','dailyCheckins','dailyActions','weeklyReports','sugarStories','consultations','userPrograms','programPlans','checklistLogs','expertNotes','notifications','deviceConnections','programMembers','medicationLogs'];
   for (const request of requests.docs) {
     const uid = request.get('userId'); if (!uid) continue;
     await request.ref.set({ status: 'processing', updatedAt: FieldValue.serverTimestamp() }, { merge: true });
