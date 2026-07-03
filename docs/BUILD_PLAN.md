@@ -321,7 +321,12 @@ by the user. Work sequentially, CI-verified per slice, small commits.
     `care_hub -> consult_stepper -> payment_confirmation` in-app scaffold
     (unreachable since the Razorpay removal) is left as-is, not deleted,
     pending a real in-app rebuild later if the owner wants one.
-12. [ ] **Health data intelligence** — basic trend correlation insight.
+12. [x] **Health data intelligence** — `computeSleepGlucoseInsight()`
+    cross-references a member's own fasting glucoseReadings against the
+    previous night's sleepLogs (Asia/Kolkata calendar day), surfaced on
+    the Today tab and the insight_detail screen. Conservative by design:
+    needs >=3 nights per bucket and an >=8 mg/dL average difference,
+    shows nothing at all otherwise rather than a fabricated placeholder.
 13. [ ] **Shareable Health File link** (signed URL / QR).
 14. [ ] **Retention/habit formation** — streak number, first-week
     checklist, milestone moments.
