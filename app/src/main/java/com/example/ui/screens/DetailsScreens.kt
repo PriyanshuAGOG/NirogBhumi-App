@@ -2633,16 +2633,16 @@ private fun ReminderToggleRow(label: String, checked: Boolean, showDivider: Bool
     }
 }
 
-// Care+ program calendar - a simple day-by-day agenda rather than a full month-grid
-// widget, since a program's meaningful unit is "day N of the program," not a
-// specific calendar date; today is highlighted so members always know where they are.
+// Care+ program calendar: a real month-grid, since "is there a session on the
+// 14th" is a calendar-shaped question, not a linear-scroll one. Days with a
+// scheduled programEvent get a dot marker; tapping any day shows that day's
+// schedule below the grid, defaulting to today's on open.
 @Composable
 fun ProgramCalendarScreen(state: NirogState) {
     val context = LocalContext.current
     val totalDays = state.programDurationDays.toInt().coerceAtLeast(1)
     val startMillis = state.programStartedAtMillis.takeIf { it > 0 } ?: System.currentTimeMillis()
-    val todayIndex = (((System.currentTimeMillis() - startMillis) / (1000L * 60 * 60 * 24)) + 1).toInt().coerceIn(1, totalDays)
-    val listState = rememberLazyListState(initialFirstVisibleItemIndex = (todayIndex - 3).coerceAtLeast(0))
+    val dayNumber = (((System.currentTimeMillis() - startMillis) / (1000L * 60 * 60 * 24)) + 1).toInt().coerceIn(1, totalDays)
 
     var events by remember { mutableStateOf<List<Map<String, Any?>>>(emptyList()) }
     DisposableEffect(state.activeProgramId) {
@@ -2652,111 +2652,213 @@ fun ProgramCalendarScreen(state: NirogState) {
         }
         onDispose { sub.cancel() }
     }
-    val upcoming = events.filter { ((it["startsAt"] as? Timestamp)?.toDate()?.time ?: 0L) >= System.currentTimeMillis() }
 
-    Column(modifier = Modifier.fillMaxSize().background(Color(0xFFF8F6EF))) {
+    val zone = remember { java.time.ZoneId.systemDefault() }
+    val today = remember { java.time.LocalDate.now(zone) }
+    var visibleMonth by remember { mutableStateOf(java.time.YearMonth.from(today)) }
+    var selectedDate by remember { mutableStateOf(today) }
+
+    val eventsByDay = remember(events) {
+        events.mapNotNull { event ->
+            val date = (event["startsAt"] as? Timestamp)?.toDate()?.toInstant()?.atZone(zone)?.toLocalDate()
+            if (date != null) date to event else null
+        }.groupBy({ it.first }, { it.second })
+    }
+
+    Column(modifier = Modifier.fillMaxSize().background(NirogColor.surface)) {
         DetailScreenHeader(state.activeProgramName.ifBlank { "Program Calendar" }, onBack = { state.currentScreen = "dashboard" })
 
-        if (upcoming.isNotEmpty()) {
+        Text(
+            "Day $dayNumber of $totalDays", style = NirogType.caption, color = NirogColor.inkMuted,
+            modifier = Modifier.padding(horizontal = NirogSpace.xl)
+        )
+        Spacer(Modifier.height(NirogSpace.sm))
+
+        MonthGridCalendar(
+            visibleMonth = visibleMonth,
+            today = today,
+            selectedDate = selectedDate,
+            eventsByDay = eventsByDay,
+            onMonthChange = { visibleMonth = it },
+            onDaySelected = { selectedDate = it },
+        )
+
+        Spacer(Modifier.height(NirogSpace.lg))
+        Divider(color = NirogColor.surfaceSunken, thickness = 1.dp)
+        Spacer(Modifier.height(NirogSpace.md))
+
+        DaySchedulePanel(
+            date = selectedDate,
+            isToday = selectedDate == today,
+            dayEvents = eventsByDay[selectedDate].orEmpty().sortedBy { (it["startsAt"] as? Timestamp)?.toDate()?.time ?: 0L },
+            onRemind = { title, startsAt ->
+                EventReminderWorker.schedule(context, "${title}_${startsAt.time}", title, "Starting now - $title", startsAt.time)
+            },
+        )
+    }
+}
+
+@Composable
+private fun MonthGridCalendar(
+    visibleMonth: java.time.YearMonth,
+    today: java.time.LocalDate,
+    selectedDate: java.time.LocalDate,
+    eventsByDay: Map<java.time.LocalDate, List<Map<String, Any?>>>,
+    onMonthChange: (java.time.YearMonth) -> Unit,
+    onDaySelected: (java.time.LocalDate) -> Unit,
+) {
+    Column(modifier = Modifier.padding(horizontal = NirogSpace.lg)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = { onMonthChange(visibleMonth.minusMonths(1)) }) {
+                Icon(Icons.Filled.ChevronLeft, contentDescription = "Previous month", tint = NirogColor.inkPrimary)
+            }
             Text(
-                "UPCOMING EVENTS", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFFC7902F),
-                letterSpacing = 1.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
+                "${visibleMonth.month.getDisplayName(java.time.format.TextStyle.FULL, java.util.Locale.getDefault())} ${visibleMonth.year}",
+                style = NirogType.sectionHeading, color = NirogColor.inkPrimary,
             )
-            Column(modifier = Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                upcoming.forEach { event ->
-                    val title = event["title"] as? String ?: "Program event"
-                    val type = event["type"] as? String
-                    val description = event["description"] as? String
-                    val startsAt = (event["startsAt"] as? Timestamp)?.toDate()
-                    val location = event["location"] as? String
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(containerColor = Color.White),
-                        shape = RoundedCornerShape(18.dp)
-                    ) {
-                        Column(Modifier.padding(16.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(title, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFF1B2219), modifier = Modifier.weight(1f))
-                                if (type != null) {
-                                    Surface(color = Color(0xFFF4E9D3), shape = RoundedCornerShape(20.dp)) {
-                                        Text(type.uppercase(), fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFFB9832B), modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp))
-                                    }
-                                }
-                            }
-                            if (startsAt != null) {
-                                Text(
-                                    java.text.SimpleDateFormat("EEE, d MMM · h:mm a", java.util.Locale.getDefault()).format(startsAt),
-                                    fontSize = 12.sp, color = Color(0xFF697169), modifier = Modifier.padding(top = 4.dp)
-                                )
-                            }
-                            if (!location.isNullOrBlank()) {
-                                Text(location, fontSize = 12.sp, color = Color(0xFF697169))
-                            }
-                            if (!description.isNullOrBlank()) {
-                                Text(description, fontSize = 12.5.sp, color = Color(0xFF434842), modifier = Modifier.padding(top = 6.dp))
-                            }
-                            if (startsAt != null) {
-                                TextButton(
-                                    onClick = {
-                                        EventReminderWorker.schedule(context, "${title}_${startsAt.time}", title, "Starting now - $title", startsAt.time)
-                                    },
-                                    modifier = Modifier.padding(top = 4.dp)
+            IconButton(onClick = { onMonthChange(visibleMonth.plusMonths(1)) }) {
+                Icon(Icons.Filled.ChevronRight, contentDescription = "Next month", tint = NirogColor.inkPrimary)
+            }
+        }
+
+        Row(modifier = Modifier.fillMaxWidth().padding(top = NirogSpace.sm)) {
+            listOf("M", "T", "W", "T", "F", "S", "S").forEach { label ->
+                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    Text(label, style = NirogType.overline, color = NirogColor.inkMuted, maxLines = 1)
+                }
+            }
+        }
+
+        val firstOfMonth = visibleMonth.atDay(1)
+        val leadingBlanks = firstOfMonth.dayOfWeek.value - 1 // Monday=1..Sunday=7
+        val daysInMonth = visibleMonth.lengthOfMonth()
+        val totalCells = leadingBlanks + daysInMonth
+        val rows = (totalCells + 6) / 7
+
+        Column(modifier = Modifier.padding(top = NirogSpace.xs)) {
+            for (row in 0 until rows) {
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    for (col in 0 until 7) {
+                        val cellIndex = row * 7 + col
+                        val dayOfMonth = cellIndex - leadingBlanks + 1
+                        Box(
+                            modifier = Modifier.weight(1f).aspectRatio(1f).padding(2.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (dayOfMonth in 1..daysInMonth) {
+                                val date = visibleMonth.atDay(dayOfMonth)
+                                val isToday = date == today
+                                val isSelected = date == selectedDate
+                                val hasEvents = eventsByDay.containsKey(date)
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .clip(CircleShape)
+                                        .then(
+                                            when {
+                                                isSelected -> Modifier.background(NirogColor.forest)
+                                                isToday -> Modifier.border(1.5.dp, NirogColor.forest, CircleShape)
+                                                else -> Modifier
+                                            }
+                                        )
+                                        .clickable { onDaySelected(date) },
+                                    contentAlignment = Alignment.Center,
                                 ) {
-                                    Icon(Icons.Filled.NotificationsActive, contentDescription = null, modifier = Modifier.size(14.dp), tint = Color(0xFF314936))
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Remind me", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF314936))
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text(
+                                            dayOfMonth.toString(),
+                                            style = NirogType.body,
+                                            color = if (isSelected) NirogColor.onAccent else NirogColor.inkPrimary,
+                                            fontWeight = if (isToday || isSelected) FontWeight.Bold else FontWeight.Normal,
+                                        )
+                                        if (hasEvents) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .padding(top = 2.dp)
+                                                    .size(4.dp)
+                                                    .clip(CircleShape)
+                                                    .background(if (isSelected) NirogColor.onAccent else NirogColor.gold)
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
                 }
             }
-            Spacer(modifier = Modifier.height(12.dp))
+        }
+    }
+}
+
+@Composable
+private fun ColumnScope.DaySchedulePanel(
+    date: java.time.LocalDate,
+    isToday: Boolean,
+    dayEvents: List<Map<String, Any?>>,
+    onRemind: (String, java.util.Date) -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth().weight(1f).padding(horizontal = NirogSpace.xl)) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = NirogSpace.sm)) {
+            Text(
+                date.format(java.time.format.DateTimeFormatter.ofPattern("EEEE, d MMMM")),
+                style = NirogType.bodyStrong, color = NirogColor.inkPrimary, modifier = Modifier.weight(1f),
+            )
+            if (isToday) {
+                Surface(color = NirogColor.forest, shape = NirogRadius.pillShape) {
+                    Text("TODAY", style = NirogType.overline, color = NirogColor.onAccent, modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp))
+                }
+            }
         }
 
-        Text(
-            "Day $todayIndex of $totalDays", fontSize = 13.sp, color = Color(0xFF697169),
-            modifier = Modifier.padding(horizontal = 20.dp)
-        )
-        Spacer(modifier = Modifier.height(12.dp))
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            contentPadding = PaddingValues(bottom = 32.dp)
-        ) {
-            items(totalDays) { index ->
-                val dayNumber = index + 1
-                val dayDate = java.util.Date(startMillis + (dayNumber - 1) * 24L * 60 * 60 * 1000)
-                val isToday = dayNumber == todayIndex
-                val isPast = dayNumber < todayIndex
-                Card(
-                    modifier = Modifier.fillMaxWidth().then(
-                        if (isToday) Modifier.border(1.5.dp, Color(0xFF314936), RoundedCornerShape(16.dp)) else Modifier
-                    ),
-                    colors = CardDefaults.cardColors(containerColor = if (isToday) Color(0xFFEBF7E8) else Color.White),
-                    shape = RoundedCornerShape(16.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp).fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Day $dayNumber", fontWeight = FontWeight.Bold, color = Color(0xFF1B3221), fontSize = 14.sp)
+        if (dayEvents.isEmpty()) {
+            EmptyStateCard(Icons.Filled.EventAvailable, "No sessions scheduled for this day.")
+        } else {
+            Column(
+                modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(NirogSpace.sm),
+            ) {
+                dayEvents.forEach { event ->
+                    val title = event["title"] as? String ?: "Program event"
+                    val type = event["type"] as? String
+                    val description = event["description"] as? String
+                    val startsAt = (event["startsAt"] as? Timestamp)?.toDate()
+                    val location = event["location"] as? String
+                    NirogCard {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(title, style = NirogType.bodyStrong, color = NirogColor.inkPrimary, modifier = Modifier.weight(1f))
+                            if (type != null) {
+                                Surface(color = NirogColor.goldSoft, shape = NirogRadius.pillShape) {
+                                    Text(type.uppercase(), style = NirogType.overline, color = NirogColor.gold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp))
+                                }
+                            }
+                        }
+                        if (startsAt != null) {
                             Text(
-                                java.text.SimpleDateFormat("EEEE, d MMMM", java.util.Locale.getDefault()).format(dayDate),
-                                fontSize = 12.sp, color = Color(0xFF697169)
+                                java.text.SimpleDateFormat("h:mm a", java.util.Locale.getDefault()).format(startsAt),
+                                style = NirogType.caption, color = NirogColor.inkMuted, modifier = Modifier.padding(top = 4.dp)
                             )
                         }
-                        if (isToday) {
-                            Surface(color = Color(0xFF314936), shape = RoundedCornerShape(10.dp)) {
-                                Text("TODAY", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+                        if (!location.isNullOrBlank()) {
+                            Text(location, style = NirogType.caption, color = NirogColor.inkMuted)
+                        }
+                        if (!description.isNullOrBlank()) {
+                            Text(description, style = NirogType.body, color = NirogColor.inkSecondary, modifier = Modifier.padding(top = 6.dp))
+                        }
+                        if (startsAt != null) {
+                            TextButton(onClick = { onRemind(title, startsAt) }, modifier = Modifier.padding(top = 4.dp)) {
+                                Icon(Icons.Filled.NotificationsActive, contentDescription = null, modifier = Modifier.size(14.dp), tint = NirogColor.forest)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Remind me", style = NirogType.secondary, color = NirogColor.forest)
                             }
-                        } else if (isPast) {
-                            Icon(Icons.Filled.CheckCircle, contentDescription = "Past", tint = Color(0xFF9CB79F), modifier = Modifier.size(18.dp))
                         }
                     }
                 }
+                Spacer(Modifier.height(NirogSpace.xxl))
             }
         }
     }

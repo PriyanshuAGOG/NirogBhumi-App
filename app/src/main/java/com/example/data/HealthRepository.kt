@@ -406,7 +406,10 @@ class FirebaseHealthRepository : HealthRepository {
         val registration = database.collection("programEvents")
             .whereEqualTo("programId", programId)
             .orderBy("startsAt", com.google.firebase.firestore.Query.Direction.ASCENDING)
-            .limit(50)
+            // High enough to cover a full multi-month program (e.g. a 6-month
+            // program with near-daily sessions) - the old limit of 50 silently
+            // truncated the month-grid calendar to only its earliest events.
+            .limit(500)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) update(CloudResult.Failure(error.message ?: "Could not load the program calendar", error))
                 else update(CloudResult.Success(snapshot?.documents.orEmpty().map { CloudDocument(it.id, it.data.orEmpty()) }))
