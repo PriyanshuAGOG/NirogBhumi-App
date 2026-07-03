@@ -24,6 +24,32 @@ interface Announcement {
   createdAt?: unknown
 }
 
+// Coaches reuse the same handful of message shapes far more often than they
+// write from scratch - these just prefill the fields below, so a coach can
+// still edit before posting rather than being locked into canned copy.
+const ANNOUNCEMENT_TEMPLATES: { label: string; title: string; body: string }[] = [
+  {
+    label: "Session moved",
+    title: "Today's session has moved",
+    body: 'A quick update: today\'s session time/location has changed. Please check the program calendar for the new details.',
+  },
+  {
+    label: 'Great turnout today',
+    title: 'Great turnout today!',
+    body: "Thank you to everyone who joined today - it was wonderful to see so many of you show up. Keep up the great work!",
+  },
+  {
+    label: 'Reminder: bring readings',
+    title: "Reminder for our next session",
+    body: 'A friendly reminder to bring your recent readings (sugar, BP, or weight) to our next session so we can review your progress together.',
+  },
+  {
+    label: 'Milestone reached',
+    title: 'A milestone worth celebrating',
+    body: 'Our batch has reached a real milestone together this month. Thank you all for your consistency and effort - it shows.',
+  },
+]
+
 export default function Announcements() {
   const { user } = useAuth()
   const { programs, loading: programsLoading, error: programsError } = usePrograms()
@@ -143,6 +169,27 @@ export default function Announcements() {
               Posted to {selectedName}.
             </div>
           )}
+          <div className="field">
+            <span className="field-label">Start from a template (optional)</span>
+            <select
+              className="select"
+              value=""
+              onChange={(e) => {
+                const chosen = ANNOUNCEMENT_TEMPLATES.find((t) => t.label === e.target.value)
+                if (chosen) {
+                  setTitle(chosen.title)
+                  setBody(chosen.body)
+                }
+              }}
+            >
+              <option value="">Choose a template…</option>
+              {ANNOUNCEMENT_TEMPLATES.map((t) => (
+                <option key={t.label} value={t.label}>
+                  {t.label}
+                </option>
+              ))}
+            </select>
+          </div>
           <div className="field">
             <span className="field-label">Title</span>
             <input

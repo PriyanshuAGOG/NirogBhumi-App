@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { collection, onSnapshot, query } from 'firebase/firestore'
-import { db } from '../lib/firebase'
+import { httpsCallable } from 'firebase/functions'
+import { db, functions } from '../lib/firebase'
 import { usePrograms } from '../lib/usePrograms'
 import { errText } from '../lib/errors'
 import { consistencyTag } from '../lib/health'
@@ -15,6 +16,34 @@ interface RosterEntry {
   lastCheckinAt?: unknown
 }
 
+function csvCell(value: string): string {
+  // Quote whenever the cell could otherwise be misread (comma/quote/newline),
+  // and double any embedded quotes - the standard CSV escaping rule, not
+  // just enough to look right in a spreadsheet preview.
+  if (/[",\n]/.test(value)) return `"${value.replace(/"/g, '""')}"`
+  return value
+}
+
+function downloadRosterCsv(rows: RosterEntry[], programName: (id?: string) => string) {
+  const header = ['Name', 'Program', 'Status', 'Last check-in']
+  const lines = [header.map(csvCell).join(',')]
+  rows.forEach((m) => {
+    const c = consistencyTag(m.lastCheckinAt)
+    lines.push(
+      [m.name ?? m.uid ?? 'Member', programName(m.programId), c.tag, c.text].map(csvCell).join(','),
+    )
+  })
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `roster_${new Date().toISOString().slice(0, 10)}.csv`
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(url)
+}
+
 export default function Members() {
   const { programs } = usePrograms()
   const [members, setMembers] = useState<RosterEntry[]>([])
@@ -23,6 +52,12 @@ export default function Members() {
   const [search, setSearch] = useState('')
   const [programFilter, setProgramFilter] = useState<string>('all')
   const [onlyQuiet, setOnlyQuiet] = useState(false)
+  const [composerOpen, setComposerOpen] = useState(false)
+  const [bulkTitle, setBulkTitle] = useState('')
+  const [bulkBody, setBulkBody] = useState('')
+  const [sending, setSending] = useState(false)
+  const [sendError, setSendError] = useState<string | null>(null)
+  const [sendResult, setSendResult] = useState<string | null>(null)
 
   useEffect(() => {
     const unsub = onSnapshot(
@@ -56,6 +91,44 @@ export default function Members() {
       return true
     })
   }, [members, search, programFilter, onlyQuiet])
+
+  // Bulk messaging is scoped to one program at a time - the callable itself
+  // enforces this boundary (programStaff(programId)) but requiring a single
+  // program here too means the button's own quiet-member count is honest,
+  // not a mix of members across batches this coach may not all manage.
+  const quietInSelectedProgram = useMemo(
+    () =>
+      programFilter === 'all'
+        ? []
+        : members.filter((m) => m.programId === programFilter && consistencyTag(m.lastCheckinAt).cls === 'tag-bad'),
+    [members, programFilter],
+  )
+
+  async function sendBulkMessage() {
+    if (programFilter === 'all' || !bulkTitle.trim() || !bulkBody.trim() || quietInSelectedProgram.length === 0) return
+    setSending(true)
+    setSendError(null)
+    setSendResult(null)
+    try {
+      const sendBulkNotification = httpsCallable<
+        { programId: string; title: string; body: string; uids: string[] },
+        { sent: number }
+      >(functions, 'sendBulkNotification')
+      const res = await sendBulkNotification({
+        programId: programFilter,
+        title: bulkTitle.trim(),
+        body: bulkBody.trim(),
+        uids: quietInSelectedProgram.map((m) => m.uid ?? '').filter(Boolean),
+      })
+      setSendResult(`Sent to ${res.data.sent} quiet member${res.data.sent === 1 ? '' : 's'}.`)
+      setBulkTitle('')
+      setBulkBody('')
+    } catch (err) {
+      setSendError(errText(err, 'Could not send the message'))
+    } finally {
+      setSending(false)
+    }
+  }
 
   return (
     <section className="page">
@@ -91,7 +164,64 @@ export default function Members() {
           <input type="checkbox" checked={onlyQuiet} onChange={(e) => setOnlyQuiet(e.target.checked)} />
           Needs attention only
         </label>
+        <button className="btn btn-ghost" onClick={() => downloadRosterCsv(visible, programName)} disabled={visible.length === 0}>
+          Export roster (CSV)
+        </button>
+        <button
+          className="btn btn-ghost"
+          disabled={programFilter === 'all' || quietInSelectedProgram.length === 0}
+          onClick={() => setComposerOpen((v) => !v)}
+          title={programFilter === 'all' ? 'Pick a single program to message its quiet members' : undefined}
+        >
+          Message quiet members ({programFilter === 'all' ? 0 : quietInSelectedProgram.length})
+        </button>
       </div>
+
+      {composerOpen && programFilter !== 'all' && (
+        <div className="card composer">
+          <span className="overline">
+            Message all {quietInSelectedProgram.length} quiet member
+            {quietInSelectedProgram.length === 1 ? '' : 's'} in {programName(programFilter)}
+          </span>
+          {sendError && (
+            <div className="banner banner-error" role="alert">
+              {sendError}
+            </div>
+          )}
+          {sendResult && (
+            <div className="banner banner-success" role="status">
+              {sendResult}
+            </div>
+          )}
+          <div className="field">
+            <span className="field-label">Title</span>
+            <input
+              className="input"
+              value={bulkTitle}
+              onChange={(e) => setBulkTitle(e.target.value)}
+              placeholder="We miss seeing your check-ins"
+            />
+          </div>
+          <div className="field">
+            <span className="field-label">Message</span>
+            <textarea
+              className="textarea"
+              value={bulkBody}
+              onChange={(e) => setBulkBody(e.target.value)}
+              placeholder="A short, warm nudge - not a scolding."
+            />
+          </div>
+          <div className="composer-actions">
+            <button
+              className="btn btn-forest"
+              disabled={sending || !bulkTitle.trim() || !bulkBody.trim()}
+              onClick={() => void sendBulkMessage()}
+            >
+              {sending ? 'Sending…' : `Send to ${quietInSelectedProgram.length} member${quietInSelectedProgram.length === 1 ? '' : 's'}`}
+            </button>
+          </div>
+        </div>
+      )}
 
       {error && (
         <div className="banner banner-error" role="alert">

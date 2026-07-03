@@ -311,6 +311,56 @@ export const setUserRole = onCall({ region }, async request => {
   return { updated: true, uid, role, permissions: perms };
 });
 
+// Console's "message all quiet members" bulk action. A direct client write to
+// notifications is deliberately blocked by firestore.rules for docs carrying
+// status/scheduledFor/type (see the comment there) - it exists specifically
+// so a coach can't spam the shared 15-minute send queue, or message someone
+// outside their own program by forging userId. This callable is the one
+// sanctioned way through that boundary: same programStaff() authorization
+// boundary as the rest of the program-scoped console actions (admin, or the
+// coach assigned to this exact program), and every uid is cross-checked
+// against the program's actual roster before a notification is queued -
+// a coach passing an arbitrary uid list can't reach members outside their
+// own batch. Reuses the same notifications-doc shape and sendPendingNotifications
+// pipeline as announcements, so it inherits the same delivery/retry behavior
+// for free instead of sending FCM directly from here.
+export const sendBulkNotification = onCall({ region }, async request => {
+  const auth = requireUser(request);
+  const role = auth.token.role;
+  const programId = String(request.data?.programId ?? '');
+  const title = String(request.data?.title ?? '').trim().slice(0, 120);
+  const body = String(request.data?.body ?? '').trim().slice(0, 200);
+  const requestedUids: string[] = Array.isArray(request.data?.uids) ? request.data.uids.map(String).filter(Boolean) : [];
+  if (!programId || !title || !body || !requestedUids.length) {
+    throw new HttpsError('invalid-argument', 'programId, title, body, and at least one uid are required');
+  }
+  if (requestedUids.length > 200) throw new HttpsError('invalid-argument', 'Too many recipients in one call (max 200)');
+
+  if (role !== 'admin' && role !== 'super_admin') {
+    if (role !== 'coach') throw new HttpsError('permission-denied', 'Staff only');
+    const program = await db.doc(`programs/${programId}`).get();
+    if (program.get('coachId') !== auth.uid) throw new HttpsError('permission-denied', 'Not your program');
+  }
+
+  const rosterSnap = await db.collection('programMembers').where('programId', '==', programId).get();
+  const rosterUids = new Set(rosterSnap.docs.map(doc => String(doc.get('uid') ?? '')));
+  const targets = requestedUids.filter(uid => rosterUids.has(uid));
+  if (!targets.length) throw new HttpsError('invalid-argument', 'None of the given uids are members of this program');
+
+  const batch = db.batch();
+  targets.forEach(uid => {
+    batch.set(db.collection('notifications').doc(), {
+      userId: uid, profileId: null, title, body, type: 'coach_message',
+      status: 'scheduled', scheduledFor: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp(),
+    });
+  });
+  await batch.commit();
+
+  await db.collection('auditLogs').add({ actorId: auth.uid, actorRole: role, action: 'bulk_notify', entityType: 'program', entityId: programId, metadata: { recipientCount: targets.length, title }, createdAt: FieldValue.serverTimestamp() });
+
+  return { sent: targets.length };
+});
+
 export const processApprovedDeletions = onSchedule({ schedule: 'every 60 minutes', timeZone: 'Asia/Kolkata', region }, async () => {
   const requests = await db.collection('deletionRequests').where('status', '==', 'approved').limit(10).get();
   // programMembers and the batchStats/checkedInMembers marker were missing
