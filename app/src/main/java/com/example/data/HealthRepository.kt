@@ -358,7 +358,7 @@ class FirebaseHealthRepository : HealthRepository {
                 // Light exponential moving average - adapts to a real shift in
                 // routine within a couple of weeks without one late night
                 // swinging the reminder time around.
-                val next = if (existing == null) hour else Math.round(existing * 0.7 + hour * 0.3)
+                val next = if (existing == null) hour else Math.round(existing * 0.7 + hour * 0.3).toInt()
                 ref.set(mapOf("checkinHourHint" to next, "lastCheckinAt" to FieldValue.serverTimestamp()), SetOptions.merge())
                     .addOnSuccessListener { done(CloudResult.Success(next)) }
                     .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Could not save", it)) }
