@@ -62,6 +62,12 @@ class NirogState {
     var profileWeight by mutableStateOf("72")
     var profileCity by mutableStateOf("Jaipur")
     var profileLanguage by mutableStateOf("English")
+    // Private (users/{uid}/profile-photo/... - readable only by the owner or
+    // an admin, same as any other private upload). Not yet surfaced to other
+    // members (e.g. as a chat sender avatar) - that would need a public-read
+    // Storage path, which is a deliberate separate decision from "let me set
+    // my own profile picture."
+    var photoUrl by mutableStateOf("")
 
     // Health Details Setup
     var selectedDiabetesStatus by mutableStateOf("None")

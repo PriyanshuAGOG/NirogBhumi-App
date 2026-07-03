@@ -1038,6 +1038,29 @@ fun ProfileScreen(state: NirogState) {
     val context = LocalContext.current
     var updateCheckMessage by remember { mutableStateOf<String?>(null) }
     var checkingUpdate by remember { mutableStateOf(false) }
+    var uploadingPhoto by remember { mutableStateOf(false) }
+    val photoPickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        uploadingPhoto = true
+        state.repository.uploadPrivateFile("profile-photo", uri) { uploadResult ->
+            when (uploadResult) {
+                is com.nirogbhumi.app.data.CloudResult.Success -> {
+                    val url = uploadResult.value
+                    state.repository.saveProfile(mapOf("photoUrl" to url)) { saveResult ->
+                        uploadingPhoto = false
+                        when (saveResult) {
+                            is com.nirogbhumi.app.data.CloudResult.Success -> state.photoUrl = url
+                            is com.nirogbhumi.app.data.CloudResult.Failure -> state.cloudMessage = saveResult.message
+                        }
+                    }
+                }
+                is com.nirogbhumi.app.data.CloudResult.Failure -> {
+                    uploadingPhoto = false
+                    state.cloudMessage = uploadResult.message
+                }
+            }
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -1061,13 +1084,43 @@ fun ProfileScreen(state: NirogState) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(
-                modifier = Modifier.size(56.dp).clip(CircleShape).background(Color(0xFF314936)),
+                modifier = Modifier
+                    .size(56.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFF314936))
+                    .clickable(enabled = !uploadingPhoto) { photoPickerLauncher.launch("image/*") },
                 contentAlignment = Alignment.Center
             ) {
-                Text(
-                    state.profileName.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?",
-                    color = Color.White, fontWeight = FontWeight.Bold, fontSize = 22.sp
-                )
+                if (state.photoUrl.isNotBlank()) {
+                    coil.compose.AsyncImage(
+                        model = state.photoUrl,
+                        contentDescription = "Your profile photo",
+                        modifier = Modifier.fillMaxSize().clip(CircleShape),
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                    )
+                } else {
+                    Text(
+                        state.profileName.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?",
+                        color = Color.White, fontWeight = FontWeight.Bold, fontSize = 22.sp
+                    )
+                }
+                if (uploadingPhoto) {
+                    Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.45f)), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = Color.White)
+                    }
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .size(20.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFFC9A24B))
+                            .border(1.5.dp, Color.White, CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Filled.PhotoCamera, contentDescription = "Change profile photo", tint = Color.White, modifier = Modifier.size(12.dp))
+                    }
+                }
             }
             Spacer(modifier = Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {

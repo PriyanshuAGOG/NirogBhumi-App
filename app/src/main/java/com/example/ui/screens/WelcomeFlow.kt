@@ -72,6 +72,7 @@ private fun applyProfileDocument(state: NirogState, document: com.google.firebas
     document.getString("bpStatus")?.let { state.selectedBpStatus = it }
     document.getString("onMedication")?.let { state.selectedOnMedication = it }
     document.getString("doctorSupervision")?.let { state.selectedDoctorSupervision = it }
+    document.getString("photoUrl")?.let { state.photoUrl = it }
     document.getBoolean("programActive")?.let { state.isProgramActive = it }
     document.getString("activeProgramId")?.let { state.activeProgramId = it }
     document.getString("activeProgramName")?.let { state.activeProgramName = it }
