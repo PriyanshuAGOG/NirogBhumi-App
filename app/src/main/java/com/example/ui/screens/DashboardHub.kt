@@ -1489,6 +1489,7 @@ fun InsightsTab(state: NirogState) {
 // TAB 4: Care Team & Consultations
 @Composable
 fun CareTab(state: NirogState) {
+    val context = LocalContext.current
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1510,6 +1511,16 @@ fun CareTab(state: NirogState) {
                 color = Color(0xFF434842),
                 modifier = Modifier.padding(top = 4.dp)
             )
+        }
+
+        // Booking currently lives on the website, not in-app - the in-app
+        // stepper was pulled with the Razorpay removal and isn't being
+        // rebuilt yet, so this is an honest handoff instead of a dead-end
+        // flow or a fabricated "coming soon" screen.
+        CareRow(Icons.Outlined.MedicalServices, "Book a Consultation", "Opens nirogbhumi.com to pick an expert and a time.") {
+            runCatching {
+                context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://nirogbhumi.com/consultation")))
+            }.onFailure { state.cloudMessage = "Couldn't open the browser - visit nirogbhumi.com/consultation directly." }
         }
 
         if (!state.isProgramActive) {

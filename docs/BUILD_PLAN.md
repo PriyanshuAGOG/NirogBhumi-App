@@ -302,14 +302,20 @@ by the user. Work sequentially, CI-verified per slice, small commits.
    hour, falling back to a safe elapsed-24h schedule until the hint
    loads or if the member has none yet.
 10. [~] **Care+ community features** — @mentions (rendering-only
-    highlighting of "@Name" tokens, no roster autocomplete yet) and
-    pin-a-message (staff-only, rules-enforced via `programStaff()`, banner
-    at top of General, 6 new rules-unit tests) shipped. Photo sharing and
-    voice notes still open - need Storage upload plumbing wired into the
-    chat composer specifically (the general upload path already exists
-    for Health File/lab reports).
-11. [ ] **Consultations** — build a real non-payment booking flow
-    end to end (replaces the inert scaffold from item 5).
+    highlighting of "@Name" tokens, no roster autocomplete yet), pin-a-
+    message (staff-only, rules-enforced via `programStaff()`, banner at
+    top of General, 6 new rules-unit tests), and photo sharing (new
+    `program-chat-photos/{programId}/{uid}` Storage path with a live
+    Firestore membership check so the whole batch can view it, not just
+    the uploader - 5 new storage-rules tests, the first storage.rules
+    coverage in this repo) shipped. Voice notes still open.
+11. [x] **Consultations** — by owner decision, this is now an honest
+    external handoff rather than a rebuilt in-app flow: a real, reachable
+    "Book a Consultation" row on the Care+ tab opens
+    `nirogbhumi.com/consultation` in the browser. The old inert
+    `care_hub -> consult_stepper -> payment_confirmation` in-app scaffold
+    (unreachable since the Razorpay removal) is left as-is, not deleted,
+    pending a real in-app rebuild later if the owner wants one.
 12. [ ] **Health data intelligence** — basic trend correlation insight.
 13. [ ] **Shareable Health File link** (signed URL / QR).
 14. [ ] **Retention/habit formation** — streak number, first-week
