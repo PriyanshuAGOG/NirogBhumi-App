@@ -327,8 +327,25 @@ by the user. Work sequentially, CI-verified per slice, small commits.
     the Today tab and the insight_detail screen. Conservative by design:
     needs >=3 nights per bucket and an >=8 mg/dL average difference,
     shows nothing at all otherwise rather than a fabricated placeholder.
-13. [ ] **Shareable Health File link** (signed URL / QR).
-14. [ ] **Retention/habit formation** — streak number, first-week
-    checklist, milestone moments.
+13. [x] **Shareable Health File link** — "Get shareable link / QR code"
+    on the Health File screen reuses the existing `uploadPrivateFile`
+    Storage path (owner-only, already allows PDF) and renders a
+    client-side QR (`com.google.zxing:core`, new dependency). Documented
+    honestly in the dialog copy: it's a bearer-token URL, not a true
+    expiring signed URL - that would need a Cloud Function on the Admin
+    SDK, a real gap flagged rather than silently implied as more secure
+    than it is.
+14. [x] **Retention/habit formation** — `checkinStreak` (consecutive
+    Asia/Kolkata calendar days, computed as a side effect of
+    `recordCheckinCompletion`, no new rule needed - owner-writable
+    fields already permitted) shown warmly as a "$N-day rhythm" pill on
+    Today from day 2 on, never framed as a loss to avoid. A first-week
+    checklist (computed client-side from existing state, no new
+    Firestore field) guides new members through their first reading,
+    first check-in, and meeting their Care+ batch, and disappears once
+    done. A one-time milestone banner (🎉 "$N-day rhythm!") fires right
+    at the check-in that hits 7/30/100 days - a real event moment, not a
+    persistent badge, so it can't repeat on a later view of the same
+    day's already-completed check-in.
 15. [ ] **Admin console utility** — announcement templates, bulk "message
     all quiet members," CSV roster export.

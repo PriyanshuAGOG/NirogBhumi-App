@@ -22,6 +22,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -454,6 +455,14 @@ fun TodayTab(state: NirogState) {
         }
         onDispose { sugarSub.cancel(); bpSub.cancel(); checklistSub.cancel() }
     }
+
+    var checkinStreak by remember { mutableStateOf(0) }
+    LaunchedEffect(state.checkedInToday) {
+        state.repository.peekCheckinStreak { result ->
+            if (result is CloudResult.Success) checkinStreak = result.value
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -484,6 +493,31 @@ fun TodayTab(state: NirogState) {
                 modifier = Modifier.padding(top = 2.dp)
             )
         }
+
+        // Framed as a "rhythm," never a loss-averse streak-counter - only
+        // shown from 2 days on, since a 1-day count isn't really a pattern
+        // yet and showing it on the very first check-in would read as
+        // hollow praise rather than an earned milestone.
+        if (checkinStreak >= 2) {
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(50))
+                    .background(Color(0xFFF4E9D3))
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("🔥", fontSize = 14.sp)
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    "$checkinStreak-day rhythm",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF7A5A1E),
+                )
+            }
+        }
+
+        FirstWeekChecklistCard(state, checkinStreak)
 
         // Highlight daily task card
         Card(
@@ -803,6 +837,68 @@ fun TodayTab(state: NirogState) {
         }
 
         Spacer(modifier = Modifier.height(24.dp))
+    }
+}
+
+/**
+ * First-week guided checklist, computed entirely from state already in
+ * memory (no new Firestore field) - turns the empty-state cliff for a new
+ * member into a guided path instead of a blank dashboard. Disappears the
+ * moment all three are done; never shown again to a member who's already
+ * past this stage, and never re-appears once dismissed for the session.
+ */
+@Composable
+private fun FirstWeekChecklistCard(state: NirogState, checkinStreak: Int) {
+    var dismissed by remember { mutableStateOf(false) }
+    val loggedFirstReading = state.sugarLogs.isNotEmpty()
+    val triedCheckin = state.checkedInToday || checkinStreak >= 1
+    val metBatch = state.isProgramActive
+    if (dismissed || (loggedFirstReading && triedCheckin && metBatch)) return
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.3f), shape = RoundedCornerShape(24.dp)),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        shape = RoundedCornerShape(24.dp)
+    ) {
+        Column(modifier = Modifier.padding(20.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("Getting started", fontWeight = FontWeight.Bold, color = Color(0xFF1B3221), fontSize = 15.sp)
+                IconButton(onClick = { dismissed = true }, modifier = Modifier.size(28.dp)) {
+                    Icon(Icons.Filled.Close, contentDescription = "Dismiss checklist", tint = Color(0xFF9CB79F), modifier = Modifier.size(16.dp))
+                }
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+            ChecklistItemRow("Log your first reading", loggedFirstReading) { state.currentScreen = "daily_checkin" }
+            ChecklistItemRow("Try the Daily Check-in", triedCheckin) { state.currentScreen = "daily_checkin" }
+            ChecklistItemRow("Meet your Care+ batch", metBatch) { state.activeTab = "Care" }
+        }
+    }
+}
+
+@Composable
+private fun ChecklistItemRow(label: String, done: Boolean, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(if (done) Modifier else Modifier.clickable(onClick = onClick))
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            if (done) Icons.Filled.CheckCircle else Icons.Filled.RadioButtonUnchecked,
+            contentDescription = null,
+            tint = if (done) Color(0xFF426820) else Color(0xFF9CB79F),
+            modifier = Modifier.size(20.dp),
+        )
+        Spacer(modifier = Modifier.width(10.dp))
+        Text(
+            label,
+            fontSize = 13.sp,
+            color = if (done) Color(0xFF737972) else Color(0xFF1B2219),
+            textDecoration = if (done) TextDecoration.LineThrough else null,
+        )
     }
 }
 

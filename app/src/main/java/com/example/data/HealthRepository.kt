@@ -10,6 +10,12 @@ import com.google.firebase.storage.FirebaseStorage
 import com.google.firebase.functions.FirebaseFunctions
 import java.util.UUID
 
+private fun checkinDayKey(millis: Long): String {
+    val fmt = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+    fmt.timeZone = java.util.TimeZone.getTimeZone("Asia/Kolkata")
+    return fmt.format(java.util.Date(millis))
+}
+
 data class CloudDocument(val id: String, val values: Map<String, Any?>)
 fun interface CloudSubscription { fun cancel() }
 
@@ -93,6 +99,10 @@ interface HealthRepository {
     // caller can re-align the on-device reminder to it.
     fun recordCheckinCompletion(hourOfDay: Int, done: (CloudResult<Int>) -> Unit = {})
     fun peekCheckinHourHint(done: (CloudResult<Int?>) -> Unit)
+    // Consecutive-day check-in count (Asia/Kolkata calendar days), updated as
+    // a side effect of recordCheckinCompletion - framed warmly as a "rhythm"
+    // in the UI, never shown as a punishing streak-loss notice.
+    fun peekCheckinStreak(done: (CloudResult<Int>) -> Unit)
 }
 
 class FirebaseHealthRepository : HealthRepository {
@@ -449,9 +459,31 @@ class FirebaseHealthRepository : HealthRepository {
                 // routine within a couple of weeks without one late night
                 // swinging the reminder time around.
                 val next = if (existing == null) hour else Math.round(existing * 0.7 + hour * 0.3).toInt()
-                ref.set(mapOf("checkinHourHint" to next, "lastCheckinAt" to FieldValue.serverTimestamp()), SetOptions.merge())
+                // Streak (warmly framed as a "rhythm", not a punishing counter):
+                // consecutive calendar days (Asia/Kolkata) with a completed
+                // check-in. Same day again keeps the count as-is rather than
+                // double-counting; any gap resets to 1 rather than 0, since the
+                // day being recorded right now always counts as day one.
+                val existingStreak = snap.getLong("checkinStreak")?.toInt() ?: 0
+                val now = System.currentTimeMillis()
+                val lastCheckinDay = snap.getTimestamp("lastCheckinAt")?.toDate()?.time?.let(::checkinDayKey)
+                val nextStreak = when (lastCheckinDay) {
+                    checkinDayKey(now) -> existingStreak.coerceAtLeast(1)
+                    // Asia/Kolkata has no DST, so subtracting exactly 24h always
+                    // lands on the correct previous calendar day.
+                    checkinDayKey(now - 86_400_000L) -> existingStreak + 1
+                    else -> 1
+                }
+                ref.set(
+                    mapOf(
+                        "checkinHourHint" to next,
+                        "lastCheckinAt" to FieldValue.serverTimestamp(),
+                        "checkinStreak" to nextStreak,
+                    ),
+                    SetOptions.merge(),
+                )
                     .addOnSuccessListener {
-                        AnalyticsLogger.log("checkin_completed", mapOf("hour" to hour))
+                        AnalyticsLogger.log("checkin_completed", mapOf("hour" to hour, "streak" to nextStreak))
                         done(CloudResult.Success(next))
                     }
                     .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Could not save", it)) }
@@ -464,6 +496,14 @@ class FirebaseHealthRepository : HealthRepository {
         val database = db ?: return done(CloudResult.Failure("Firebase is not configured"))
         database.collection("users").document(uid).get()
             .addOnSuccessListener { snap -> done(CloudResult.Success(snap.getLong("checkinHourHint")?.toInt())) }
+            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Could not load", it)) }
+    }
+
+    override fun peekCheckinStreak(done: (CloudResult<Int>) -> Unit) {
+        val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
+        val database = db ?: return done(CloudResult.Failure("Firebase is not configured"))
+        database.collection("users").document(uid).get()
+            .addOnSuccessListener { snap -> done(CloudResult.Success(snap.getLong("checkinStreak")?.toInt() ?: 0)) }
             .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Could not load", it)) }
     }
 
