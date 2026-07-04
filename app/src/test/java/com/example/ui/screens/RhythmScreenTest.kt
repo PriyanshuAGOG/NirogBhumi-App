@@ -30,7 +30,8 @@ class RhythmScreenTest {
 
         composeTestRule.onNodeWithText("Your rhythm").assertExists()
         composeTestRule.onNodeWithText("Not a streak. A pattern.").assertExists()
-        composeTestRule.onNodeWithText("Last 7 days").assertExists()
+        // SectionLabel uppercases its text.
+        composeTestRule.onNodeWithText("LAST 7 DAYS").assertExists()
     }
 
     @Test
