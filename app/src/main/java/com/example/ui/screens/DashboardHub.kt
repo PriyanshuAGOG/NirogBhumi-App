@@ -53,13 +53,13 @@ fun MainHub(state: NirogState) {
         val flags = booleanArrayOf(false, false, false)
         fun recompute() { state.checkedInToday = flags.any { it } }
         val subs = listOf(
-            state.repository.listenUserCollection("glucoseReadings", 5) { r ->
+            state.repository.listenUserCollection("glucoseReadings", 5, orderByField = "measuredAt", descending = true) { r ->
                 if (r is CloudResult.Success) { flags[0] = anyToday(r.value); recompute() }
             },
-            state.repository.listenUserCollection("bpReadings", 5) { r ->
+            state.repository.listenUserCollection("bpReadings", 5, orderByField = "createdAt", descending = true) { r ->
                 if (r is CloudResult.Success) { flags[1] = anyToday(r.value); recompute() }
             },
-            state.repository.listenUserCollection("weightLogs", 5) { r ->
+            state.repository.listenUserCollection("weightLogs", 5, orderByField = "createdAt", descending = true) { r ->
                 if (r is CloudResult.Success) { flags[2] = anyToday(r.value); recompute() }
             },
         )
@@ -411,7 +411,7 @@ fun TodayTab(state: NirogState) {
     var walkLoggedToday by remember { mutableStateOf(false) }
 
     DisposableEffect(Unit) {
-        val sugarSub = state.repository.listenUserCollection("glucoseReadings", 7) { result ->
+        val sugarSub = state.repository.listenUserCollection("glucoseReadings", 7, orderByField = "measuredAt", descending = true) { result ->
             if (result is com.nirogbhumi.app.data.CloudResult.Success) {
                 val todayKey = com.nirogbhumi.app.ui.localDayKey(System.currentTimeMillis())
                 val synced = result.value.mapIndexedNotNull { index, doc ->
@@ -440,7 +440,7 @@ fun TodayTab(state: NirogState) {
                 }
             }
         }
-        val bpSub = state.repository.listenUserCollection("bpReadings", 1) { result ->
+        val bpSub = state.repository.listenUserCollection("bpReadings", 1, orderByField = "createdAt", descending = true) { result ->
             if (result is com.nirogbhumi.app.data.CloudResult.Success) {
                 val latest = result.value.firstOrNull()
                 val systolic = (latest?.values?.get("systolic") as? Number)?.toInt()
@@ -988,10 +988,10 @@ private fun SleepGlucoseInsightCard(state: NirogState) {
     var glucoseReadings by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>>(emptyList()) }
 
     DisposableEffect(state.repository.userId) {
-        val sleepSub = state.repository.listenUserCollection("sleepLogs", limit = 60) { result ->
+        val sleepSub = state.repository.listenUserCollection("sleepLogs", limit = 60, orderByField = "createdAt", descending = true) { result ->
             if (result is CloudResult.Success) sleepLogs = result.value
         }
-        val glucoseSub = state.repository.listenUserCollection("glucoseReadings", limit = 60) { result ->
+        val glucoseSub = state.repository.listenUserCollection("glucoseReadings", limit = 60, orderByField = "measuredAt", descending = true) { result ->
             if (result is CloudResult.Success) glucoseReadings = result.value
         }
         onDispose { sleepSub.cancel(); glucoseSub.cancel() }

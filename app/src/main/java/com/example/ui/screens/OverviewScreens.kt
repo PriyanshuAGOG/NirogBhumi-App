@@ -95,7 +95,7 @@ private fun TrendLine(points: List<Float>) {
 fun BpOverviewScreen(state: NirogState) {
     var records by remember { mutableStateOf<List<CloudDocument>?>(null) }
     DisposableEffect(Unit) {
-        val sub = state.repository.listenUserCollection("bpReadings", 30) { r ->
+        val sub = state.repository.listenUserCollection("bpReadings", 30, orderByField = "createdAt", descending = true) { r ->
             records = if (r is CloudResult.Success) r.value else emptyList()
             if (r is CloudResult.Success) r.value.firstOrNull()?.let { d ->
                 val s = (d.values["systolic"] as? Number)?.toInt(); val di = (d.values["diastolic"] as? Number)?.toInt()
@@ -145,7 +145,7 @@ fun SleepOverviewScreen(state: NirogState) {
     var records by remember { mutableStateOf<List<CloudDocument>?>(null) }
     var showAdd by remember { mutableStateOf(false) }
     DisposableEffect(Unit) {
-        val sub = state.repository.listenUserCollection("sleepLogs", 30) { r -> records = if (r is CloudResult.Success) r.value else emptyList() }
+        val sub = state.repository.listenUserCollection("sleepLogs", 30, orderByField = "createdAt", descending = true) { r -> records = if (r is CloudResult.Success) r.value else emptyList() }
         onDispose { sub.cancel() }
     }
     val sorted = (records ?: emptyList()).sortedByDescending { docTime(it.values)?.time ?: 0 }
@@ -236,7 +236,7 @@ fun WalkingActivityScreen(state: NirogState) {
     var records by remember { mutableStateOf<List<CloudDocument>?>(null) }
     var showAdd by remember { mutableStateOf(false) }
     DisposableEffect(Unit) {
-        val sub = state.repository.listenUserCollection("walkLogs", 30) { r -> records = if (r is CloudResult.Success) r.value else emptyList() }
+        val sub = state.repository.listenUserCollection("walkLogs", 30, orderByField = "createdAt", descending = true) { r -> records = if (r is CloudResult.Success) r.value else emptyList() }
         onDispose { sub.cancel() }
     }
     val sorted = (records ?: emptyList()).sortedByDescending { docTime(it.values)?.time ?: 0 }
@@ -368,7 +368,7 @@ fun LabReportsScreen(state: NirogState) {
     var records by remember { mutableStateOf<List<CloudDocument>?>(null) }
     var showAdd by remember { mutableStateOf(false) }
     DisposableEffect(Unit) {
-        val sub = state.repository.listenUserCollection("labReports", 30) { r -> records = if (r is CloudResult.Success) r.value else emptyList() }
+        val sub = state.repository.listenUserCollection("labReports", 30, orderByField = "createdAt", descending = true) { r -> records = if (r is CloudResult.Success) r.value else emptyList() }
         onDispose { sub.cancel() }
     }
     val sorted = (records ?: emptyList()).sortedByDescending { docTime(it.values)?.time ?: 0 }

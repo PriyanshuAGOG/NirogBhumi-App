@@ -132,11 +132,6 @@ class NirogState {
     var isExperimentActive by mutableStateOf(false)
     var experimentStartedAtMillis by mutableStateOf(0L)
 
-    // Active Journey Protocol State - only the one non-loggable manual
-    // protocol ("movement") is ever stored here; the rest are derived live
-    // from real logged data in ActiveJourneyScreen.
-    val completedProtocols = mutableStateListOf<String>()
-
     // Book Consultation State
     var consultStep by mutableStateOf(1) // 1: Service, 2: Slot & Form, 3: Success
     var selectedConsultType by mutableStateOf("diabetes_lifestyle")

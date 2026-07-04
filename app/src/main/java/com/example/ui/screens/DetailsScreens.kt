@@ -62,7 +62,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun BloodSugarDetailScreen(state: NirogState) {
     DisposableEffect(Unit) {
-        val subscription = state.repository.listenUserCollection("glucoseReadings", 30) { result ->
+        val subscription = state.repository.listenUserCollection("glucoseReadings", 30, orderByField = "measuredAt", descending = true) { result ->
             when (result) {
                 is com.nirogbhumi.app.data.CloudResult.Success -> {
                     val synced = result.value.mapIndexedNotNull { index, doc ->
@@ -605,6 +605,13 @@ fun ActiveJourneyScreen(state: NirogState) {
     var loggedReadingToday by remember { mutableStateOf(false) }
     var walkLoggedToday by remember { mutableStateOf(false) }
     var sleepLoggedToday by remember { mutableStateOf(false) }
+    // Persisted like the "daily_post_dinner_walk" checklist item (a
+    // checklistLogs doc keyed by day) instead of state.completedProtocols,
+    // which lived only in memory and silently reset on every app restart
+    // even though the row visually showed as checked off.
+    var movementDoneToday by remember { mutableStateOf(false) }
+    val movementDayKey = remember { com.nirogbhumi.app.ui.localDayKey(System.currentTimeMillis()) }
+    val movementDocId = "daily_movement_stretch_$movementDayKey"
 
     DisposableEffect(state.repository.userId) {
         val todayKey = com.nirogbhumi.app.ui.localDayKey(System.currentTimeMillis())
@@ -612,7 +619,7 @@ fun ActiveJourneyScreen(state: NirogState) {
             val ts = (doc.values["measuredAt"] as? Timestamp) ?: (doc.values["createdAt"] as? Timestamp)
             return ts != null && com.nirogbhumi.app.ui.localDayKey(ts.toDate().time) == todayKey
         }
-        val sugarSub = state.repository.listenUserCollection("glucoseReadings", 7) { result ->
+        val sugarSub = state.repository.listenUserCollection("glucoseReadings", 7, orderByField = "measuredAt", descending = true) { result ->
             if (result is CloudResult.Success) loggedReadingToday = result.value.any(::loggedToday)
         }
         val walkSub = state.repository.listenUserCollection("walkLogs", 5, orderByField = "createdAt", descending = true) { result ->
@@ -621,7 +628,14 @@ fun ActiveJourneyScreen(state: NirogState) {
         val sleepSub = state.repository.listenUserCollection("sleepLogs", 5, orderByField = "createdAt", descending = true) { result ->
             if (result is CloudResult.Success) sleepLoggedToday = result.value.any(::loggedToday)
         }
-        onDispose { sugarSub.cancel(); walkSub.cancel(); sleepSub.cancel() }
+        val checklistSub = state.repository.listenUserCollection("checklistLogs", 10, orderByField = "createdAt", descending = true) { result ->
+            if (result is CloudResult.Success) {
+                movementDoneToday = result.value.any { doc ->
+                    doc.values["taskId"] == "daily_movement_stretch" && doc.values["status"] == "done" && loggedToday(doc)
+                }
+            }
+        }
+        onDispose { sugarSub.cancel(); walkSub.cancel(); sleepSub.cancel(); checklistSub.cancel() }
     }
 
     fun isDone(protocol: DailyProtocol): Boolean = when (protocol.id) {
@@ -629,7 +643,7 @@ fun ActiveJourneyScreen(state: NirogState) {
         "checkin" -> state.checkedInToday
         "walk" -> walkLoggedToday
         "sleep" -> sleepLoggedToday
-        else -> state.completedProtocols.contains(protocol.id)
+        else -> movementDoneToday
     }
     val completedCount = DAILY_PROTOCOLS.count { isDone(it) }
 
@@ -728,10 +742,15 @@ fun ActiveJourneyScreen(state: NirogState) {
                             .clickable {
                                 if (protocol.autoCompletable) {
                                     if (!checked) protocol.onOpen(state)
-                                } else if (checked) {
-                                    state.completedProtocols.remove(protocol.id)
                                 } else {
-                                    state.completedProtocols.add(protocol.id)
+                                    val nextStatus = if (checked) "pending" else "done"
+                                    movementDoneToday = !checked
+                                    state.repository.upsertUserRecord("checklistLogs", movementDocId, mapOf(
+                                        "taskId" to "daily_movement_stretch",
+                                        "title" to protocol.title,
+                                        "status" to nextStatus,
+                                        "completedAt" to if (nextStatus == "done") com.google.firebase.firestore.FieldValue.serverTimestamp() else null,
+                                    )) { result -> if (result is CloudResult.Failure) state.cloudMessage = result.message }
                                 }
                             }
                             .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.25f), shape = RoundedCornerShape(16.dp)),
@@ -770,10 +789,10 @@ fun InsightDetailScreen(state: NirogState) {
     var sleepLogs by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>>(emptyList()) }
     var glucoseReadings by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>>(emptyList()) }
     DisposableEffect(state.repository.userId) {
-        val sleepSub = state.repository.listenUserCollection("sleepLogs", limit = 60) { result ->
+        val sleepSub = state.repository.listenUserCollection("sleepLogs", limit = 60, orderByField = "createdAt", descending = true) { result ->
             if (result is CloudResult.Success) sleepLogs = result.value
         }
-        val glucoseSub = state.repository.listenUserCollection("glucoseReadings", limit = 60) { result ->
+        val glucoseSub = state.repository.listenUserCollection("glucoseReadings", limit = 60, orderByField = "measuredAt", descending = true) { result ->
             if (result is CloudResult.Success) glucoseReadings = result.value
         }
         onDispose { sleepSub.cancel(); glucoseSub.cancel() }
@@ -2189,7 +2208,7 @@ fun FamilyMemberDetailScreen(state: NirogState) {
 fun OrdersScreen(state: NirogState) {
     var records by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>?>(null) }
     DisposableEffect(Unit) {
-        val subscription = state.repository.listenUserCollection("orders", 30) { result ->
+        val subscription = state.repository.listenUserCollection("orders", 30, orderByField = "createdAt", descending = true) { result ->
             records = when (result) {
                 is com.nirogbhumi.app.data.CloudResult.Success -> result.value
                 is com.nirogbhumi.app.data.CloudResult.Failure -> emptyList()
@@ -2269,7 +2288,7 @@ private fun OrderStatusBadge(status: String) {
 fun NotificationInboxScreen(state: NirogState) {
     var records by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>?>(null) }
     DisposableEffect(Unit) {
-        val subscription = state.repository.listenUserCollection("notifications", 30) { result ->
+        val subscription = state.repository.listenUserCollection("notifications", 30, orderByField = "createdAt", descending = true) { result ->
             records = when (result) {
                 is com.nirogbhumi.app.data.CloudResult.Success -> result.value
                 is com.nirogbhumi.app.data.CloudResult.Failure -> emptyList()
@@ -2301,19 +2320,25 @@ fun NotificationInboxScreen(state: NirogState) {
             records!!.isEmpty() -> EmptyStateCard(Icons.Filled.NotificationsNone, "No notifications yet. Health reminders, order and consultation updates will show up here.")
             else -> Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 records!!.sortedByDescending { (it.values["createdAt"] as? com.google.firebase.Timestamp)?.seconds ?: 0 }.forEach { record ->
-                    val category = record.values["category"]?.toString() ?: "update"
+                    // Cloud Functions always stamp "type" (critical_alert, announcement,
+                    // coach_message, report, weekly_digest, reminder) - this used to read
+                    // a "category" field nothing ever wrote, so every notification fell
+                    // through to the generic bell icon regardless of its real kind.
+                    val type = record.values["type"]?.toString() ?: "update"
                     val title = record.values["title"]?.toString() ?: "Nirog Bhumi"
                     val body = record.values["body"]?.toString().orEmpty()
                     val route = record.values["route"]?.toString() ?: "dashboard"
                     val timestamp = (record.values["createdAt"] as? com.google.firebase.Timestamp)?.toDate()
                     val relative = timestamp?.let { relativeTimeLabel(it) } ?: ""
-                    val icon = when (category) {
+                    val icon = when (type) {
                         "reminder" -> Icons.Filled.NotificationsActive
+                        "critical_alert" -> Icons.Filled.NotificationsActive
                         "order" -> Icons.Filled.ShoppingBag
                         "consultation" -> Icons.Filled.MedicalServices
+                        "announcement" -> Icons.Filled.Campaign
                         "program" -> Icons.Filled.Checklist
-                        "report" -> Icons.Filled.Insights
-                        "expert_message" -> Icons.Filled.Person
+                        "report", "weekly_digest" -> Icons.Filled.Insights
+                        "coach_message", "expert_message" -> Icons.Filled.Person
                         else -> Icons.Filled.Notifications
                     }
                     Card(

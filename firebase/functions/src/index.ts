@@ -140,11 +140,36 @@ export const generateDailyContent = onSchedule({ schedule: '0 5 * * *', timeZone
   const weekdayIST = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', weekday: 'short' }).format(new Date());
   if (weekdayIST !== 'Mon') return;
   const end = Timestamp.now(); const start = Timestamp.fromMillis(end.toMillis() - 7 * 86400000);
+  // Digest notifications are scheduled a few hours out (not sent immediately
+  // at this 5am run) so they land at a considerate mid-morning hour instead
+  // of during most users' default quiet hours (21:00-07:00).
+  const digestScheduledFor = Timestamp.fromMillis(Date.now() + 4 * 60 * 60000);
   for (const user of users.docs) {
-    const glucose = await db.collection('glucoseReadings').where('userId', '==', user.id).where('measuredAt', '>=', start).get();
+    const [glucose, sleep] = await Promise.all([
+      db.collection('glucoseReadings').where('userId', '==', user.id).where('measuredAt', '>=', start).get(),
+      db.collection('sleepLogs').where('userId', '==', user.id).where('createdAt', '>=', start).get(),
+    ]);
     const values = glucose.docs.map(x => Number(x.data().value)).filter(Number.isFinite);
     const average = values.length ? Math.round(values.reduce((a,b) => a+b, 0) / values.length) : null;
     await db.collection('weeklyReports').add({ userId: user.id, profileId: user.id, periodStart: start, periodEnd: end, glucoseAverage: average, glucoseLogCount: values.length, consistency: values.length >= 4 ? 'good' : 'building', recommendation: 'Focus on one consistent daily action this week.', createdAt: FieldValue.serverTimestamp() });
+
+    // Weekly logging-coverage digest: same "days with a reading/sleep log
+    // out of 7" coverage math the Insights screen already shows the member,
+    // sent as a nudge rather than left for them to discover on their own.
+    const loggedDayKeys = new Set<string>();
+    for (const doc of [...glucose.docs, ...sleep.docs]) {
+      const ts = (doc.get('measuredAt') ?? doc.get('createdAt')) as FirebaseFirestore.Timestamp | undefined;
+      if (ts) loggedDayKeys.add(dayKeyIST(ts.toDate()));
+    }
+    const daysLogged = loggedDayKeys.size;
+    if (daysLogged === 0) continue; // Never nag a fully inactive user with a "0/7" ping.
+    const body = daysLogged >= 4
+      ? `Great rhythm - you logged health data on ${daysLogged} of the last 7 days. Keep it up!`
+      : `You logged health data on ${daysLogged} of the last 7 days. Try logging one thing today to build your rhythm.`;
+    await db.collection('notifications').add({
+      userId: user.id, profileId: user.id, title: 'Your week in review', body,
+      type: 'weekly_digest', status: 'scheduled', scheduledFor: digestScheduledFor, createdAt: FieldValue.serverTimestamp(),
+    });
   }
 });
 

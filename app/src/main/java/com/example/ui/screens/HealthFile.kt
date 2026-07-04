@@ -83,10 +83,10 @@ fun HealthFileScreen(state: NirogState) {
 
   DisposableEffect(Unit) {
     val subs = listOf(
-      state.repository.listenUserCollection("glucoseReadings", 30) { r -> if (r is CloudResult.Success) recentSugar = r.value.map { it.values } },
-      state.repository.listenUserCollection("bpReadings", 10) { r -> if (r is CloudResult.Success) recentBp = r.value.map { it.values } },
-      state.repository.listenUserCollection("weightLogs", 5) { r -> if (r is CloudResult.Success) recentWeight = r.value.map { it.values } },
-      state.repository.listenUserCollection("labReports", 10) { r -> if (r is CloudResult.Success) labReports = r.value.map { it.values } },
+      state.repository.listenUserCollection("glucoseReadings", 30, orderByField = "measuredAt", descending = true) { r -> if (r is CloudResult.Success) recentSugar = r.value.map { it.values } },
+      state.repository.listenUserCollection("bpReadings", 10, orderByField = "createdAt", descending = true) { r -> if (r is CloudResult.Success) recentBp = r.value.map { it.values } },
+      state.repository.listenUserCollection("weightLogs", 5, orderByField = "createdAt", descending = true) { r -> if (r is CloudResult.Success) recentWeight = r.value.map { it.values } },
+      state.repository.listenUserCollection("labReports", 10, orderByField = "createdAt", descending = true) { r -> if (r is CloudResult.Success) labReports = r.value.map { it.values } },
     )
     onDispose { subs.forEach { it.cancel() } }
   }

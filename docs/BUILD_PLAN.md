@@ -347,8 +347,11 @@ by the user. Work sequentially, CI-verified per slice, small commits.
     at the check-in that hits 7/30/100 days - a real event moment, not a
     persistent badge, so it can't repeat on a later view of the same
     day's already-completed check-in.
-15. [ ] **Admin console utility** — announcement templates, bulk "message
-    all quiet members," CSV roster export.
+15. [x] **Admin console utility** — announcement templates (`ANNOUNCEMENT_TEMPLATES`
+    dropdown on the composer), bulk "message all quiet members" (per-program
+    bulk notification via the existing `sendBulkNotification` callable), and
+    CSV roster export (`Members.tsx`, client-side CSV with proper quote
+    escaping) all shipped.
 16. [x] **Self-update system** — the app now detects, downloads, verifies,
     and installs new builds over itself without a manual APK reinstall
     cycle. `appUpdates/{channel}` (public-read, admin-write) and
@@ -372,3 +375,52 @@ by the user. Work sequentially, CI-verified per slice, small commits.
     publish step currently skips itself cleanly (by design) rather than
     failing the build; everything else (detection, download, verify,
     install, Developer Settings) works today independent of that setup.
+17. [x] **Core-dynamism audit** — a full re-verification pass over the
+    22-item backlog the user asked for next: most of it (mentions, pin,
+    unread badges, reply threading, typing indicators, trend correlation,
+    Health File link, PDF export, admin templates/bulk/CSV, streaks,
+    first-week checklist, milestones, analytics, a11y, rules-tests) turned
+    out to already be shipped from earlier slices - verified by reading the
+    actual code and rules rather than re-building blind, to avoid
+    duplicate/conflicting implementations. Concrete gaps found and fixed:
+    - Extended the `checklistLogs`-ordering fix (item that started this
+      audit) to every other unordered `listenUserCollection` call reading
+      a "recent N" from a per-user growing collection - `bpReadings`,
+      `sleepLogs`, `walkLogs`, `labReports`, `glucoseReadings`, `orders`,
+      `notifications` across Overview/Rhythm/HealthFile/Dashboard/Details
+      screens. Two of these (`TodayTab`'s `checkedInToday` glucose/BP/
+      weight check, and the BP "latest reading" `limit(1)` fetch) were
+      real, live bugs, not just theoretical - an unordered `limit(1)`
+      cannot actually return "the latest" anything.
+    - `completedProtocols` (the one manual "movement" Daily Protocol item)
+      was in-memory-only and reset every app restart despite showing as
+      checked. Now persisted the same way as the other checklist items
+      (`checklistLogs` doc keyed by day).
+    - New composite index (`notifications`: `userId` + `createdAt` desc)
+      to support the above without breaking the existing `status`+
+      `scheduledFor`/`sentAt` indexes used by delivery.
+    - Found and fixed an unrelated pre-existing bug while in this code:
+      the Notification Inbox read a `category` field no Cloud Function
+      has ever written (they all write `type`) - every notification was
+      silently rendering the generic bell icon regardless of its real
+      kind.
+    - Added the weekly digest notification described in the original
+      suggestion list ("you logged N/7 days this week") - `generateDailyContent`'s
+      existing Monday `weeklyReports` job now also writes a `notifications`
+      doc with the same logging-coverage math the Insights screen already
+      shows, scheduled ~4h out so it lands mid-morning instead of during
+      most users' default quiet hours; skipped entirely for a fully
+      inactive user rather than nagging with "0/7."
+    - Added unit tests for the two pure-logic modules that had none:
+      `TodayFocusEngine` and `computeSleepGlucoseInsight`.
+    - Day-key audit: confirmed the two coexisting day-key systems
+      (`localDayKey`, device-local, for personal "did I do X today"
+      signals; the Asia/Kolkata string keys, for anything that must match
+      a Cloud-Function-written shared document like `batchStats`) are a
+      deliberate, consistently-applied split, not a bug - no raw
+      UTC-millis-window comparisons found anywhere in the app.
+    - Cold-start empty-state flash: already mitigated by Firestore's
+      explicit `PersistentCacheSettings` (enabled in
+      `NirogBhumiApplication`), which serves the last cached snapshot
+      instantly before revalidating - a hand-rolled DataStore cache layer
+      would just duplicate that.

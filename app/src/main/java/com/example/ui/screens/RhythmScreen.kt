@@ -63,7 +63,7 @@ fun RhythmScreen(state: NirogState) {
   var loaded by remember { mutableStateOf(false) }
 
   DisposableEffect(Unit) {
-    val sub = state.repository.listenUserCollection("glucoseReadings", 90) { result ->
+    val sub = state.repository.listenUserCollection("glucoseReadings", 90, orderByField = "measuredAt", descending = true) { result ->
       if (result is CloudResult.Success) {
         loggedDayKeys = result.value.mapNotNull { doc ->
           val ts = (doc.values["createdAt"] as? Timestamp) ?: (doc.values["measuredAt"] as? Timestamp)
