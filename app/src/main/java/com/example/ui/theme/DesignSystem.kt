@@ -78,6 +78,23 @@ object NirogColor {
   val statusCriticalBg = StatusCriticalBg
   val statusNeutral = StatusNeutral
   val statusNeutralBg = StatusNeutralBg
+
+  // Additional semantic aliases for existing brand colors (Color.kt) that
+  // pre-date this token system but are used heavily across the dashboard -
+  // exposed here so screens can read from NirogColor instead of reaching
+  // for the raw Color.kt constants directly, without changing any hex value.
+  val outline = OutlineGrey
+  val outlineVariant = OutlineVariantLight
+  val secondaryGreen = SecondaryOliveGreen
+  val secondaryContainer = SecondaryContainerLime
+  val forestSofter = OnPrimaryContainerLight
+  val forestPale = PrimaryFixedDim
+  val forestPaleLight = PrimaryFixed
+  val errorColor = ErrorRed
+  val inkTertiary = OnSurfaceVariantDark
+  val surfaceNeutral = SurfaceContainerNeutral
+  val surfaceLow = SurfaceContainerLowLight
+  val surfaceMint = SurfaceMintTint
 }
 
 /** 4 / 8 / 12 / 16 / 24 / 32 / 48 spacing scale. */
