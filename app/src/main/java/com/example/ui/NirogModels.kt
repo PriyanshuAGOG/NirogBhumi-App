@@ -126,12 +126,15 @@ class NirogState {
     // Daily Checklist State
     var dailyRitualsCompleted = mutableStateListOf<String>()
 
-    // Active Experiment State
+    // Active Experiment State - startedAtMillis anchors real progress
+    // (nights of 7+ hours actually logged since start), not just a manually
+    // incremented day counter disconnected from real sleep data.
     var isExperimentActive by mutableStateOf(false)
-    var experimentDayCount by mutableStateOf(1)
+    var experimentStartedAtMillis by mutableStateOf(0L)
 
-    // Active Journey Protocol State
-    var activeJourneyProgress by mutableStateOf(0)
+    // Active Journey Protocol State - only the one non-loggable manual
+    // protocol ("movement") is ever stored here; the rest are derived live
+    // from real logged data in ActiveJourneyScreen.
     val completedProtocols = mutableStateListOf<String>()
 
     // Book Consultation State

@@ -583,15 +583,55 @@ fun ConsultTypeOption(title: String, desc: String, info: String, selected: Boole
 }
 
 // Screen 4: Active Journey Screen (reversal checklist progress)
+private data class DailyProtocol(val id: String, val title: String, val autoCompletable: Boolean, val onOpen: (NirogState) -> Unit)
+
+// Deliberately generic, safe daily wellness actions - no named herbs,
+// supplements, or home remedies (e.g. "ashwagandha," "lemon water with
+// ginger"), since recommending those without an expert reviewing the
+// member's actual conditions/medications isn't something this app should
+// do on its own. Four of five are auto-completable straight from real
+// logged data (never a manual "trust me" toggle); tapping an incomplete
+// one deep-links into the exact screen that logs it.
+private val DAILY_PROTOCOLS = listOf(
+    DailyProtocol("fasting_reading", "Log a fasting sugar reading", autoCompletable = true) { it.isQuickLogFastingOpen = true },
+    DailyProtocol("checkin", "Complete today's check-in", autoCompletable = true) { it.checkinStartStep = 0; it.currentScreen = "daily_checkin" },
+    DailyProtocol("walk", "Walk 10 minutes", autoCompletable = true) { it.currentScreen = "walk_timer" },
+    DailyProtocol("sleep", "Log last night's sleep", autoCompletable = true) { it.currentScreen = "sleep_overview" },
+    DailyProtocol("movement", "5-minute stretch or light movement", autoCompletable = false) {},
+)
+
 @Composable
 fun ActiveJourneyScreen(state: NirogState) {
-    val protocolsList = listOf(
-        "Fasting Blood Sugar",
-        "Warm Lemon Water with Ginger",
-        "Mandukasana Posture Sequence",
-        "Brisk 10-Min Walk post lunch",
-        "Bedtime Ashwagandha milk loop"
-    )
+    var loggedReadingToday by remember { mutableStateOf(false) }
+    var walkLoggedToday by remember { mutableStateOf(false) }
+    var sleepLoggedToday by remember { mutableStateOf(false) }
+
+    DisposableEffect(state.repository.userId) {
+        val todayKey = com.nirogbhumi.app.ui.localDayKey(System.currentTimeMillis())
+        fun loggedToday(doc: com.nirogbhumi.app.data.CloudDocument): Boolean {
+            val ts = (doc.values["measuredAt"] as? Timestamp) ?: (doc.values["createdAt"] as? Timestamp)
+            return ts != null && com.nirogbhumi.app.ui.localDayKey(ts.toDate().time) == todayKey
+        }
+        val sugarSub = state.repository.listenUserCollection("glucoseReadings", 7) { result ->
+            if (result is CloudResult.Success) loggedReadingToday = result.value.any(::loggedToday)
+        }
+        val walkSub = state.repository.listenUserCollection("walkLogs", 5, orderByField = "createdAt", descending = true) { result ->
+            if (result is CloudResult.Success) walkLoggedToday = result.value.any(::loggedToday)
+        }
+        val sleepSub = state.repository.listenUserCollection("sleepLogs", 5, orderByField = "createdAt", descending = true) { result ->
+            if (result is CloudResult.Success) sleepLoggedToday = result.value.any(::loggedToday)
+        }
+        onDispose { sugarSub.cancel(); walkSub.cancel(); sleepSub.cancel() }
+    }
+
+    fun isDone(protocol: DailyProtocol): Boolean = when (protocol.id) {
+        "fasting_reading" -> loggedReadingToday
+        "checkin" -> state.checkedInToday
+        "walk" -> walkLoggedToday
+        "sleep" -> sleepLoggedToday
+        else -> state.completedProtocols.contains(protocol.id)
+    }
+    val completedCount = DAILY_PROTOCOLS.count { isDone(it) }
 
     Column(
         modifier = Modifier
@@ -654,7 +694,7 @@ fun ActiveJourneyScreen(state: NirogState) {
                         }
                         // Core value representation
                         Text(
-                            "${state.activeJourneyProgress}%",
+                            "${completedCount * 20}%",
                             fontSize = 32.sp,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
@@ -665,7 +705,7 @@ fun ActiveJourneyScreen(state: NirogState) {
                     Spacer(modifier = Modifier.height(16.dp))
 
                     Text(
-                        "${state.completedProtocols.size} of 5 Protocols checked off.",
+                        "$completedCount of ${DAILY_PROTOCOLS.size} checked off today.",
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFF426820),
                         fontSize = 14.sp
@@ -675,20 +715,24 @@ fun ActiveJourneyScreen(state: NirogState) {
 
             Text("Daily Protocols", fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
 
-            // Protocol checked card checklist
+            // Protocol checked card checklist - auto-completable items reflect
+            // real logged data (tapping while incomplete deep-links to the
+            // right logging screen instead of just self-reporting); only the
+            // one non-loggable item is a manual toggle.
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                protocolsList.forEach { protocol ->
-                    val checked = state.completedProtocols.contains(protocol)
+                DAILY_PROTOCOLS.forEach { protocol ->
+                    val checked = isDone(protocol)
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable {
-                                if (checked) {
-                                    state.completedProtocols.remove(protocol)
+                                if (protocol.autoCompletable) {
+                                    if (!checked) protocol.onOpen(state)
+                                } else if (checked) {
+                                    state.completedProtocols.remove(protocol.id)
                                 } else {
-                                    state.completedProtocols.add(protocol)
+                                    state.completedProtocols.add(protocol.id)
                                 }
-                                state.activeJourneyProgress = (state.completedProtocols.size * 20)
                             }
                             .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.25f), shape = RoundedCornerShape(16.dp)),
                         colors = CardDefaults.cardColors(containerColor = if (checked) Color(0xFFEBF7E8) else Color.White),
@@ -699,7 +743,7 @@ fun ActiveJourneyScreen(state: NirogState) {
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text(protocol, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, color = Color(0xFF141E15))
+                            Text(protocol.title, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, color = Color(0xFF141E15))
 
                             if (checked) {
                                 Icon(Icons.Filled.CheckCircle, "Completed", tint = Color(0xFF426820))
@@ -816,8 +860,67 @@ fun InsightDetailScreen(state: NirogState) {
 
             Divider(color = Color(0xFFC3C8C0).copy(alpha = 0.3f))
 
-            // Experiment CTA
+            // Data coverage: a real, live reason to come back - shows how
+            // consistently the last 7 days have actually been logged, using
+            // the same sleepLogs/glucoseReadings already fetched above.
+            Text("This week's logging", fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+            val nowMillis = remember { System.currentTimeMillis() }
+            val weekAgoDayKey = remember(nowMillis) { com.nirogbhumi.app.ui.localDayKey(nowMillis) - 6 }
+            val sleepDaysThisWeek = remember(sleepLogs, nowMillis) {
+                sleepLogs.mapNotNull { log ->
+                    val ts = (log.values["measuredAt"] as? Timestamp) ?: (log.values["createdAt"] as? Timestamp)
+                    ts?.toDate()?.time?.let { com.nirogbhumi.app.ui.localDayKey(it) }
+                }.filter { it >= weekAgoDayKey }.toSet().size
+            }
+            val readingDaysThisWeek = remember(glucoseReadings, nowMillis) {
+                glucoseReadings.mapNotNull { doc ->
+                    val ts = (doc.values["measuredAt"] as? Timestamp) ?: (doc.values["createdAt"] as? Timestamp)
+                    ts?.toDate()?.time?.let { com.nirogbhumi.app.ui.localDayKey(it) }
+                }.filter { it >= weekAgoDayKey }.toSet().size
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Card(
+                    modifier = Modifier.weight(1f).border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.3f), shape = RoundedCornerShape(18.dp)),
+                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    shape = RoundedCornerShape(18.dp),
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Text("$readingDaysThisWeek/7", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+                        Text("days with a sugar reading", fontSize = 11.sp, color = Color(0xFF737972))
+                    }
+                }
+                Card(
+                    modifier = Modifier.weight(1f).border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.3f), shape = RoundedCornerShape(18.dp)),
+                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    shape = RoundedCornerShape(18.dp),
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Text("$sleepDaysThisWeek/7", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+                        Text("nights of sleep logged", fontSize = 11.sp, color = Color(0xFF737972))
+                    }
+                }
+            }
+
+            Divider(color = Color(0xFFC3C8C0).copy(alpha = 0.3f))
+
+            // Experiment CTA - real progress: nights of 7+ hours actually
+            // logged since starting, not a manually-incremented counter.
             Text("Resolve the correlation pattern", fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+
+            val nightsSinceStart = remember(sleepLogs, state.experimentStartedAtMillis) {
+                if (state.experimentStartedAtMillis <= 0) 0 else sleepLogs.count { log ->
+                    val ts = (log.values["measuredAt"] as? Timestamp) ?: (log.values["createdAt"] as? Timestamp)
+                    val hours = (log.values["duration"] as? Number)?.toDouble() ?: 0.0
+                    ts != null && ts.toDate().time >= state.experimentStartedAtMillis && hours >= 7.0
+                }
+            }
+            val experimentDaysElapsed = remember(state.experimentStartedAtMillis) {
+                if (state.experimentStartedAtMillis <= 0) 0 else
+                    (((System.currentTimeMillis() - state.experimentStartedAtMillis) / (1000L * 60 * 60 * 24)) + 1).toInt().coerceAtMost(7)
+            }
+            LaunchedEffect(experimentDaysElapsed) {
+                if (state.isExperimentActive && experimentDaysElapsed >= 7) state.isExperimentActive = false
+            }
 
             Card(
                 modifier = Modifier
@@ -830,7 +933,7 @@ fun InsightDetailScreen(state: NirogState) {
                     Text("ACTIVE EXPERIMENT", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF426820))
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = if (state.isExperimentActive) "Experiment Active: Day ${state.experimentDayCount} of 7" else "7-Day Rest Reset Experiment",
+                        text = if (state.isExperimentActive) "Experiment Active: Day $experimentDaysElapsed of 7" else "7-Day Rest Reset Experiment",
                         fontSize = 18.sp,
                         fontFamily = FontFamily.Serif,
                         fontWeight = FontWeight.Bold,
@@ -838,7 +941,10 @@ fun InsightDetailScreen(state: NirogState) {
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        "We challenge you to log at least seven hours of restful sleep daily for the next week. Observe if this aligns fasting sugars down to sub-100 ranges.",
+                        if (state.isExperimentActive)
+                            "$nightsSinceStart of $experimentDaysElapsed nights so far had 7+ hours logged. Keep logging sleep and sugar readings to see if it lines up with lower fasting numbers."
+                        else
+                            "We challenge you to log at least seven hours of restful sleep daily for the next week - tracked from your real sleep logs, not a manual checkbox.",
                         fontSize = 13.sp,
                         color = Color(0xFF434842),
                         lineHeight = 18.sp
@@ -850,7 +956,7 @@ fun InsightDetailScreen(state: NirogState) {
                         onClick = {
                             state.isExperimentActive = !state.isExperimentActive
                             if (state.isExperimentActive) {
-                                state.experimentDayCount = 1
+                                state.experimentStartedAtMillis = System.currentTimeMillis()
                             }
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF314936)),
@@ -3495,25 +3601,43 @@ fun ProgramChatScreen(state: NirogState) {
                 onClick = { photoPicker.launch("image/*") },
                 modifier = Modifier.semantics { contentDescription = "Attach a photo" },
             ) {
-                Text("📷", style = NirogType.cardTitle)
+                Icon(Icons.Filled.AddPhotoAlternate, contentDescription = null, tint = NirogColor.forest)
             }
-            IconButton(
-                enabled = !uploadingPhoto && !sending && !uploadingAudio,
-                onClick = {
-                    if (isRecording) {
-                        stopRecordingAndSend()
-                    } else if (androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                        startRecording()
+            // Mic hides once there's something to send (text or a pending
+            // photo) - WhatsApp-style mic-to-send handoff - rather than
+            // showing mic and send simultaneously at all times.
+            val showMic = messageInput.isBlank() && pendingPhotoUri == null
+            if (showMic || isRecording) {
+                val recordingPulse = rememberInfiniteTransition(label = "recording-pulse")
+                val pulseScale by recordingPulse.animateFloat(
+                    initialValue = 1f, targetValue = 1.18f,
+                    animationSpec = infiniteRepeatable(animation = tween(600), repeatMode = RepeatMode.Reverse),
+                    label = "recording-pulse-scale",
+                )
+                IconButton(
+                    enabled = !uploadingPhoto && !sending && !uploadingAudio,
+                    onClick = {
+                        if (isRecording) {
+                            stopRecordingAndSend()
+                        } else if (androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                            startRecording()
+                        } else {
+                            micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                        }
+                    },
+                    modifier = Modifier
+                        .then(if (isRecording) Modifier.graphicsLayer(scaleX = pulseScale, scaleY = pulseScale) else Modifier)
+                        .semantics { contentDescription = if (isRecording) "Stop and send voice note" else "Record a voice note" },
+                ) {
+                    if (uploadingAudio) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = NirogColor.forestSoft)
                     } else {
-                        micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                        Icon(
+                            if (isRecording) Icons.Filled.Stop else Icons.Filled.Mic,
+                            contentDescription = null,
+                            tint = if (isRecording) NirogColor.statusCritical else NirogColor.forest,
+                        )
                     }
-                },
-                modifier = Modifier.semantics { contentDescription = if (isRecording) "Stop and send voice note" else "Record a voice note" },
-            ) {
-                if (uploadingAudio) {
-                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = NirogColor.forestSoft)
-                } else {
-                    Text(if (isRecording) "⏹" else "🎤", style = NirogType.cardTitle, color = if (isRecording) NirogColor.statusCritical else Color.Unspecified)
                 }
             }
             if (isRecording) {
@@ -3535,7 +3659,7 @@ fun ProgramChatScreen(state: NirogState) {
             )
             Spacer(modifier = Modifier.width(NirogSpace.sm))
             IconButton(
-                enabled = !sending && !uploadingPhoto && !isRecording && !uploadingAudio,
+                enabled = !sending && !uploadingPhoto && !isRecording && !uploadingAudio && (messageInput.isNotBlank() || pendingPhotoUri != null),
                 onClick = {
                     val text = messageInput.trim()
                     val photo = pendingPhotoUri
@@ -3576,7 +3700,10 @@ fun ProgramChatScreen(state: NirogState) {
                         send(null)
                     }
                 },
-                modifier = Modifier.size(48.dp).background(NirogColor.forest, CircleShape)
+                modifier = Modifier.size(48.dp).background(
+                    if (messageInput.isNotBlank() || pendingPhotoUri != null) NirogColor.forest else NirogColor.surfaceSunken,
+                    CircleShape,
+                )
             ) {
                 Icon(Icons.Filled.Send, contentDescription = "Send", tint = NirogColor.onAccent, modifier = Modifier.size(20.dp))
             }

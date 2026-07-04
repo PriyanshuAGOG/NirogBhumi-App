@@ -404,9 +404,16 @@ fun NirogBottomNavItem(
 // TAB 1: Today Tab Dashboard
 @Composable
 fun TodayTab(state: NirogState) {
+    // Real, data-backed signals for TodayFocusEngine - the "one action for
+    // today" card picks from these instead of always showing the same fixed
+    // task, so it actually changes as the member logs real things.
+    var loggedReadingToday by remember { mutableStateOf(false) }
+    var walkLoggedToday by remember { mutableStateOf(false) }
+
     DisposableEffect(Unit) {
         val sugarSub = state.repository.listenUserCollection("glucoseReadings", 7) { result ->
             if (result is com.nirogbhumi.app.data.CloudResult.Success) {
+                val todayKey = com.nirogbhumi.app.ui.localDayKey(System.currentTimeMillis())
                 val synced = result.value.mapIndexedNotNull { index, doc ->
                     val readingType = doc.values["readingType"] as? String
                     // HbA1c is a lab percentage on a different scale than mg/dL readings,
@@ -427,6 +434,10 @@ fun TodayTab(state: NirogState) {
                     state.sugarLogs.addAll(synced)
                     state.fastingSugarValue = synced.firstOrNull { it.type == "Fasting" }?.value ?: state.fastingSugarValue
                 }
+                loggedReadingToday = result.value.any { doc ->
+                    val ts = (doc.values["measuredAt"] as? com.google.firebase.Timestamp) ?: (doc.values["createdAt"] as? com.google.firebase.Timestamp)
+                    ts != null && com.nirogbhumi.app.ui.localDayKey(ts.toDate().time) == todayKey
+                }
             }
         }
         val bpSub = state.repository.listenUserCollection("bpReadings", 1) { result ->
@@ -437,10 +448,26 @@ fun TodayTab(state: NirogState) {
                 if (systolic != null && diastolic != null) state.latestBpReading = "$systolic/$diastolic"
             }
         }
+        // Real walk logs (from Activity/Walk Timer), independent of the
+        // manual "Mark Complete" checklist fallback below - if the member
+        // already logged a real walk today, the focus card treats it as done
+        // without requiring a separate manual tap.
+        val walkSub = state.repository.listenUserCollection("walkLogs", 5, orderByField = "createdAt", descending = true) { result ->
+            if (result is com.nirogbhumi.app.data.CloudResult.Success) {
+                val todayKey = com.nirogbhumi.app.ui.localDayKey(System.currentTimeMillis())
+                walkLoggedToday = result.value.any { doc ->
+                    val ts = (doc.values["measuredAt"] as? com.google.firebase.Timestamp) ?: (doc.values["createdAt"] as? com.google.firebase.Timestamp)
+                    ts != null && com.nirogbhumi.app.ui.localDayKey(ts.toDate().time) == todayKey
+                }
+            }
+        }
         // Restores today's checklist state from Firestore on every open - without
         // this, "Mark Complete" only ever lived in memory and silently reset the
         // moment the app was reopened, even though it visually said "Completed".
-        val checklistSub = state.repository.listenUserCollection("checklistLogs", 10) { result ->
+        // Ordered by createdAt so a growing history can't push today's own doc
+        // out of the fetch window (was previously unordered + limit(10), which
+        // silently stopped finding today's entry once the collection passed 10).
+        val checklistSub = state.repository.listenUserCollection("checklistLogs", 10, orderByField = "createdAt", descending = true) { result ->
             if (result is com.nirogbhumi.app.data.CloudResult.Success) {
                 val todayKey = com.nirogbhumi.app.ui.localDayKey(System.currentTimeMillis())
                 val walkDoneToday = result.value.any { doc ->
@@ -453,7 +480,7 @@ fun TodayTab(state: NirogState) {
                 else if (!walkDoneToday) state.dailyRitualsCompleted.remove("Walk")
             }
         }
-        onDispose { sugarSub.cancel(); bpSub.cancel(); checklistSub.cancel() }
+        onDispose { sugarSub.cancel(); bpSub.cancel(); walkSub.cancel(); checklistSub.cancel() }
     }
 
     var checkinStreak by remember { mutableStateOf(0) }
@@ -461,6 +488,15 @@ fun TodayTab(state: NirogState) {
         state.repository.peekCheckinStreak { result ->
             if (result is CloudResult.Success) checkinStreak = result.value
         }
+    }
+
+    val focusAction = remember(state.isProgramActive, state.checkedInToday, loggedReadingToday, walkLoggedToday, state.dailyRitualsCompleted.contains("Walk")) {
+        com.nirogbhumi.app.health.TodayFocusEngine.pick(
+            isProgramActive = state.isProgramActive,
+            checkedInToday = state.checkedInToday,
+            loggedReadingToday = loggedReadingToday,
+            walkDoneToday = walkLoggedToday || state.dailyRitualsCompleted.contains("Walk"),
+        )
     }
 
     Column(
@@ -519,7 +555,9 @@ fun TodayTab(state: NirogState) {
 
         FirstWeekChecklistCard(state, checkinStreak)
 
-        // Highlight daily task card
+        // Highlight daily task card - driven entirely by TodayFocusEngine, so
+        // this card genuinely changes with real usage instead of always
+        // showing the same fixed walk suggestion.
         Card(
             modifier = Modifier
                 .fillMaxWidth()
@@ -541,10 +579,11 @@ fun TodayTab(state: NirogState) {
 
                 Spacer(modifier = Modifier.height(6.dp))
 
-                val isWalkTaskDone = state.dailyRitualsCompleted.contains("Walk")
+                val isDone = focusAction.id == com.nirogbhumi.app.health.TodayFocusActionId.ALL_DONE ||
+                    (focusAction.id == com.nirogbhumi.app.health.TodayFocusActionId.WALK && state.dailyRitualsCompleted.contains("Walk"))
 
                 Text(
-                    text = if (isWalkTaskDone) "Walk logged and completed!" else "Walk 15 minutes after dinner",
+                    text = if (isDone) focusAction.doneLabel else focusAction.label,
                     fontSize = 22.sp,
                     fontFamily = FontFamily.Serif,
                     fontWeight = FontWeight.Bold,
@@ -553,55 +592,88 @@ fun TodayTab(state: NirogState) {
 
                 Spacer(modifier = Modifier.height(18.dp))
 
-                if (isWalkTaskDone) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(Color.White.copy(alpha = 0.12f), RoundedCornerShape(24.dp))
-                            .padding(vertical = 14.dp, horizontal = 16.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                when (focusAction.id) {
+                    com.nirogbhumi.app.health.TodayFocusActionId.ALL_DONE -> {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Color.White.copy(alpha = 0.12f), RoundedCornerShape(24.dp))
+                                .padding(vertical = 14.dp, horizontal = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = Color(0xFFBFEE95), modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("Completed for today", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        }
-                        TextButton(onClick = {
-                            state.dailyRitualsCompleted.remove("Walk")
-                            val dayKey = com.nirogbhumi.app.ui.localDayKey(System.currentTimeMillis())
-                            state.repository.upsertUserRecord("checklistLogs", "daily_post_dinner_walk_$dayKey", mapOf(
-                                "taskId" to "daily_post_dinner_walk",
-                                "title" to "Walk 15 minutes after dinner",
-                                "status" to "pending",
-                                "completedAt" to null
-                            )) { result -> if (result is com.nirogbhumi.app.data.CloudResult.Failure) state.cloudMessage = result.message }
-                        }) {
-                            Text("Undo", color = Color(0xFFB2CEB4), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Text("Check-in, a reading, and a walk - all logged today", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                         }
                     }
-                } else {
-                    Button(
-                        onClick = {
-                            state.dailyRitualsCompleted.add("Walk")
-                            val dayKey = com.nirogbhumi.app.ui.localDayKey(System.currentTimeMillis())
-                            state.repository.upsertUserRecord("checklistLogs", "daily_post_dinner_walk_$dayKey", mapOf(
-                                "taskId" to "daily_post_dinner_walk",
-                                "title" to "Walk 15 minutes after dinner",
-                                "status" to "done",
-                                "completedAt" to com.google.firebase.firestore.FieldValue.serverTimestamp()
-                            )) { result -> if (result is com.nirogbhumi.app.data.CloudResult.Failure) state.cloudMessage = result.message }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color.White),
-                        shape = RoundedCornerShape(24.dp)
-                    ) {
-                        Text(
-                            text = "Mark Complete",
-                            color = Color(0xFF314936),
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp
-                        )
+                    com.nirogbhumi.app.health.TodayFocusActionId.CHECK_IN -> {
+                        Button(
+                            onClick = { state.checkinStartStep = 0; state.currentScreen = "daily_checkin" },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color.White),
+                            shape = RoundedCornerShape(24.dp)
+                        ) { Text("Start check-in", color = Color(0xFF314936), fontWeight = FontWeight.Bold, fontSize = 14.sp) }
+                    }
+                    com.nirogbhumi.app.health.TodayFocusActionId.LOG_READING -> {
+                        Button(
+                            onClick = { state.isQuickLogFastingOpen = true },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color.White),
+                            shape = RoundedCornerShape(24.dp)
+                        ) { Text("Log a reading", color = Color(0xFF314936), fontWeight = FontWeight.Bold, fontSize = 14.sp) }
+                    }
+                    com.nirogbhumi.app.health.TodayFocusActionId.WALK -> {
+                        if (isDone) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(Color.White.copy(alpha = 0.12f), RoundedCornerShape(24.dp))
+                                    .padding(vertical = 14.dp, horizontal = 16.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = Color(0xFFBFEE95), modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Completed for today", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                }
+                                TextButton(onClick = {
+                                    state.dailyRitualsCompleted.remove("Walk")
+                                    val dayKey = com.nirogbhumi.app.ui.localDayKey(System.currentTimeMillis())
+                                    state.repository.upsertUserRecord("checklistLogs", "daily_post_dinner_walk_$dayKey", mapOf(
+                                        "taskId" to "daily_post_dinner_walk",
+                                        "title" to "Walk 15 minutes after a meal",
+                                        "status" to "pending",
+                                        "completedAt" to null
+                                    )) { result -> if (result is com.nirogbhumi.app.data.CloudResult.Failure) state.cloudMessage = result.message }
+                                }) {
+                                    Text("Undo", color = Color(0xFFB2CEB4), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                }
+                            }
+                        } else {
+                            Button(
+                                onClick = {
+                                    state.dailyRitualsCompleted.add("Walk")
+                                    val dayKey = com.nirogbhumi.app.ui.localDayKey(System.currentTimeMillis())
+                                    state.repository.upsertUserRecord("checklistLogs", "daily_post_dinner_walk_$dayKey", mapOf(
+                                        "taskId" to "daily_post_dinner_walk",
+                                        "title" to "Walk 15 minutes after a meal",
+                                        "status" to "done",
+                                        "completedAt" to com.google.firebase.firestore.FieldValue.serverTimestamp()
+                                    )) { result -> if (result is com.nirogbhumi.app.data.CloudResult.Failure) state.cloudMessage = result.message }
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color.White),
+                                shape = RoundedCornerShape(24.dp)
+                            ) {
+                                Text(
+                                    text = "Mark Complete",
+                                    color = Color(0xFF314936),
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -1784,8 +1856,15 @@ private fun ProgramStatusHero(state: NirogState, dayNumber: Long) {
                         Text("$checkedIn/$memberCount", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color.White)
                         Text("batchmates checked in today", fontSize = 12.sp, color = Color(0xFFB2CEB4))
                     } else {
-                        Text("—", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                        Text("be first to check in today", fontSize = 12.sp, color = Color(0xFFB2CEB4))
+                        // A lone "-" read as meaningless at a glance - spell out
+                        // what's actually being counted (no one's checked in
+                        // yet today) instead of an unexplained placeholder symbol.
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Filled.WavingHand, contentDescription = null, tint = Color(0xFFBFEE95), modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Be first!", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        }
+                        Text("No batchmates checked in yet today", fontSize = 12.sp, color = Color(0xFFB2CEB4))
                     }
                 }
             }

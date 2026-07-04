@@ -31,7 +31,13 @@ interface HealthRepository {
     fun saveProfile(values: Map<String, Any?>, done: (CloudResult<Unit>) -> Unit)
     fun addHealthLog(collection: String, values: Map<String, Any?>, done: (CloudResult<String>) -> Unit)
     fun uploadPrivateFile(folder: String, uri: Uri, done: (CloudResult<String>) -> Unit)
-    fun listenUserCollection(collection: String, limit: Long = 30, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription
+    // orderByField/descending default to unset (Firestore's own implementation-
+    // defined order) to preserve every existing call site's behavior - only
+    // pass them where "the most recent N" specifically matters (e.g. checking
+    // "did I complete today's task" against a collection that keeps growing,
+    // where an unordered limit() can silently exclude today's own doc once
+    // the collection passes the limit).
+    fun listenUserCollection(collection: String, limit: Long = 30, orderByField: String? = null, descending: Boolean = true, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription
     fun listenPublicCollection(collection: String, limit: Long = 30, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription
     fun requestDataExport(done: (CloudResult<Unit>) -> Unit)
     fun requestAccountDeletion(done: (CloudResult<Unit>) -> Unit)
@@ -153,12 +159,15 @@ class FirebaseHealthRepository : HealthRepository {
             .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Upload failed", it)) }
     }
 
-    override fun listenUserCollection(collection: String, limit: Long, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription {
+    override fun listenUserCollection(collection: String, limit: Long, orderByField: String?, descending: Boolean, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription {
         val uid = userId ?: run { update(CloudResult.Failure("Sign in is required")); return CloudSubscription {} }
         val allowed = setOf("profiles", "glucoseReadings", "bpReadings", "sleepLogs", "walkLogs", "weightLogs", "labReports", "dailyActions", "weeklyReports", "sugarStories", "consultations", "userPrograms", "programPlans", "checklistLogs", "expertNotes", "notifications", "deviceConnections", "orders", "supportRequests", "dataExportRequests", "deletionRequests", "medicationLogs")
         if (collection !in allowed) { update(CloudResult.Failure("Unsupported collection")); return CloudSubscription {} }
-        val query = db?.collection(collection)?.whereEqualTo("userId", uid)?.limit(limit)
+        val base = db?.collection(collection)?.whereEqualTo("userId", uid)
             ?: run { update(CloudResult.Failure("Firebase is not configured")); return CloudSubscription {} }
+        val query = (if (orderByField != null) {
+            base.orderBy(orderByField, if (descending) com.google.firebase.firestore.Query.Direction.DESCENDING else com.google.firebase.firestore.Query.Direction.ASCENDING)
+        } else base).limit(limit)
         val registration = query.addSnapshotListener { snapshot, error ->
             if (error != null) update(CloudResult.Failure(error.message ?: "Could not load data", error))
             else update(CloudResult.Success(snapshot?.documents.orEmpty().map { CloudDocument(it.id, it.data.orEmpty()) }))
