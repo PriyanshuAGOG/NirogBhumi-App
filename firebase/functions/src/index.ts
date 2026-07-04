@@ -272,6 +272,36 @@ export const exportUserData = onDocumentCreated({ document: 'dataExportRequests/
   await request.ref.set({ status: 'completed', storagePath: path, completedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   await db.collection('notifications').add({ userId: uid, profileId: null, title: 'Your data export is ready', body: 'Open Privacy and Data Controls to access your export.', type: 'report', status: 'scheduled', scheduledFor: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp() });
 });
+// Real, time-limited signed URL for the Health File "share link / QR code"
+// feature - the client previously used the Storage download-token URL
+// directly (works, but never expires and isn't a true signed URL). Requires
+// the Functions runtime service account to have `roles/iam.serviceAccountTokenCreator`
+// bound to itself (a one-time `gcloud iam service-accounts add-iam-policy-binding`
+// grant, same shape as the WIF setup in docs/deploy-wif-setup.md) - if that
+// grant hasn't been done yet, this throws a clear 'failed-precondition' and
+// the Android client falls back to the existing non-expiring link rather
+// than breaking the feature.
+export const getHealthFileShareLink = onCall({ region }, async request => {
+  const auth = requireUser(request);
+  const storagePath = String(request.data?.storagePath ?? '');
+  // Owner-only: without this check, any signed-in user could pass another
+  // member's Health File path and get a working link to their private data.
+  if (!storagePath.startsWith(`users/${auth.uid}/health-file/`)) {
+    throw new HttpsError('permission-denied', 'You can only share your own Health File');
+  }
+  try {
+    const [url] = await getStorage().bucket().file(storagePath).getSignedUrl({
+      version: 'v4',
+      action: 'read',
+      expires: Date.now() + 7 * 24 * 60 * 60 * 1000,
+    });
+    return { url, expiresInDays: 7 };
+  } catch (error) {
+    console.error('getHealthFileShareLink signing failed', error);
+    throw new HttpsError('failed-precondition', 'Signed links are not set up yet - showing a standard link instead.');
+  }
+});
+
 export const createAuditLog = onCall({ region }, async request => {
   const auth = requireUser(request);
   if (auth.token.role !== 'admin' && auth.token.role !== 'super_admin') throw new HttpsError('permission-denied', 'Admin only');

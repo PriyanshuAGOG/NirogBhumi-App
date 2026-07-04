@@ -50,7 +50,15 @@ fun WalkTimerScreen(state: NirogState) {
                 running = false; saving = true
                 state.repository.addHealthLog("walkLogs", mapOf("minutes" to maxOf(1, minutes), "seconds" to seconds, "mealRelation" to "after_dinner", "measuredAt" to FieldValue.serverTimestamp(), "source" to "timer")) { result ->
                     saving = false
-                    if (result is CloudResult.Success) state.currentScreen = "walking_overview" else error = (result as CloudResult.Failure).message
+                    if (result is CloudResult.Success) {
+                        state.currentScreen = "walking_overview"
+                        // Best-effort: a milestone toast is a nice-to-have, never
+                        // worth blocking or erroring the actual walk log over.
+                        state.repository.peekWalkLogCount { countResult ->
+                            val count = (countResult as? CloudResult.Success)?.value ?: return@peekWalkLogCount
+                            if (count == 10L || count == 30L || count == 100L) state.walkMilestoneCount = count
+                        }
+                    } else error = (result as CloudResult.Failure).message
                 }
             }, enabled = !saving, modifier = Modifier.weight(1f).height(52.dp), shape = RoundedCornerShape(26.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF314936))) {
                 if (saving) CircularProgressIndicator(Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp) else Text("Finish")

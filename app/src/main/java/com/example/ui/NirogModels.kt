@@ -115,6 +115,11 @@ class NirogState {
     // Lets a quick-log entry point (a chip, a tile's "+" ) jump the Daily Check-in
     // wizard straight to the relevant step instead of starting over at sugar.
     var checkinStartStep by mutableStateOf(0)
+    // One-time "N walks logged" milestone moment - set right after the timed
+    // walk that crosses a threshold, consumed (and cleared) by the first
+    // screen that shows it, same one-shot pattern as the check-in streak
+    // milestone in CheckInFlow.kt.
+    var walkMilestoneCount by mutableStateOf<Long?>(null)
 
     // Sugar History & Tracking State - populated only from real Firestore reads
     val sugarLogs = mutableStateListOf<SugarLog>()

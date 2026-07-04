@@ -424,3 +424,22 @@ by the user. Work sequentially, CI-verified per slice, small commits.
       `NirogBhumiApplication`), which serves the last cached snapshot
       instantly before revalidating - a hand-rolled DataStore cache layer
       would just duplicate that.
+18. [~] **Real signed URL for the Health File link** — closes the one honest
+    gap the earlier Health File share feature flagged in its own dialog copy:
+    the "shareable link" was a non-expiring Storage download-token URL, not
+    a true signed URL. New `getHealthFileShareLink` callable generates a
+    real V4 signed URL (7-day expiry) via the Admin SDK. Requires one owner
+    action (`roles/iam.serviceAccountTokenCreator` self-bound to the
+    Functions runtime service account - see
+    `docs/health-file-signed-url-setup.md`, same shape as the WIF setup);
+    until that's done, the function throws a clear `failed-precondition`
+    and the Android client automatically falls back to the previous
+    non-expiring link rather than breaking the feature - the dialog copy
+    honestly reflects whichever kind of link the member actually got.
+19. [x] **Milestone moments, extended** — the existing check-in-streak
+    milestone (7/30/100 days) now has two siblings using the same one-time-
+    toast pattern: a "N walks logged" celebration (10/30/100, checked via a
+    Firestore `count()` aggregation query right after a timed walk saves)
+    and a "Day 30/60/90" program milestone on the Care+ hero, de-duplicated
+    with a local `SharedPreferences` flag since these are device-side
+    celebratory moments, not data other screens need to agree on.

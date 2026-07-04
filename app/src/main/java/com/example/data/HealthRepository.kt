@@ -109,6 +109,18 @@ interface HealthRepository {
     // a side effect of recordCheckinCompletion - framed warmly as a "rhythm"
     // in the UI, never shown as a punishing streak-loss notice.
     fun peekCheckinStreak(done: (CloudResult<Int>) -> Unit)
+
+    // Real, time-limited signed URL for the Health File share link/QR (7-day
+    // expiry) - falls back to the caller passing the existing non-expiring
+    // Storage download URL if the Cloud Function isn't set up yet (see
+    // getHealthFileShareLink in firebase/functions).
+    fun getHealthFileShareLink(storagePath: String, done: (CloudResult<String>) -> Unit)
+
+    // One-shot server-side count (not a live listener - a milestone check
+    // only needs to be current right after a new walk is logged) of the
+    // caller's total walkLogs, used to fire the "N walks logged" milestone
+    // moment at the exact log that crosses a threshold.
+    fun peekWalkLogCount(done: (CloudResult<Long>) -> Unit)
 }
 
 class FirebaseHealthRepository : HealthRepository {
@@ -516,6 +528,28 @@ class FirebaseHealthRepository : HealthRepository {
         val database = db ?: return done(CloudResult.Failure("Firebase is not configured"))
         database.collection("users").document(uid).get()
             .addOnSuccessListener { snap -> done(CloudResult.Success(snap.getLong("checkinStreak")?.toInt() ?: 0)) }
+            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Could not load", it)) }
+    }
+
+    override fun getHealthFileShareLink(storagePath: String, done: (CloudResult<String>) -> Unit) {
+        val callable = functions?.getHttpsCallable("getHealthFileShareLink")
+            ?: return done(CloudResult.Failure("Firebase is not configured"))
+        callable.call(mapOf("storagePath" to storagePath))
+            .addOnSuccessListener { result ->
+                @Suppress("UNCHECKED_CAST")
+                val value = result.data as? Map<String, Any?>
+                val url = value?.get("url") as? String
+                if (url != null) done(CloudResult.Success(url)) else done(CloudResult.Failure("Signed link is not available"))
+            }
+            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Signed link is not available", it)) }
+    }
+
+    override fun peekWalkLogCount(done: (CloudResult<Long>) -> Unit) {
+        val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
+        val database = db ?: return done(CloudResult.Failure("Firebase is not configured"))
+        database.collection("walkLogs").whereEqualTo("userId", uid).count()
+            .get(com.google.firebase.firestore.AggregateSource.SERVER)
+            .addOnSuccessListener { snapshot -> done(CloudResult.Success(snapshot.count)) }
             .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Could not load", it)) }
     }
 

@@ -79,6 +79,7 @@ fun HealthFileScreen(state: NirogState) {
   var shareError by remember { mutableStateOf<String?>(null) }
   var generatingLink by remember { mutableStateOf(false) }
   var shareLink by remember { mutableStateOf<String?>(null) }
+  var linkExpiresInDays by remember { mutableStateOf<Int?>(null) }
   var linkError by remember { mutableStateOf<String?>(null) }
 
   DisposableEffect(Unit) {
@@ -251,10 +252,30 @@ fun HealthFileScreen(state: NirogState) {
               linkError = "The Health File couldn't be created. Please try again."
             } else {
               state.repository.uploadPrivateFile("health-file", uri) { result ->
-                generatingLink = false
                 when (result) {
-                  is CloudResult.Success -> shareLink = result.value
-                  is CloudResult.Failure -> linkError = result.message
+                  is CloudResult.Success -> {
+                    val downloadUrl = result.value
+                    val storagePath = storagePathFromDownloadUrl(downloadUrl)
+                    if (storagePath == null) {
+                      generatingLink = false
+                      shareLink = downloadUrl
+                      linkExpiresInDays = null
+                    } else {
+                      // Try for a real, time-limited signed URL first; if the
+                      // one-time Cloud Functions IAM setup hasn't been done
+                      // yet (see getHealthFileShareLink), fall back to the
+                      // Storage download URL rather than leaving the member
+                      // with no link at all.
+                      state.repository.getHealthFileShareLink(storagePath) { signedResult ->
+                        generatingLink = false
+                        when (signedResult) {
+                          is CloudResult.Success -> { shareLink = signedResult.value; linkExpiresInDays = 7 }
+                          is CloudResult.Failure -> { shareLink = downloadUrl; linkExpiresInDays = null }
+                        }
+                      }
+                    }
+                  }
+                  is CloudResult.Failure -> { generatingLink = false; linkError = result.message }
                 }
               }
             }
@@ -267,12 +288,23 @@ fun HealthFileScreen(state: NirogState) {
   }
 
   shareLink?.let { link ->
-    HealthFileLinkDialog(link, onDismiss = { shareLink = null })
+    HealthFileLinkDialog(link, expiresInDays = linkExpiresInDays, onDismiss = { shareLink = null; linkExpiresInDays = null })
   }
 }
 
+/** Recovers the raw Storage path (e.g. "users/uid/health-file/xyz") from a
+ * Firebase Storage download URL so it can be passed to getHealthFileShareLink
+ * without changing uploadPrivateFile's signature (used by many other callers). */
+private fun storagePathFromDownloadUrl(url: String): String? {
+  val marker = "/o/"
+  val idx = url.indexOf(marker)
+  if (idx == -1) return null
+  val encodedPath = url.substring(idx + marker.length).substringBefore("?")
+  return runCatching { java.net.URLDecoder.decode(encodedPath, "UTF-8") }.getOrNull()
+}
+
 @Composable
-private fun HealthFileLinkDialog(link: String, onDismiss: () -> Unit) {
+private fun HealthFileLinkDialog(link: String, expiresInDays: Int?, onDismiss: () -> Unit) {
   val clipboard = LocalClipboardManager.current
   val qrBitmap = remember(link) { runCatching { generateQrBitmap(link) }.getOrNull() }
   AlertDialog(
@@ -290,15 +322,15 @@ private fun HealthFileLinkDialog(link: String, onDismiss: () -> Unit) {
         }
         Text(link, style = NirogType.caption, color = NirogColor.inkSecondary)
         Spacer(Modifier.size(NirogSpace.sm))
-        // Honest about what this link actually is: a bearer-token URL, not a
-        // per-viewer access grant - anyone who has it can open it without
-        // signing in, same tradeoff as most "share a link" features. It's
-        // not truly short-lived (the token doesn't auto-expire); a real
-        // expiring signed URL would need a Cloud Function using the Admin
-        // SDK, which is a real gap worth closing before relying on this for
-        // anything more sensitive than showing a doctor in person.
+        // Honest either way: a real signed URL expires on its own (no
+        // lingering access after the window), while the fallback bearer-
+        // token link doesn't expire on its own - never overstate which one
+        // the member actually got.
         Text(
-          "Anyone with this link or QR code can view your Health File without signing in - don't post it publicly. It doesn't expire on its own yet.",
+          if (expiresInDays != null)
+            "Anyone with this link or QR code can view your Health File without signing in - don't post it publicly. This link stops working in $expiresInDays days."
+          else
+            "Anyone with this link or QR code can view your Health File without signing in - don't post it publicly. It doesn't expire on its own yet.",
           style = NirogType.caption, color = NirogColor.inkMuted,
         )
       }

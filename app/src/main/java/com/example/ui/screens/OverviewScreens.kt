@@ -23,6 +23,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.firebase.Timestamp
@@ -257,6 +258,20 @@ fun WalkingActivityScreen(state: NirogState) {
                 OutlinedButton(onClick = { state.currentScreen = "device_hub" }, Modifier.fillMaxWidth().height(48.dp), shape = RoundedCornerShape(24.dp)) {
                     Text("Connect a device")
                 }
+            }
+            state.walkMilestoneCount?.let { count ->
+                Surface(Modifier.fillMaxWidth(), color = Color(0xFFF4E9D3), shape = RoundedCornerShape(18.dp)) {
+                    Column(Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("🎉", fontSize = 24.sp)
+                        Spacer(Modifier.height(4.dp))
+                        Text("$count walks logged!", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF7A5A1E))
+                        Text(
+                            "A real, earned milestone - keep moving at whatever pace works for you.",
+                            fontSize = 12.sp, color = Color(0xFF8A6C2E), textAlign = TextAlign.Center,
+                        )
+                    }
+                }
+                DisposableEffect(Unit) { onDispose { state.walkMilestoneCount = null } }
             }
             Text("Logged activity", fontWeight = FontWeight.Bold, color = Ink2)
             when {

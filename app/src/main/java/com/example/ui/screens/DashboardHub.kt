@@ -1834,6 +1834,21 @@ private fun ProgramStatusHero(state: NirogState, dayNumber: Long) {
     val memberCount = (pulse?.get("memberCount") as? Number)?.toInt() ?: 0
     val collectiveMinutes = (pulse?.get("collectiveMinutes") as? Number)?.toInt() ?: 0
 
+    // Program-day milestone (30/60/90) - a device-local one-time flag (not
+    // Firestore-synced state) since it's a celebratory toast, not data the
+    // rest of the app needs to agree on.
+    val context = LocalContext.current
+    var showDayMilestone by remember { mutableStateOf(false) }
+    LaunchedEffect(dayNumber, state.activeProgramId) {
+        if (dayNumber != 30L && dayNumber != 60L && dayNumber != 90L || state.activeProgramId.isBlank()) return@LaunchedEffect
+        val prefs = context.getSharedPreferences("nirog_prefs", android.content.Context.MODE_PRIVATE)
+        val key = "program_day_milestone_${state.activeProgramId}_$dayNumber"
+        if (!prefs.getBoolean(key, false)) {
+            prefs.edit().putBoolean(key, true).apply()
+            showDayMilestone = true
+        }
+    }
+
     Card(
         modifier = Modifier.fillMaxWidth().border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.3f), shape = RoundedCornerShape(24.dp)),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF314936)),
@@ -1866,6 +1881,16 @@ private fun ProgramStatusHero(state: NirogState, dayNumber: Long) {
                         }
                         Text("No batchmates checked in yet today", fontSize = 12.sp, color = Color(0xFFB2CEB4))
                     }
+                }
+            }
+            if (showDayMilestone) {
+                Spacer(modifier = Modifier.height(16.dp))
+                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.18f)))
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("🎉", fontSize = 18.sp)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Day $dayNumber - a real milestone in your program!", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
                 }
             }
             // Cooperative, never a per-member ranking - a team total only.
