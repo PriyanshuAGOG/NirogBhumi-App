@@ -224,6 +224,22 @@ class FirebaseHealthRepository : HealthRepository {
     // roster entry with forged consistency stats). The function validates
     // the code and performs both writes itself under the Admin SDK.
     override fun redeemProgramCode(code: String, done: (CloudResult<Map<String, Any?>>) -> Unit) {
+        val user = auth?.currentUser ?: return done(CloudResult.Failure("Sign in is required"))
+        // A brand-new account's ID token can still be mid-refresh by the time
+        // onboarding reaches this screen - unlike Firestore's writes (which
+        // queue locally and appear to succeed instantly regardless of token
+        // state), a callable Function is a real network round-trip that
+        // needs a genuinely valid token *right now*, so a stale one here
+        // surfaced as a confusing "unauthenticated" for new signups even
+        // though the user was, from their own point of view, already signed
+        // in. Forcing a refresh first closes that race instead of just
+        // hoping the cached token happens to still be valid.
+        user.getIdToken(true)
+            .addOnSuccessListener { callRedeemProgramCode(code, retryOnAuthFailure = true, done) }
+            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Could not verify your sign-in - please try again", it)) }
+    }
+
+    private fun callRedeemProgramCode(code: String, retryOnAuthFailure: Boolean, done: (CloudResult<Map<String, Any?>>) -> Unit) {
         val callable = functions?.getHttpsCallable("redeemProgramCode")
             ?: return done(CloudResult.Failure("Firebase is not configured"))
         callable.call(mapOf("code" to code.trim().uppercase()))
@@ -233,7 +249,18 @@ class FirebaseHealthRepository : HealthRepository {
                 AnalyticsLogger.log("program_joined")
                 done(CloudResult.Success(value))
             }
-            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "That program code wasn't recognized", it)) }
+            .addOnFailureListener { error ->
+                val isAuthError = (error as? com.google.firebase.functions.FirebaseFunctionsException)?.code ==
+                    com.google.firebase.functions.FirebaseFunctionsException.Code.UNAUTHENTICATED
+                if (isAuthError && retryOnAuthFailure) {
+                    auth?.currentUser?.getIdToken(true)
+                        ?.addOnSuccessListener { callRedeemProgramCode(code, retryOnAuthFailure = false, done) }
+                        ?.addOnFailureListener { done(CloudResult.Failure(error.message ?: "That program code wasn't recognized", error)) }
+                        ?: done(CloudResult.Failure(error.message ?: "That program code wasn't recognized", error))
+                } else {
+                    done(CloudResult.Failure(error.message ?: "That program code wasn't recognized", error))
+                }
+            }
     }
 
     override fun listenAnnouncements(programId: String, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription {
