@@ -3240,6 +3240,14 @@ private fun TypingIndicatorRow(names: List<String>) {
     }
 }
 
+// The no-arg MediaRecorder() constructor is deprecated from API 31 onward in
+// favor of the context-aware overload; isolated in its own function so the
+// suppression is scoped to exactly the one legacy call path instead of an
+// entire block.
+@Suppress("DEPRECATION")
+private fun newMediaRecorder(context: android.content.Context): android.media.MediaRecorder =
+    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) android.media.MediaRecorder(context) else android.media.MediaRecorder()
+
 // Care+ community chat - one shared room per program, not one global room, so
 // conversation stays relevant to the program a member actually joined.
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
@@ -3266,19 +3274,33 @@ fun ProgramChatScreen(state: NirogState) {
     val context = LocalContext.current
     val recorderHolder = remember { mutableStateOf<android.media.MediaRecorder?>(null) }
     val recordingFileHolder = remember { mutableStateOf<java.io.File?>(null) }
-    val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+    // The modern system Photo Picker (androidx.activity 1.7+) - unlike
+    // ACTION_GET_CONTENT it needs no storage permission at all on any OS
+    // version and is Google's current recommendation, so there's no
+    // permission-grant edge case that can silently swallow a pick.
+    val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) pendingPhotoUri = uri
     }
 
     fun startRecording() {
         val file = java.io.File.createTempFile("voice_note_", ".m4a", context.cacheDir)
-        @Suppress("DEPRECATION")
-        val recorder = android.media.MediaRecorder().apply {
+        val recorder = newMediaRecorder(context).apply {
             setAudioSource(android.media.MediaRecorder.AudioSource.MIC)
             setOutputFormat(android.media.MediaRecorder.OutputFormat.MPEG_4)
             setAudioEncoder(android.media.MediaRecorder.AudioEncoder.AAC)
             setOutputFile(file.absolutePath)
-            runCatching { prepare(); start() }
+        }
+        // prepare()/start() throw if the mic is held by another app or the
+        // device has no microphone - previously swallowed by runCatching
+        // while isRecording was still set true unconditionally, leaving the
+        // UI stuck showing "Recording..." for a voice note that never
+        // actually started and could never be stopped successfully.
+        val started = runCatching { recorder.prepare(); recorder.start() }.isSuccess
+        if (!started) {
+            runCatching { recorder.release() }
+            file.delete()
+            state.cloudMessage = "Couldn't access the microphone - it may be in use by another app"
+            return
         }
         recorderHolder.value = recorder
         recordingFileHolder.value = file
@@ -3623,7 +3645,7 @@ fun ProgramChatScreen(state: NirogState) {
         ) {
             IconButton(
                 enabled = !uploadingPhoto && !sending && !isRecording && !uploadingAudio,
-                onClick = { photoPicker.launch("image/*") },
+                onClick = { photoPicker.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
                 modifier = Modifier.semantics { contentDescription = "Attach a photo" },
             ) {
                 Icon(Icons.Filled.AddPhotoAlternate, contentDescription = null, tint = NirogColor.forest)
