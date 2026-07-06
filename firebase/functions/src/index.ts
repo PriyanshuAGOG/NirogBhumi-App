@@ -28,7 +28,48 @@ export const onUserCreate = functions.region(region).auth.user().onCreate(async 
     const createdAt = existing.exists ? (existing.data()?.createdAt ?? FieldValue.serverTimestamp()) : FieldValue.serverTimestamp();
     tx.set(ref, { userId: user.uid, phone: user.phoneNumber ?? null, email: user.email ?? null, role, status: 'active', timezone: 'Asia/Kolkata', notificationPreferences: { quietHoursStart: '21:00', quietHoursEnd: '07:00', maxHealthReminders: 3 }, createdAt, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   });
+  await consumeMatchingInvite(user.uid, user.email ?? null, user.phoneNumber ?? null);
 });
+
+// Auto-enrolls a brand-new account into whatever program staff pre-invited
+// their email or phone to (see inviteToProgram below), so onboarding a known
+// member never requires handing out a code at all - the moment they sign up
+// with the invited contact, by whichever method (phone OTP or email), they
+// land in the program automatically. Checks both contact channels since a
+// person might sign up with either one. Deliberately keyed by the doc id
+// (not a query) so this never scans the whole collection on every signup.
+async function consumeMatchingInvite(uid: string, email: string | null, phone: string | null) {
+  const candidates: string[] = [];
+  if (email) candidates.push(`email_${email.trim().toLowerCase()}`);
+  if (phone) candidates.push(`phone_${phone.trim()}`);
+  for (const id of candidates) {
+    const inviteRef = db.doc(`programInvites/${id}`);
+    const invite = await inviteRef.get();
+    if (!invite.exists || invite.get('consumedAt') != null) continue;
+    const programId = String(invite.get('programId') ?? '');
+    const programDoc = await db.doc(`programs/${programId}`).get();
+    if (!programDoc.exists) continue;
+    const programName = String(programDoc.get('name') ?? invite.get('programName') ?? 'Nirog Bhumi Program');
+    const durationDays = programDurationDays(programDoc);
+    const userDoc = await db.doc(`users/${uid}`).get();
+    const memberName = String(userDoc.get('fullName') ?? '').trim() || 'Member';
+    const batch = db.batch();
+    batch.set(db.doc(`users/${uid}`), {
+      programActive: true,
+      activeProgramId: programId,
+      activeProgramName: programName,
+      programDurationDays: durationDays,
+      programStartedAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+    batch.set(db.doc(`programMembers/${programId}_${uid}`), {
+      programId, uid, name: memberName, status: 'active', joinedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+    batch.set(inviteRef, { consumedAt: FieldValue.serverTimestamp(), consumedByUid: uid }, { merge: true });
+    await batch.commit();
+    return; // one matching invite is enough
+  }
+}
 
 // The Android app only ever writes lastCheckinAt/checkinStreak onto
 // users/{uid} (HealthRepository.recordCheckinCompletion) - but the admin
@@ -41,13 +82,19 @@ export const onUserCheckinMirror = onDocumentWritten({ document: 'users/{uid}', 
   const before = event.data?.before?.data();
   const after = event.data?.after?.data();
   if (!after) return;
-  const beforeAt = before?.lastCheckinAt?.toMillis?.() ?? null;
-  const afterAt = after.lastCheckinAt?.toMillis?.() ?? null;
-  if (beforeAt === afterAt) return;
+  const checkinChanged = (before?.lastCheckinAt?.toMillis?.() ?? null) !== (after.lastCheckinAt?.toMillis?.() ?? null);
+  // A pre-invited member is auto-enrolled at signup, before they've entered
+  // their name - the roster doc starts as "Member" until their profile
+  // saves fullName. Mirror that first real name in too, same trigger.
+  const nameChanged = (before?.fullName ?? null) !== (after.fullName ?? null) && !!after.fullName;
+  if (!checkinChanged && !nameChanged) return;
   const roster = await db.collection('programMembers').where('uid', '==', event.params.uid).get();
   if (roster.empty) return;
+  const update: Record<string, unknown> = {};
+  if (checkinChanged) { update.lastCheckinAt = after.lastCheckinAt; update.checkinStreak = after.checkinStreak ?? null; }
+  if (nameChanged) update.name = after.fullName;
   const batch = db.batch();
-  roster.docs.forEach(d => batch.set(d.ref, { lastCheckinAt: after.lastCheckinAt, checkinStreak: after.checkinStreak ?? null }, { merge: true }));
+  roster.docs.forEach(d => batch.set(d.ref, update, { merge: true }));
   await batch.commit();
 });
 
@@ -357,6 +404,65 @@ export const adminEnrollUser = onCall({ region }, async request => {
 
   await db.collection('auditLogs').add({ actorId: auth.uid, actorRole: role ?? 'admin', action: 'admin_enroll_user', entityType: 'user', entityId: uid, metadata: { programId, programName }, createdAt: FieldValue.serverTimestamp() });
   return { activeProgramId: programId, activeProgramName: programName, programDurationDays: durationDays };
+});
+
+function normalizeContact(raw: string): { type: 'email' | 'phone'; key: string } | null {
+  const trimmed = raw.trim();
+  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) return { type: 'email', key: trimmed.toLowerCase() };
+  if (/^\+[1-9]\d{7,14}$/.test(trimmed)) return { type: 'phone', key: trimmed };
+  return null;
+}
+
+// Pre-enrolls someone who hasn't signed up yet - staff enters the phone
+// number or email a person will use, and the moment an account with that
+// exact contact is created (onUserCreate -> consumeMatchingInvite above),
+// they land in the program automatically. No code to hand out, no manual
+// enroll step after the fact - this is the "onboard by contact" flow instead
+// of the self-serve program-code flow. Same staff/own-program boundary as
+// adminEnrollUser/sendBulkNotification.
+export const inviteToProgram = onCall({ region }, async request => {
+  const auth = requireUser(request);
+  const role = auth.token.role;
+  const programId = String(request.data?.programId ?? '');
+  const contactRaw = String(request.data?.contact ?? '');
+  if (!programId || !contactRaw) throw new HttpsError('invalid-argument', 'A contact (email or phone) and programId are required');
+  const contact = normalizeContact(contactRaw);
+  if (!contact) throw new HttpsError('invalid-argument', 'Enter a valid email, or a phone number with country code (e.g. +919876543210)');
+
+  const programDoc = await db.doc(`programs/${programId}`).get();
+  if (!programDoc.exists) throw new HttpsError('not-found', "That program wasn't found");
+  if (role !== 'admin' && role !== 'super_admin') {
+    if (role !== 'coach') throw new HttpsError('permission-denied', 'Staff only');
+    if (programDoc.get('coachId') !== auth.uid) throw new HttpsError('permission-denied', 'Not your program');
+  }
+
+  const programName = String(programDoc.get('name') ?? 'Nirog Bhumi Program');
+  const inviteId = `${contact.type}_${contact.key}`;
+  await db.doc(`programInvites/${inviteId}`).set({
+    contact: contact.key, contactType: contact.type, programId, programName,
+    invitedBy: auth.uid, invitedByRole: role, createdAt: FieldValue.serverTimestamp(),
+    consumedAt: null, consumedByUid: null,
+  });
+  await db.collection('auditLogs').add({ actorId: auth.uid, actorRole: role ?? 'admin', action: 'invite_to_program', entityType: 'programInvite', entityId: inviteId, metadata: { contact: contact.key, programId, programName }, createdAt: FieldValue.serverTimestamp() });
+  return { id: inviteId, contact: contact.key, contactType: contact.type, programId, programName };
+});
+
+export const revokeInvite = onCall({ region }, async request => {
+  const auth = requireUser(request);
+  const role = auth.token.role;
+  const id = String(request.data?.id ?? '');
+  if (!id) throw new HttpsError('invalid-argument', 'An invite id is required');
+  const ref = db.doc(`programInvites/${id}`);
+  const invite = await ref.get();
+  if (!invite.exists) return { revoked: false };
+  if (role !== 'admin' && role !== 'super_admin') {
+    if (role !== 'coach') throw new HttpsError('permission-denied', 'Staff only');
+    const programDoc = await db.doc(`programs/${invite.get('programId')}`).get();
+    if (programDoc.get('coachId') !== auth.uid) throw new HttpsError('permission-denied', 'Not your program');
+  }
+  await ref.delete();
+  await db.collection('auditLogs').add({ actorId: auth.uid, actorRole: role ?? 'admin', action: 'revoke_invite', entityType: 'programInvite', entityId: id, createdAt: FieldValue.serverTimestamp() });
+  return { revoked: true };
 });
 
 export const requestDataExport = onCall({ region }, async request => {

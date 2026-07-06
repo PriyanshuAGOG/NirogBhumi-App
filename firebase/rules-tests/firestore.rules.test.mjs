@@ -362,6 +362,37 @@ describe('appUpdates (self-update system release metadata)', () => {
   });
 });
 
+// programInvites (pre-enrollment by phone/email) holds contact info for
+// people who haven't signed up yet - it's written/read only via the
+// inviteToProgram/revokeInvite callables and onUserCreate's auto-consume
+// (both under the Admin SDK, which bypasses rules entirely), so the client
+// path through firestore.rules must stay fully closed - no explicit rule
+// exists for this collection, relying on the trailing default-deny match.
+describe('programInvites (staff-only via callable, never client-writable)', () => {
+  beforeEach(async () => {
+    await seed(async (db) => {
+      await setDoc(doc(db, 'programInvites/email_member@example.com'), {
+        contact: 'member@example.com', contactType: 'email', programId: 'prog1',
+        programName: 'Test Program', consumedAt: null,
+      });
+    });
+  });
+
+  it('denies an anonymous caller reading an invite', async () => {
+    await assertFails(getDoc(doc(anon(), 'programInvites/email_member@example.com')));
+  });
+
+  it('denies a plain member reading an invite', async () => {
+    await assertFails(getDoc(doc(member('mem1'), 'programInvites/email_member@example.com')));
+  });
+
+  it('denies an admin writing an invite directly (must go through inviteToProgram)', async () => {
+    await assertFails(setDoc(doc(admin(), 'programInvites/email_other@example.com'), {
+      contact: 'other@example.com', contactType: 'email', programId: 'prog1',
+    }));
+  });
+});
+
 // Sanity check that the suite itself is wired up, independent of rules content.
 describe('test harness sanity', () => {
   it('ran at least one assertion', () => assert.ok(true));
