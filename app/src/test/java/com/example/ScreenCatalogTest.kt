@@ -18,7 +18,7 @@ class ScreenCatalogTest {
     }
 
     @Test fun everyDeclaredDestinationResolves() {
-        val routes = NirogScreens.map { it.route }.toSet() + setOf("legal_center", "care_hub")
+        val routes = NirogScreens.map { it.route }.toSet() + setOf("legal_center", "care_hub", "health_file")
         assertTrue(declaredDestinationRoutes().all { it in routes })
     }
 

@@ -61,7 +61,7 @@ val ScreenExperiences = mapOf(
 private val RouteDestinations = mapOf(
     "track_hub" to mapOf("Blood Sugar" to "sugar_detail", "Blood Pressure" to "bp_overview", "Sleep" to "sleep_overview", "Walking and Activity" to "walking_overview", "Lab Reports" to "lab_reports"),
     "sugar_detail" to mapOf("Latest fasting sugar" to "sugar_reading_detail", "History" to "sugar_reading_detail"),
-    "insights_hub" to mapOf("Weekly Report" to "weekly_report", "Sugar Story" to "sugar_story", "30-Day Trends" to "trends_30", "Share with Expert" to "share_report"),
+    "insights_hub" to mapOf("Weekly Report" to "weekly_report", "Sugar Story" to "sugar_story", "30-Day Trends" to "trends_30", "Share with Expert" to "health_file"),
     "care_hub" to mapOf("Consultations" to "consultation_types", "Program Mode" to "active_journey", "Expert notes" to "expert_notes", "Upcoming care" to "consultation_detail"),
     "consultation_types" to mapOf("Diabetes lifestyle" to "consult_stepper", "Diet review" to "consult_stepper", "Yoga" to "consult_stepper", "Naturopathy" to "consult_stepper", "Follow-up" to "consult_stepper"),
     "active_journey" to mapOf("Today’s checklist" to "program_checklist", "Plans" to "diet_plan", "Expert note" to "expert_notes"),
@@ -77,11 +77,11 @@ fun declaredDestinationRoutes(): Set<String> = RouteDestinations.values.flatMap 
 
 val PrimaryDestinations = mapOf(
     "today_empty" to "quick_sugar", "today_program" to "active_journey", "track_hub" to "sugar_detail",
-    "sugar_detail" to "add_sugar", "sugar_reading_detail" to "share_report", "bp_overview" to "add_bp",
+    "sugar_detail" to "add_sugar", "sugar_reading_detail" to "health_file", "bp_overview" to "add_bp",
     "sleep_overview" to "add_sleep", "walking_overview" to "quick_walk", "walk_timer" to "walking_overview",
     "lab_reports" to "upload_lab", "insights_hub" to "weekly_report",
-    "weekly_report" to "share_report", "sugar_story" to "insight_detail", "trends_30" to "share_report",
-    "share_report" to "care_hub", "care_hub" to "consultation_types", "consultation_types" to "consult_stepper",
+    "sugar_story" to "insight_detail", "trends_30" to "health_file",
+    "care_hub" to "consultation_types", "consultation_types" to "consult_stepper",
     "payment_confirmation" to "consultation_confirmed", "consultation_confirmed" to "consultation_detail",
     "program_locked" to "program_code_optional", "active_journey" to "program_checklist", "diet_plan" to "program_checklist",
     "yoga_plan" to "yoga_detail", "yoga_detail" to "program_checklist", "naturopathy_plan" to "naturopathy_detail",
@@ -96,7 +96,7 @@ private val ExplicitBackDestinations = mapOf(
     "quick_sugar" to "dashboard", "quick_walk" to "dashboard",
     "add_sugar" to "sugar_detail", "sugar_reading_detail" to "sugar_detail", "add_bp" to "bp_overview",
     "add_sleep" to "sleep_overview", "walk_timer" to "walking_overview", "upload_lab" to "lab_reports",
-    "insight_detail" to "sugar_story", "share_report" to "weekly_report", "pre_consultation" to "consult_stepper",
+    "insight_detail" to "sugar_story", "pre_consultation" to "consult_stepper",
     "payment_confirmation" to "consult_stepper", "consultation_confirmed" to "care_hub", "consultation_detail" to "care_hub",
     "program_checklist" to "active_journey", "yoga_detail" to "yoga_plan", "naturopathy_detail" to "naturopathy_plan",
     "article_detail" to "articles", "order_detail" to "orders", "add_family" to "family_profiles",

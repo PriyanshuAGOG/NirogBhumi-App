@@ -1690,9 +1690,12 @@ fun InsightsTab(state: NirogState) {
                 }
             }
 
-            // Share CTA
+            // Share CTA - the real, fully-built Health File screen (PDF share +
+            // shareable link/QR, actual vitals/lab data), not the old generic
+            // "Share Report" catalog screen (a fake options list that always
+            // just triggered the same share sheet regardless of what you picked).
             OutlinedButton(
-                onClick = { state.currentScreen = "share_report" },
+                onClick = { state.currentScreen = "health_file" },
                 modifier = Modifier.fillMaxWidth().height(48.dp),
                 shape = RoundedCornerShape(24.dp),
                 border = BorderStroke(1.dp, NirogColor.outlineVariant),
