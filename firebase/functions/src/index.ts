@@ -7,14 +7,27 @@ import { onDocumentCreated, onDocumentWritten } from 'firebase-functions/v2/fire
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import * as functions from 'firebase-functions/v1';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 
 initializeApp();
 const db = getFirestore();
 const region = 'asia-south1';
 
+// createStaffAccount (below) creates the Auth user and writes its role to
+// Firestore in the same request - but this trigger fires off the exact same
+// Auth-user-created event, with no ordering guarantee against that write. A
+// plain unconditional `.set({ role: 'user' })` here would silently stomp an
+// admin/coach role back to 'user' if this trigger happened to run second.
+// The transaction makes it order-independent: whichever of the two writes
+// lands second sees the first one's role already there and preserves it.
 export const onUserCreate = functions.region(region).auth.user().onCreate(async user => {
-  await db.doc(`users/${user.uid}`).set({ userId: user.uid, phone: user.phoneNumber ?? null, email: user.email ?? null, role: 'user', status: 'active', timezone: 'Asia/Kolkata', notificationPreferences: { quietHoursStart: '21:00', quietHoursEnd: '07:00', maxHealthReminders: 3 }, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
+  const ref = db.doc(`users/${user.uid}`);
+  await db.runTransaction(async tx => {
+    const existing = await tx.get(ref);
+    const role = existing.exists ? (existing.data()?.role ?? 'user') : 'user';
+    const createdAt = existing.exists ? (existing.data()?.createdAt ?? FieldValue.serverTimestamp()) : FieldValue.serverTimestamp();
+    tx.set(ref, { userId: user.uid, phone: user.phoneNumber ?? null, email: user.email ?? null, role, status: 'active', timezone: 'Asia/Kolkata', notificationPreferences: { quietHoursStart: '21:00', quietHoursEnd: '07:00', maxHealthReminders: 3 }, createdAt, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  });
 });
 
 // The Android app only ever writes lastCheckinAt/checkinStreak onto
@@ -385,6 +398,41 @@ export const setUserRole = onCall({ region }, async request => {
   await db.doc(`users/${uid}`).set({ role, permissions: perms ?? FieldValue.delete(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   await db.collection('auditLogs').add({ actorId: auth.uid, actorRole: auth.token.role ?? 'admin', action: 'set_role', entityType: 'user', entityId: uid, metadata: { role, permissions: perms }, createdAt: FieldValue.serverTimestamp() });
   return { updated: true, uid, role, permissions: perms };
+});
+
+// Creates a brand-new staff (coach/admin) account from the console's Users
+// page - previously the only way to add a new admin/coach was to create the
+// Auth user by hand in the Firebase Console, then promote them via
+// setUserRole. Same privilege tiering as setUserRole: only a super_admin may
+// create an admin account; a plain admin may only create coach accounts.
+// Returns a one-time temporary password (shown once in the console) rather
+// than emailing an invite, since this project has no transactional email
+// sender wired up - the admin relays it to the new hire directly, who can
+// then use "Forgot password" to set their own.
+export const createStaffAccount = onCall({ region }, async request => {
+  const auth = requireUser(request);
+  const callerRole = auth.token.role;
+  if (callerRole !== 'admin' && callerRole !== 'super_admin') throw new HttpsError('permission-denied', 'Admin only');
+  const email = String(request.data?.email ?? '').trim().toLowerCase();
+  const role = String(request.data?.role ?? '');
+  const name = String(request.data?.name ?? '').trim();
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new HttpsError('invalid-argument', 'A valid email is required');
+  if (!['coach', 'admin'].includes(role)) throw new HttpsError('invalid-argument', 'Role must be coach or admin');
+  if (role === 'admin' && callerRole !== 'super_admin') throw new HttpsError('permission-denied', 'Only a super admin can create an admin account');
+
+  const existing = await getAuth().getUserByEmail(email).catch(() => null);
+  if (existing) throw new HttpsError('already-exists', 'An account with that email already exists - use the role control below instead of creating a new one');
+
+  const tempPassword = randomBytes(9).toString('base64').replace(/[+/=]/g, '');
+  const created = await getAuth().createUser({ email, password: tempPassword, displayName: name || undefined, emailVerified: false });
+
+  const perms = role === 'coach' ? [...PERMISSION_KEYS] : null;
+  const claims: Record<string, unknown> = { role };
+  if (perms) claims.perms = perms;
+  await getAuth().setCustomUserClaims(created.uid, claims);
+  await db.doc(`users/${created.uid}`).set({ userId: created.uid, email, fullName: name || null, role, permissions: perms ?? FieldValue.delete(), status: 'active', createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  await db.collection('auditLogs').add({ actorId: auth.uid, actorRole: callerRole, action: 'create_staff_account', entityType: 'user', entityId: created.uid, metadata: { email, role }, createdAt: FieldValue.serverTimestamp() });
+  return { uid: created.uid, email, role, tempPassword };
 });
 
 // Console's "message all quiet members" bulk action. A direct client write to

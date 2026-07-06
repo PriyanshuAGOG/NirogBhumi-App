@@ -1,6 +1,7 @@
 import { lazy, Suspense, type ReactNode } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AuthProvider, isStaffRole, useAuth, type Permission } from './auth/AuthProvider'
+import { firebaseConfigError } from './lib/firebase'
 import SignIn from './auth/SignIn'
 import AppShell from './shell/AppShell'
 import StaffOnly from './shell/StaffOnly'
@@ -27,6 +28,26 @@ function FullScreenLoader() {
     <div className="boot-screen">
       <div className="spin boot-spinner" aria-hidden />
       <p>Loading…</p>
+    </div>
+  )
+}
+
+/**
+ * Every page in this console reads Firestore/Storage/Functions - if the
+ * Firebase web config wasn't baked in at build time (this build wasn't
+ * produced by this repo's GitHub Actions workflow, or that workflow's env
+ * changed), sign-in and every single query fail with a bare
+ * "permission-denied" and nothing in the UI explains why - every page just
+ * quietly looks like it "has no data". This is checked before AuthProvider
+ * even mounts, since sign-in itself is equally broken in this state.
+ */
+function ConfigErrorScreen({ message }: { message: string }) {
+  return (
+    <div className="boot-screen">
+      <p style={{ maxWidth: 480, textAlign: 'center', color: '#B4472F', fontWeight: 600 }}>
+        Configuration error
+      </p>
+      <p style={{ maxWidth: 480, textAlign: 'center' }}>{message}</p>
     </div>
   )
 }
@@ -166,6 +187,7 @@ function Gate() {
 }
 
 export default function App() {
+  if (firebaseConfigError) return <ConfigErrorScreen message={firebaseConfigError} />
   return (
     <AuthProvider>
       <BrowserRouter>

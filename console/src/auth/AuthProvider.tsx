@@ -62,29 +62,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    const applyClaims = (token: { claims: Record<string, unknown> }) => {
+      const claimRole = token.claims.role
+      setRole(typeof claimRole === 'string' ? claimRole : null)
+      const claimPerms = token.claims.perms
+      setPermissions(
+        Array.isArray(claimPerms)
+          ? claimPerms.filter((p): p is Permission => PERMISSION_KEYS.includes(p as Permission))
+          : null,
+      )
+    }
     const unsub = onAuthStateChanged(auth, async (nextUser) => {
       setUser(nextUser)
       if (nextUser) {
         try {
-          // force refresh so a freshly granted claim is picked up
-          const token = await nextUser.getIdTokenResult(true)
-          const claimRole = token.claims.role
-          setRole(typeof claimRole === 'string' ? claimRole : null)
-          const claimPerms = token.claims.perms
-          setPermissions(
-            Array.isArray(claimPerms)
-              ? claimPerms.filter((p): p is Permission => PERMISSION_KEYS.includes(p as Permission))
-              : null,
-          )
+          // Cached claims first - resolves instantly with no network round
+          // trip, unlike a forced refresh. Forcing on every single page load
+          // meant the entire console sat behind a full-screen spinner every
+          // time it was opened or reloaded, waiting on a round trip to
+          // Google's token endpoint before rendering anything at all.
+          applyClaims(await nextUser.getIdTokenResult(false))
         } catch {
           setRole(null)
           setPermissions(null)
         }
+        setLoading(false)
+        // Force-refresh in the background so a claim change made *while this
+        // tab is open* (an admin just promoting this account) still gets
+        // picked up - just without every load paying for the rare case.
+        nextUser.getIdTokenResult(true).then(applyClaims).catch(() => {})
       } else {
         setRole(null)
         setPermissions(null)
+        setLoading(false)
       }
-      setLoading(false)
     })
     return unsub
   }, [])
