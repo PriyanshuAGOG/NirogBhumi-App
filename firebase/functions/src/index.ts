@@ -277,6 +277,28 @@ export const redeemProgramCode = onCall({ region }, async request => {
   return { activeProgramId: programId, activeProgramName: programName, programDurationDays: durationDays, programActive: true };
 });
 
+// Self-heals a missing programMembers roster doc for an account that Firestore
+// itself already considers an active program member (users/{uid}.programActive
+// == true) but whose roster entry is somehow absent - e.g. an account enrolled
+// under an older, pre-hardening version of redeemProgramCode that wrote these
+// as two separate non-atomic writes, where the first could succeed and the
+// second silently never run. Deliberately does NOT accept a programId from the
+// client and only ever acts on the caller's own already-authoritative
+// programActive/activeProgramId - it repairs an existing enrollment, it can
+// never grant a new one (that's still exclusively redeemProgramCode's job).
+export const ensureProgramMembership = onCall({ region }, async request => {
+  const auth = requireUser(request);
+  const userDoc = await db.doc(`users/${auth.uid}`).get();
+  if (userDoc.get('programActive') !== true) throw new HttpsError('failed-precondition', 'No active program on this account');
+  const programId = String(userDoc.get('activeProgramId') ?? '');
+  if (!programId) throw new HttpsError('failed-precondition', 'No active program on this account');
+  const memberRef = db.doc(`programMembers/${programId}_${auth.uid}`);
+  if ((await memberRef.get()).exists) return { repaired: false, programId };
+  const memberName = String(userDoc.get('fullName') ?? '').trim() || 'Member';
+  await memberRef.set({ programId, uid: auth.uid, name: memberName, status: 'active', joinedAt: FieldValue.serverTimestamp() }, { merge: true });
+  return { repaired: true, programId };
+});
+
 export const requestDataExport = onCall({ region }, async request => {
   const auth = requireUser(request);
   // Each request triggers exportUserData, which reads ~19 collections and
