@@ -20,6 +20,7 @@ const Consultations = lazy(() => import('./pages/Consultations'))
 const Support = lazy(() => import('./pages/Support'))
 const Users = lazy(() => import('./pages/Users'))
 const Settings = lazy(() => import('./pages/Settings'))
+const ErrorReports = lazy(() => import('./pages/ErrorReports'))
 
 function FullScreenLoader() {
   return (
@@ -145,6 +146,14 @@ function Gate() {
             element={
               <Protected adminOnly>
                 <Users />
+              </Protected>
+            }
+          />
+          <Route
+            path="/error-reports"
+            element={
+              <Protected adminOnly>
+                <ErrorReports />
               </Protected>
             }
           />

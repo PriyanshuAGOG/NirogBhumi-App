@@ -121,6 +121,14 @@ interface HealthRepository {
     // caller's total walkLogs, used to fire the "N walks logged" milestone
     // moment at the exact log that crosses a threshold.
     fun peekWalkLogCount(done: (CloudResult<Long>) -> Unit)
+
+    // Fire-and-forget production error telemetry: every CloudResult.Failure
+    // surfaced to a real user (via state.cloudMessage) also gets reported
+    // here, so failures that only ever happen on a real device (a stale
+    // token race, a permission gap only one role hits, ...) are visible in
+    // the admin console instead of needing to be reproduced blind. Never
+    // throws, never blocks, never shown to the user if it itself fails.
+    fun reportError(screen: String, message: String, code: String? = null)
 }
 
 class FirebaseHealthRepository : HealthRepository {
@@ -250,17 +258,29 @@ class FirebaseHealthRepository : HealthRepository {
                 done(CloudResult.Success(value))
             }
             .addOnFailureListener { error ->
-                val isAuthError = (error as? com.google.firebase.functions.FirebaseFunctionsException)?.code ==
-                    com.google.firebase.functions.FirebaseFunctionsException.Code.UNAUTHENTICATED
+                val functionsError = error as? com.google.firebase.functions.FirebaseFunctionsException
+                val isAuthError = functionsError?.code == com.google.firebase.functions.FirebaseFunctionsException.Code.UNAUTHENTICATED
                 if (isAuthError && retryOnAuthFailure) {
                     auth?.currentUser?.getIdToken(true)
                         ?.addOnSuccessListener { callRedeemProgramCode(code, retryOnAuthFailure = false, done) }
-                        ?.addOnFailureListener { done(CloudResult.Failure(error.message ?: "That program code wasn't recognized", error)) }
-                        ?: done(CloudResult.Failure(error.message ?: "That program code wasn't recognized", error))
+                        ?.addOnFailureListener { done(finalRedeemFailure(error, functionsError)) }
+                        ?: done(finalRedeemFailure(error, functionsError))
                 } else {
-                    done(CloudResult.Failure(error.message ?: "That program code wasn't recognized", error))
+                    done(finalRedeemFailure(error, functionsError))
                 }
             }
+    }
+
+    // Embeds the raw FirebaseFunctionsException code (e.g. "functions/unauthenticated")
+    // into the surfaced message so the error-reporting pipeline (which only
+    // ever sees the final message string, not the original Throwable)
+    // captures which specific failure actually happened on a real device,
+    // instead of every redeemProgramCode failure looking identical in the
+    // admin console.
+    private fun finalRedeemFailure(error: Exception, functionsError: com.google.firebase.functions.FirebaseFunctionsException?): CloudResult.Failure {
+        val base = error.message ?: "That program code wasn't recognized"
+        val message = if (functionsError != null) "$base (code: ${functionsError.code.name.lowercase()})" else base
+        return CloudResult.Failure(message, error)
     }
 
     override fun listenAnnouncements(programId: String, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription {
@@ -578,6 +598,26 @@ class FirebaseHealthRepository : HealthRepository {
             .get(com.google.firebase.firestore.AggregateSource.SERVER)
             .addOnSuccessListener { snapshot -> done(CloudResult.Success(snapshot.count)) }
             .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Could not load", it)) }
+    }
+
+    override fun reportError(screen: String, message: String, code: String?) {
+        val uid = userId ?: return
+        val database = db ?: return
+        // Best-effort only: swallow every possible failure here silently -
+        // an error report that itself errors must never surface anything to
+        // the user or recurse into reporting itself.
+        runCatching {
+            database.collection("errorReports").add(
+                mapOf(
+                    "userId" to uid,
+                    "screen" to screen,
+                    "message" to message.take(500),
+                    "code" to code,
+                    "resolved" to false,
+                    "createdAt" to FieldValue.serverTimestamp(),
+                )
+            )
+        }
     }
 
     override fun upsertUserRecord(collection: String, documentId: String, values: Map<String, Any?>, done: (CloudResult<Unit>) -> Unit) {

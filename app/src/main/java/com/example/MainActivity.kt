@@ -75,7 +75,14 @@ class MainActivity : ComponentActivity() {
         LaunchedEffect(state.cloudMessage) {
           if (state.cloudMessage.isNotBlank()) {
             val message = state.cloudMessage
+            val screen = state.currentScreen
             state.cloudMessage = ""
+            // Same single choke point also reports the failure for the admin
+            // console's error dashboard - real device failures (a stale auth
+            // token race, a permission gap that only shows up for one role)
+            // are otherwise invisible without this, since reproducing them
+            // blind isn't always possible.
+            state.repository.reportError(screen, message)
             snackbarHostState.showSnackbar(message)
           }
         }

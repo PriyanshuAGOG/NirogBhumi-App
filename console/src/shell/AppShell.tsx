@@ -24,6 +24,7 @@ const NAV: NavItem[] = [
   { to: '/consultations', label: 'Consultations', icon: '🩺', permission: 'consultations' },
   { to: '/support', label: 'Support', icon: '💬', permission: 'support' },
   { to: '/users', label: 'Users & Roles', icon: '🧑‍🤝‍🧑', adminOnly: true },
+  { to: '/error-reports', label: 'Error Reports', icon: '🚨', adminOnly: true },
   { to: '/settings', label: 'Settings', icon: '⚙️' },
 ]
 
