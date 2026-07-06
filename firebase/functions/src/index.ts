@@ -3,7 +3,7 @@ import { FieldValue, getFirestore, Timestamp } from 'firebase-admin/firestore';
 import { getAuth } from 'firebase-admin/auth';
 import { getStorage } from 'firebase-admin/storage';
 import { getMessaging } from 'firebase-admin/messaging';
-import { onDocumentCreated } from 'firebase-functions/v2/firestore';
+import { onDocumentCreated, onDocumentWritten } from 'firebase-functions/v2/firestore';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import * as functions from 'firebase-functions/v1';
@@ -15,6 +15,27 @@ const region = 'asia-south1';
 
 export const onUserCreate = functions.region(region).auth.user().onCreate(async user => {
   await db.doc(`users/${user.uid}`).set({ userId: user.uid, phone: user.phoneNumber ?? null, email: user.email ?? null, role: 'user', status: 'active', timezone: 'Asia/Kolkata', notificationPreferences: { quietHoursStart: '21:00', quietHoursEnd: '07:00', maxHealthReminders: 3 }, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
+});
+
+// The Android app only ever writes lastCheckinAt/checkinStreak onto
+// users/{uid} (HealthRepository.recordCheckinCompletion) - but the admin
+// console's roster pages (Dashboard, Members, Batches, MemberDetail) read
+// consistency/quiet-member state off programMembers docs, which never had
+// this field. Mirror it server-side on every check-in so the console's
+// existing realtime programMembers listeners pick it up with no client
+// changes, instead of every roster page having to join two collections.
+export const onUserCheckinMirror = onDocumentWritten({ document: 'users/{uid}', region }, async event => {
+  const before = event.data?.before?.data();
+  const after = event.data?.after?.data();
+  if (!after) return;
+  const beforeAt = before?.lastCheckinAt?.toMillis?.() ?? null;
+  const afterAt = after.lastCheckinAt?.toMillis?.() ?? null;
+  if (beforeAt === afterAt) return;
+  const roster = await db.collection('programMembers').where('uid', '==', event.params.uid).get();
+  if (roster.empty) return;
+  const batch = db.batch();
+  roster.docs.forEach(d => batch.set(d.ref, { lastCheckinAt: after.lastCheckinAt, checkinStreak: after.checkinStreak ?? null }, { merge: true }));
+  await batch.commit();
 });
 
 function glucoseStatus(value: number, type: string) {

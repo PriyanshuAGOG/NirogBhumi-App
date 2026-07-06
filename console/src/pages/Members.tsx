@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { collection, onSnapshot, query } from 'firebase/firestore'
+import { collection, limit, onSnapshot, query, where } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
 import { db, functions } from '../lib/firebase'
 import { usePrograms } from '../lib/usePrograms'
@@ -60,8 +60,17 @@ export default function Members() {
   const [sendResult, setSendResult] = useState<string | null>(null)
 
   useEffect(() => {
+    setLoading(true)
+    // Scoped to one program's roster when a batch is picked - matches
+    // Batches.tsx's own per-program listener. The "all programs" view is
+    // capped instead of unbounded: programMembers docs get touched on every
+    // check-in platform-wide now that lastCheckinAt is mirrored onto them
+    // (see the onUserCheckinMirror function), so an unfiltered listener here
+    // would re-render this page on every single check-in from every member.
+    const constraints =
+      programFilter === 'all' ? [limit(1000)] : [where('programId', '==', programFilter)]
     const unsub = onSnapshot(
-      query(collection(db, 'programMembers')),
+      query(collection(db, 'programMembers'), ...constraints),
       (snap) => {
         const next = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<RosterEntry, 'id'>) }))
         next.sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''))
@@ -75,7 +84,7 @@ export default function Members() {
       },
     )
     return unsub
-  }, [])
+  }, [programFilter])
 
   const programName = useMemo(() => {
     const map = new Map(programs.map((p) => [p.id, p.name ?? 'Program']))

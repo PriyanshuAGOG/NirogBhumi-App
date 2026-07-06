@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { collection, onSnapshot, query } from 'firebase/firestore'
+import { collection, limit, onSnapshot, orderBy, query } from 'firebase/firestore'
 import { httpsCallable, type HttpsCallableResult } from 'firebase/functions'
 import { FirebaseError } from 'firebase/app'
 import { db, functions } from '../lib/firebase'
@@ -73,8 +73,13 @@ export default function Users() {
   const [rowState, setRowState] = useState<Record<string, RowState>>({})
 
   useEffect(() => {
+    // Bounded + ordered - an unfiltered listener on the whole `users`
+    // collection re-fires for every admin viewing this page on every
+    // check-in anywhere in the app (users/{uid} is touched on each one).
+    // Newest-first with a cap keeps this page reactive without paying for
+    // the entire platform's write volume.
     const unsub = onSnapshot(
-      query(collection(db, 'users')),
+      query(collection(db, 'users'), orderBy('createdAt', 'desc'), limit(500)),
       (snap) => {
         const next = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<UserRow, 'id'>) }))
         next.sort((a, b) => (a.name ?? a.email ?? '').localeCompare(b.name ?? b.email ?? ''))
