@@ -1,6 +1,17 @@
 name: Deploy Firebase
 
 on:
+  # Backend changes (functions/rules/indexes) sat undeployed for days at a
+  # time when this was workflow_dispatch-only - every commit needed someone
+  # to remember to come here and click "Run workflow" by hand, which is
+  # exactly the kind of manual step that silently stops happening. This is
+  # the same gap (and same fix) as build-firebase-debug-apk.yml's push
+  # trigger: deploy automatically the moment backend code actually changes.
+  push:
+    branches: [main, 'claude/**']
+    paths:
+      - 'firebase/**'
+      - '.github/workflows/deploy-firebase.yml'
   workflow_dispatch:
     inputs:
       project_id:
@@ -55,4 +66,6 @@ jobs:
           VITE_FIREBASE_APP_ID: "1:126409331898:web:62ba9137dd9781f0009e83"
         run: npm ci && npm run build
       - name: Deploy rules, indexes, storage, functions, and hosting
-        run: npx --yes firebase-tools@latest deploy --project "${{ inputs.project_id }}" --only firestore,storage,functions,hosting --non-interactive
+        env:
+          PROJECT_ID: ${{ inputs.project_id || 'nirog-bhumi-app' }}
+        run: npx --yes firebase-tools@latest deploy --project "$PROJECT_ID" --only firestore,storage,functions,hosting --non-interactive
