@@ -148,12 +148,13 @@ export default function ErrorReports() {
           {visible.map((item) => (
             <article key={item.id} className="card sup-card">
               <div className="sup-head">
-                <span className="sup-subject">{item.screen ?? 'unknown screen'}</span>
+                <span className="sup-subject">{item.screen ?? 'unknown operation'}</span>
                 <span className={`tag ${item.resolved ? 'tag-good' : 'tag-warn'}`}>
                   {item.resolved ? 'Resolved' : 'Open'}
                 </span>
               </div>
               {item.message && <p className="sup-message">{item.message}</p>}
+              {item.code && <code className="sup-code">{item.code}</code>}
               <div className="sup-foot">
                 <span className="sup-meta">
                   {shortId(item.userId)} · {relativeTime(item.createdAt)}
