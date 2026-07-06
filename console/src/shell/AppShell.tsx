@@ -6,6 +6,8 @@ interface NavItem {
   to: string
   label: string
   icon: string
+  /** Groups the sidebar into labeled sections instead of one flat list. */
+  section: 'Overview' | 'Care+' | 'Support' | 'Platform' | 'Account'
   /** If set, only admin/super_admin see the item - never scopable to a coach. */
   adminOnly?: boolean
   /** If set, a coach only sees the item when this permission is in their scope. */
@@ -13,20 +15,22 @@ interface NavItem {
 }
 
 const NAV: NavItem[] = [
-  { to: '/dashboard', label: 'Overview', icon: '🏠' },
-  { to: '/moderation', label: 'Moderation', icon: '🛡️', permission: 'moderation' },
-  { to: '/members', label: 'Members', icon: '💚', permission: 'members' },
-  { to: '/batches', label: 'Batches', icon: '👥', permission: 'batches' },
-  { to: '/announcements', label: 'Announcements', icon: '📣', permission: 'announcements' },
-  { to: '/calendar', label: 'Calendar', icon: '🗓️', permission: 'calendar' },
-  { to: '/programs', label: 'Programs', icon: '🌱', permission: 'programs' },
-  { to: '/content', label: 'Content', icon: '📚', adminOnly: true },
-  { to: '/consultations', label: 'Consultations', icon: '🩺', permission: 'consultations' },
-  { to: '/support', label: 'Support', icon: '💬', permission: 'support' },
-  { to: '/users', label: 'Users & Roles', icon: '🧑‍🤝‍🧑', adminOnly: true },
-  { to: '/error-reports', label: 'Error Reports', icon: '🚨', adminOnly: true },
-  { to: '/settings', label: 'Settings', icon: '⚙️' },
+  { to: '/dashboard', label: 'Overview', icon: '🏠', section: 'Overview' },
+  { to: '/members', label: 'Members', icon: '💚', section: 'Care+', permission: 'members' },
+  { to: '/batches', label: 'Batches', icon: '👥', section: 'Care+', permission: 'batches' },
+  { to: '/announcements', label: 'Announcements', icon: '📣', section: 'Care+', permission: 'announcements' },
+  { to: '/calendar', label: 'Calendar', icon: '🗓️', section: 'Care+', permission: 'calendar' },
+  { to: '/programs', label: 'Programs', icon: '🌱', section: 'Care+', permission: 'programs' },
+  { to: '/consultations', label: 'Consultations', icon: '🩺', section: 'Care+', permission: 'consultations' },
+  { to: '/moderation', label: 'Moderation', icon: '🛡️', section: 'Support', permission: 'moderation' },
+  { to: '/support', label: 'Support', icon: '💬', section: 'Support', permission: 'support' },
+  { to: '/error-reports', label: 'Error Reports', icon: '🚨', section: 'Support', adminOnly: true },
+  { to: '/content', label: 'Content', icon: '📚', section: 'Platform', adminOnly: true },
+  { to: '/users', label: 'Users & Roles', icon: '🧑‍🤝‍🧑', section: 'Platform', adminOnly: true },
+  { to: '/settings', label: 'Settings', icon: '⚙️', section: 'Account' },
 ]
+
+const NAV_SECTIONS: NavItem['section'][] = ['Overview', 'Care+', 'Support', 'Platform', 'Account']
 
 function roleLabel(role: string | null): string {
   switch (role) {
@@ -47,6 +51,10 @@ export default function AppShell() {
   const nav = NAV.filter(
     (item) => (!item.adminOnly || isAdmin) && (!item.permission || hasPermission(item.permission)),
   )
+  const sections = NAV_SECTIONS.map((section) => ({
+    section,
+    items: nav.filter((item) => item.section === section),
+  })).filter((group) => group.items.length > 0)
 
   return (
     <div className="shell">
@@ -57,19 +65,24 @@ export default function AppShell() {
         </div>
 
         <nav className="sidebar-nav">
-          {nav.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              className={({ isActive }) =>
-                'nav-item' + (isActive ? ' nav-item-active' : '')
-              }
-            >
-              <span className="nav-icon" aria-hidden>
-                {item.icon}
-              </span>
-              <span>{item.label}</span>
-            </NavLink>
+          {sections.map(({ section, items }) => (
+            <div key={section} className="sidebar-group">
+              {section !== 'Overview' && <span className="sidebar-group-label">{section}</span>}
+              {items.map((item) => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  className={({ isActive }) =>
+                    'nav-item' + (isActive ? ' nav-item-active' : '')
+                  }
+                >
+                  <span className="nav-icon" aria-hidden>
+                    {item.icon}
+                  </span>
+                  <span>{item.label}</span>
+                </NavLink>
+              ))}
+            </div>
           ))}
         </nav>
 
