@@ -3,7 +3,7 @@ import { FieldValue, getFirestore, Timestamp } from 'firebase-admin/firestore';
 import { getAuth } from 'firebase-admin/auth';
 import { getStorage } from 'firebase-admin/storage';
 import { getMessaging } from 'firebase-admin/messaging';
-import { onDocumentCreated } from 'firebase-functions/v2/firestore';
+import { onDocumentCreated, onDocumentWritten } from 'firebase-functions/v2/firestore';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import * as functions from 'firebase-functions/v1';
@@ -15,6 +15,27 @@ const region = 'asia-south1';
 
 export const onUserCreate = functions.region(region).auth.user().onCreate(async user => {
   await db.doc(`users/${user.uid}`).set({ userId: user.uid, phone: user.phoneNumber ?? null, email: user.email ?? null, role: 'user', status: 'active', timezone: 'Asia/Kolkata', notificationPreferences: { quietHoursStart: '21:00', quietHoursEnd: '07:00', maxHealthReminders: 3 }, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
+});
+
+// The Android app only ever writes lastCheckinAt/checkinStreak onto
+// users/{uid} (HealthRepository.recordCheckinCompletion) - but the admin
+// console's roster pages (Dashboard, Members, Batches, MemberDetail) read
+// consistency/quiet-member state off programMembers docs, which never had
+// this field. Mirror it server-side on every check-in so the console's
+// existing realtime programMembers listeners pick it up with no client
+// changes, instead of every roster page having to join two collections.
+export const onUserCheckinMirror = onDocumentWritten({ document: 'users/{uid}', region }, async event => {
+  const before = event.data?.before?.data();
+  const after = event.data?.after?.data();
+  if (!after) return;
+  const beforeAt = before?.lastCheckinAt?.toMillis?.() ?? null;
+  const afterAt = after.lastCheckinAt?.toMillis?.() ?? null;
+  if (beforeAt === afterAt) return;
+  const roster = await db.collection('programMembers').where('uid', '==', event.params.uid).get();
+  if (roster.empty) return;
+  const batch = db.batch();
+  roster.docs.forEach(d => batch.set(d.ref, { lastCheckinAt: after.lastCheckinAt, checkinStreak: after.checkinStreak ?? null }, { merge: true }));
+  await batch.commit();
 });
 
 function glucoseStatus(value: number, type: string) {
@@ -140,11 +161,36 @@ export const generateDailyContent = onSchedule({ schedule: '0 5 * * *', timeZone
   const weekdayIST = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', weekday: 'short' }).format(new Date());
   if (weekdayIST !== 'Mon') return;
   const end = Timestamp.now(); const start = Timestamp.fromMillis(end.toMillis() - 7 * 86400000);
+  // Digest notifications are scheduled a few hours out (not sent immediately
+  // at this 5am run) so they land at a considerate mid-morning hour instead
+  // of during most users' default quiet hours (21:00-07:00).
+  const digestScheduledFor = Timestamp.fromMillis(Date.now() + 4 * 60 * 60000);
   for (const user of users.docs) {
-    const glucose = await db.collection('glucoseReadings').where('userId', '==', user.id).where('measuredAt', '>=', start).get();
+    const [glucose, sleep] = await Promise.all([
+      db.collection('glucoseReadings').where('userId', '==', user.id).where('measuredAt', '>=', start).get(),
+      db.collection('sleepLogs').where('userId', '==', user.id).where('createdAt', '>=', start).get(),
+    ]);
     const values = glucose.docs.map(x => Number(x.data().value)).filter(Number.isFinite);
     const average = values.length ? Math.round(values.reduce((a,b) => a+b, 0) / values.length) : null;
     await db.collection('weeklyReports').add({ userId: user.id, profileId: user.id, periodStart: start, periodEnd: end, glucoseAverage: average, glucoseLogCount: values.length, consistency: values.length >= 4 ? 'good' : 'building', recommendation: 'Focus on one consistent daily action this week.', createdAt: FieldValue.serverTimestamp() });
+
+    // Weekly logging-coverage digest: same "days with a reading/sleep log
+    // out of 7" coverage math the Insights screen already shows the member,
+    // sent as a nudge rather than left for them to discover on their own.
+    const loggedDayKeys = new Set<string>();
+    for (const doc of [...glucose.docs, ...sleep.docs]) {
+      const ts = (doc.get('measuredAt') ?? doc.get('createdAt')) as FirebaseFirestore.Timestamp | undefined;
+      if (ts) loggedDayKeys.add(dayKeyIST(ts.toDate()));
+    }
+    const daysLogged = loggedDayKeys.size;
+    if (daysLogged === 0) continue; // Never nag a fully inactive user with a "0/7" ping.
+    const body = daysLogged >= 4
+      ? `Great rhythm - you logged health data on ${daysLogged} of the last 7 days. Keep it up!`
+      : `You logged health data on ${daysLogged} of the last 7 days. Try logging one thing today to build your rhythm.`;
+    await db.collection('notifications').add({
+      userId: user.id, profileId: user.id, title: 'Your week in review', body,
+      type: 'weekly_digest', status: 'scheduled', scheduledFor: digestScheduledFor, createdAt: FieldValue.serverTimestamp(),
+    });
   }
 });
 
@@ -247,6 +293,36 @@ export const exportUserData = onDocumentCreated({ document: 'dataExportRequests/
   await request.ref.set({ status: 'completed', storagePath: path, completedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   await db.collection('notifications').add({ userId: uid, profileId: null, title: 'Your data export is ready', body: 'Open Privacy and Data Controls to access your export.', type: 'report', status: 'scheduled', scheduledFor: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp() });
 });
+// Real, time-limited signed URL for the Health File "share link / QR code"
+// feature - the client previously used the Storage download-token URL
+// directly (works, but never expires and isn't a true signed URL). Requires
+// the Functions runtime service account to have `roles/iam.serviceAccountTokenCreator`
+// bound to itself (a one-time `gcloud iam service-accounts add-iam-policy-binding`
+// grant, same shape as the WIF setup in docs/deploy-wif-setup.md) - if that
+// grant hasn't been done yet, this throws a clear 'failed-precondition' and
+// the Android client falls back to the existing non-expiring link rather
+// than breaking the feature.
+export const getHealthFileShareLink = onCall({ region }, async request => {
+  const auth = requireUser(request);
+  const storagePath = String(request.data?.storagePath ?? '');
+  // Owner-only: without this check, any signed-in user could pass another
+  // member's Health File path and get a working link to their private data.
+  if (!storagePath.startsWith(`users/${auth.uid}/health-file/`)) {
+    throw new HttpsError('permission-denied', 'You can only share your own Health File');
+  }
+  try {
+    const [url] = await getStorage().bucket().file(storagePath).getSignedUrl({
+      version: 'v4',
+      action: 'read',
+      expires: Date.now() + 7 * 24 * 60 * 60 * 1000,
+    });
+    return { url, expiresInDays: 7 };
+  } catch (error) {
+    console.error('getHealthFileShareLink signing failed', error);
+    throw new HttpsError('failed-precondition', 'Signed links are not set up yet - showing a standard link instead.');
+  }
+});
+
 export const createAuditLog = onCall({ region }, async request => {
   const auth = requireUser(request);
   if (auth.token.role !== 'admin' && auth.token.role !== 'super_admin') throw new HttpsError('permission-denied', 'Admin only');

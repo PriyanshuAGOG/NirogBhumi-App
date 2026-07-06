@@ -94,7 +94,6 @@ val NirogScreens = listOf(
     s(39,"sugar_story","Sugar Story","Insights","Simple patterns from your own data.","Sleep and fasting sugar|Dinner walk impact","View details"),
     s(40,"insight_detail","Sugar Story Detail","Insights","Post-dinner walks were linked with lower readings.","Comparison graph|Data used|Suggested action|Confidence","Try 15-minute walk"),
     s(41,"trends_30","30-Day Trends","Insights","Zoom out to see what is changing.","Sugar|BP|Sleep|Walking|Weight|Consistency","Choose metric"),
-    s(42,"share_report","Share Report","Insights","Share only what you choose.","Expert|Family member|PDF|Date range|Privacy reminder","Share securely"),
     s(43,"care_hub","Care Hub","Care","Expert help, programs and follow-ups in one place.","Consultations|Program Mode|Expert notes|Upcoming care","Book consultation"),
     s(44,"consultation_types","Consultation Types","Care","Choose the kind of support you need.","Diabetes lifestyle|Diet review|Yoga|Naturopathy|Follow-up","Choose consultation"),
     s(45,"consult_stepper","Consultation Booking, Slot Selection","Care","Pick a suitable expert and time.","Expert|Date|Available slot|Price","Continue"),
@@ -438,7 +437,7 @@ fun CatalogScreen(state: NirogState, route: String) {
                             if (spec.route == "notification_settings" && Build.VERSION.SDK_INT >= 33 && activity != null) {
                                 ActivityCompat.requestPermissions(activity, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 4201)
                             }
-                            if (spec.route == "share_report" || spec.route == "weekly_report") {
+                            if (spec.route == "weekly_report") {
                                 runCatching { ReportShare.shareWeeklyReport(context, state) }.onFailure { message = it.message ?: "Report could not be shared" }
                             } else if (spec.route == "health_connect_permissions") {
                                 if (!healthConnect.isAvailable) message = "Health Connect is unavailable or needs an update" else healthPermissionLauncher.launch(HealthConnectManager.permissions)
@@ -484,7 +483,7 @@ fun CatalogScreen(state: NirogState, route: String) {
                     OutlinedButton(onClick = { state.currentScreen = "walk_timer" }, Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(25.dp)) { Text("Start walk timer") }
                 }
                 if (spec.route == "weekly_report") {
-                    OutlinedButton(onClick = { state.currentScreen = "share_report" }, Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(25.dp)) { Text("Share with expert or family") }
+                    OutlinedButton(onClick = { state.currentScreen = "health_file" }, Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(25.dp)) { Text("Share with expert or family") }
                 }
                 if (spec.route == "data_controls") {
                     OutlinedButton(

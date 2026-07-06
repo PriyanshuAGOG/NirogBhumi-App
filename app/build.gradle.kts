@@ -125,6 +125,7 @@ dependencies {
   implementation(libs.firebase.crashlytics)
   implementation(libs.firebase.appdistribution.api)
   implementation(libs.firebase.appcheck.playintegrity)
+  debugImplementation(libs.firebase.appcheck.debug)
   implementation(libs.play.services.auth)
   implementation(libs.androidx.health.connect)
   implementation(libs.androidx.work.runtime.ktx)

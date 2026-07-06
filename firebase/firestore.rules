@@ -168,6 +168,15 @@ service cloud.firestore {
       allow read: if ownsResource() || staff();
       allow update: if staff();
     }
+    // Client-side error telemetry (CloudResult.Failure surfaced to a real
+    // user) - the caller can only ever report on their own behalf (never
+    // forge another uid's report) and can never read reports back, so this
+    // can't be abused as a side-channel to enumerate other users' errors.
+    // Staff triage and mark resolved from the admin console.
+    match /errorReports/{id} {
+      allow create: if validCreate() && request.resource.data.resolved == false;
+      allow read, update: if staff();
+    }
     // Care+ program calendar. Members read events for the program they're
     // enrolled in; only admin or that program's assigned coach create/edit.
     match /programEvents/{id} {

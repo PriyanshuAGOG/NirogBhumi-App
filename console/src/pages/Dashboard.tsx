@@ -2,7 +2,10 @@ import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { Link } from 'react-router-dom'
 import {
   collection,
+  getCountFromServer,
+  limit,
   onSnapshot,
+  orderBy,
   query,
   where,
   Timestamp,
@@ -11,7 +14,6 @@ import {
 import { db } from '../lib/firebase'
 import { useAuth } from '../auth/AuthProvider'
 import { usePrograms } from '../lib/usePrograms'
-import { consistencyTag } from '../lib/health'
 import './Dashboard.css'
 
 interface TileState {
@@ -19,32 +21,44 @@ interface TileState {
   error: boolean
 }
 
-/** Live count for a query; falls back to counting the whole collection. */
+// Refresh cadence for dashboard tile counts. These are stat tiles, not
+// lists a coach reads line-by-line - they don't need sub-second realtime,
+// and the old approach (a live onSnapshot listener on the *entire* `users`
+// collection just to read snap.size) re-fired the whole Dashboard on every
+// single check-in from every member in the app, since users/{uid} gets
+// touched on every one (checkinStreak, checkinHourHint, lastCheckinAt...).
+// A periodic count() aggregation query - which Firestore bills and executes
+// as a single number, never downloading the matched documents - gets the
+// same "feels live" tile without that cost.
+const COUNT_REFRESH_MS = 45_000
+
+/** Periodically refreshed aggregate count for a query; falls back to a second query on error. */
 function useCount(build: () => { primary: Query; fallback: Query }): TileState {
   const [state, setState] = useState<TileState>({ count: null, error: false })
 
   useEffect(() => {
     const { primary, fallback } = build()
-    let unsubFallback: (() => void) | null = null
+    let cancelled = false
 
-    const startFallback = () => {
-      if (unsubFallback) return
-      unsubFallback = onSnapshot(
-        fallback,
-        (snap) => setState({ count: snap.size, error: false }),
-        () => setState({ count: null, error: true }),
-      )
+    async function refresh() {
+      try {
+        const snap = await getCountFromServer(primary)
+        if (!cancelled) setState({ count: snap.data().count, error: false })
+      } catch {
+        try {
+          const snap = await getCountFromServer(fallback)
+          if (!cancelled) setState({ count: snap.data().count, error: false })
+        } catch {
+          if (!cancelled) setState({ count: null, error: true })
+        }
+      }
     }
 
-    const unsubPrimary = onSnapshot(
-      primary,
-      (snap) => setState({ count: snap.size, error: false }),
-      () => startFallback(),
-    )
-
+    void refresh()
+    const interval = setInterval(() => void refresh(), COUNT_REFRESH_MS)
     return () => {
-      unsubPrimary()
-      if (unsubFallback) unsubFallback()
+      cancelled = true
+      clearInterval(interval)
     }
     // build is stable per-call; deps intentionally empty (one-time wiring).
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -87,23 +101,37 @@ interface RosterEntry {
   lastCheckinAt?: unknown
 }
 
-/** Members whose last check-in is stale enough to need a coach's attention. */
+const QUIET_AFTER_MS = 4 * 24 * 60 * 60 * 1000
+
+/**
+ * Members whose last check-in is stale enough to need a coach's attention.
+ * Filtered server-side (lastCheckinAt <= 4 days ago) instead of live-listening
+ * every programMembers doc on the platform - that field is mirrored onto
+ * every roster doc on each check-in (see the onUserCheckinMirror function),
+ * so without this bound the widget would re-fire for every admin on every
+ * single check-in from every member, not just the ones actually going quiet.
+ */
 function useQuietMembers(): { list: RosterEntry[]; loading: boolean } {
-  const [members, setMembers] = useState<RosterEntry[]>([])
+  const [list, setList] = useState<RosterEntry[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const unsub = onSnapshot(query(collection(db, 'programMembers')), (snap) => {
-      setMembers(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<RosterEntry, 'id'>) })))
-      setLoading(false)
-    })
+    const cutoff = Timestamp.fromDate(new Date(Date.now() - QUIET_AFTER_MS))
+    const unsub = onSnapshot(
+      query(
+        collection(db, 'programMembers'),
+        where('lastCheckinAt', '<=', cutoff),
+        orderBy('lastCheckinAt', 'asc'),
+        limit(6),
+      ),
+      (snap) => {
+        setList(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<RosterEntry, 'id'>) })))
+        setLoading(false)
+      },
+    )
     return unsub
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-
-  const list = useMemo(
-    () => members.filter((m) => consistencyTag(m.lastCheckinAt).cls === 'tag-bad').slice(0, 6),
-    [members],
-  )
 
   return { list, loading }
 }

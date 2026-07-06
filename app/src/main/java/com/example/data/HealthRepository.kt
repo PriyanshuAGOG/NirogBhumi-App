@@ -31,7 +31,13 @@ interface HealthRepository {
     fun saveProfile(values: Map<String, Any?>, done: (CloudResult<Unit>) -> Unit)
     fun addHealthLog(collection: String, values: Map<String, Any?>, done: (CloudResult<String>) -> Unit)
     fun uploadPrivateFile(folder: String, uri: Uri, done: (CloudResult<String>) -> Unit)
-    fun listenUserCollection(collection: String, limit: Long = 30, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription
+    // orderByField/descending default to unset (Firestore's own implementation-
+    // defined order) to preserve every existing call site's behavior - only
+    // pass them where "the most recent N" specifically matters (e.g. checking
+    // "did I complete today's task" against a collection that keeps growing,
+    // where an unordered limit() can silently exclude today's own doc once
+    // the collection passes the limit).
+    fun listenUserCollection(collection: String, limit: Long = 30, orderByField: String? = null, descending: Boolean = true, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription
     fun listenPublicCollection(collection: String, limit: Long = 30, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription
     fun requestDataExport(done: (CloudResult<Unit>) -> Unit)
     fun requestAccountDeletion(done: (CloudResult<Unit>) -> Unit)
@@ -103,6 +109,26 @@ interface HealthRepository {
     // a side effect of recordCheckinCompletion - framed warmly as a "rhythm"
     // in the UI, never shown as a punishing streak-loss notice.
     fun peekCheckinStreak(done: (CloudResult<Int>) -> Unit)
+
+    // Real, time-limited signed URL for the Health File share link/QR (7-day
+    // expiry) - falls back to the caller passing the existing non-expiring
+    // Storage download URL if the Cloud Function isn't set up yet (see
+    // getHealthFileShareLink in firebase/functions).
+    fun getHealthFileShareLink(storagePath: String, done: (CloudResult<String>) -> Unit)
+
+    // One-shot server-side count (not a live listener - a milestone check
+    // only needs to be current right after a new walk is logged) of the
+    // caller's total walkLogs, used to fire the "N walks logged" milestone
+    // moment at the exact log that crosses a threshold.
+    fun peekWalkLogCount(done: (CloudResult<Long>) -> Unit)
+
+    // Fire-and-forget production error telemetry: every CloudResult.Failure
+    // surfaced to a real user (via state.cloudMessage) also gets reported
+    // here, so failures that only ever happen on a real device (a stale
+    // token race, a permission gap only one role hits, ...) are visible in
+    // the admin console instead of needing to be reproduced blind. Never
+    // throws, never blocks, never shown to the user if it itself fails.
+    fun reportError(screen: String, message: String, code: String? = null)
 }
 
 class FirebaseHealthRepository : HealthRepository {
@@ -153,12 +179,15 @@ class FirebaseHealthRepository : HealthRepository {
             .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Upload failed", it)) }
     }
 
-    override fun listenUserCollection(collection: String, limit: Long, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription {
+    override fun listenUserCollection(collection: String, limit: Long, orderByField: String?, descending: Boolean, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription {
         val uid = userId ?: run { update(CloudResult.Failure("Sign in is required")); return CloudSubscription {} }
         val allowed = setOf("profiles", "glucoseReadings", "bpReadings", "sleepLogs", "walkLogs", "weightLogs", "labReports", "dailyActions", "weeklyReports", "sugarStories", "consultations", "userPrograms", "programPlans", "checklistLogs", "expertNotes", "notifications", "deviceConnections", "orders", "supportRequests", "dataExportRequests", "deletionRequests", "medicationLogs")
         if (collection !in allowed) { update(CloudResult.Failure("Unsupported collection")); return CloudSubscription {} }
-        val query = db?.collection(collection)?.whereEqualTo("userId", uid)?.limit(limit)
+        val base = db?.collection(collection)?.whereEqualTo("userId", uid)
             ?: run { update(CloudResult.Failure("Firebase is not configured")); return CloudSubscription {} }
+        val query = (if (orderByField != null) {
+            base.orderBy(orderByField, if (descending) com.google.firebase.firestore.Query.Direction.DESCENDING else com.google.firebase.firestore.Query.Direction.ASCENDING)
+        } else base).limit(limit)
         val registration = query.addSnapshotListener { snapshot, error ->
             if (error != null) update(CloudResult.Failure(error.message ?: "Could not load data", error))
             else update(CloudResult.Success(snapshot?.documents.orEmpty().map { CloudDocument(it.id, it.data.orEmpty()) }))
@@ -203,6 +232,22 @@ class FirebaseHealthRepository : HealthRepository {
     // roster entry with forged consistency stats). The function validates
     // the code and performs both writes itself under the Admin SDK.
     override fun redeemProgramCode(code: String, done: (CloudResult<Map<String, Any?>>) -> Unit) {
+        val user = auth?.currentUser ?: return done(CloudResult.Failure("Sign in is required"))
+        // A brand-new account's ID token can still be mid-refresh by the time
+        // onboarding reaches this screen - unlike Firestore's writes (which
+        // queue locally and appear to succeed instantly regardless of token
+        // state), a callable Function is a real network round-trip that
+        // needs a genuinely valid token *right now*, so a stale one here
+        // surfaced as a confusing "unauthenticated" for new signups even
+        // though the user was, from their own point of view, already signed
+        // in. Forcing a refresh first closes that race instead of just
+        // hoping the cached token happens to still be valid.
+        user.getIdToken(true)
+            .addOnSuccessListener { callRedeemProgramCode(code, retryOnAuthFailure = true, done) }
+            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Could not verify your sign-in - please try again", it)) }
+    }
+
+    private fun callRedeemProgramCode(code: String, retryOnAuthFailure: Boolean, done: (CloudResult<Map<String, Any?>>) -> Unit) {
         val callable = functions?.getHttpsCallable("redeemProgramCode")
             ?: return done(CloudResult.Failure("Firebase is not configured"))
         callable.call(mapOf("code" to code.trim().uppercase()))
@@ -212,7 +257,30 @@ class FirebaseHealthRepository : HealthRepository {
                 AnalyticsLogger.log("program_joined")
                 done(CloudResult.Success(value))
             }
-            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "That program code wasn't recognized", it)) }
+            .addOnFailureListener { error ->
+                val functionsError = error as? com.google.firebase.functions.FirebaseFunctionsException
+                val isAuthError = functionsError?.code == com.google.firebase.functions.FirebaseFunctionsException.Code.UNAUTHENTICATED
+                if (isAuthError && retryOnAuthFailure) {
+                    auth?.currentUser?.getIdToken(true)
+                        ?.addOnSuccessListener { callRedeemProgramCode(code, retryOnAuthFailure = false, done) }
+                        ?.addOnFailureListener { done(finalRedeemFailure(error, functionsError)) }
+                        ?: done(finalRedeemFailure(error, functionsError))
+                } else {
+                    done(finalRedeemFailure(error, functionsError))
+                }
+            }
+    }
+
+    // Embeds the raw FirebaseFunctionsException code (e.g. "functions/unauthenticated")
+    // into the surfaced message so the error-reporting pipeline (which only
+    // ever sees the final message string, not the original Throwable)
+    // captures which specific failure actually happened on a real device,
+    // instead of every redeemProgramCode failure looking identical in the
+    // admin console.
+    private fun finalRedeemFailure(error: Exception, functionsError: com.google.firebase.functions.FirebaseFunctionsException?): CloudResult.Failure {
+        val base = error.message ?: "That program code wasn't recognized"
+        val message = if (functionsError != null) "$base (code: ${functionsError.code.name.lowercase()})" else base
+        return CloudResult.Failure(message, error)
     }
 
     override fun listenAnnouncements(programId: String, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription {
@@ -406,7 +474,10 @@ class FirebaseHealthRepository : HealthRepository {
         val registration = database.collection("programEvents")
             .whereEqualTo("programId", programId)
             .orderBy("startsAt", com.google.firebase.firestore.Query.Direction.ASCENDING)
-            .limit(50)
+            // High enough to cover a full multi-month program (e.g. a 6-month
+            // program with near-daily sessions) - the old limit of 50 silently
+            // truncated the month-grid calendar to only its earliest events.
+            .limit(500)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) update(CloudResult.Failure(error.message ?: "Could not load the program calendar", error))
                 else update(CloudResult.Success(snapshot?.documents.orEmpty().map { CloudDocument(it.id, it.data.orEmpty()) }))
@@ -505,6 +576,48 @@ class FirebaseHealthRepository : HealthRepository {
         database.collection("users").document(uid).get()
             .addOnSuccessListener { snap -> done(CloudResult.Success(snap.getLong("checkinStreak")?.toInt() ?: 0)) }
             .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Could not load", it)) }
+    }
+
+    override fun getHealthFileShareLink(storagePath: String, done: (CloudResult<String>) -> Unit) {
+        val callable = functions?.getHttpsCallable("getHealthFileShareLink")
+            ?: return done(CloudResult.Failure("Firebase is not configured"))
+        callable.call(mapOf("storagePath" to storagePath))
+            .addOnSuccessListener { result ->
+                @Suppress("UNCHECKED_CAST")
+                val value = result.data as? Map<String, Any?>
+                val url = value?.get("url") as? String
+                if (url != null) done(CloudResult.Success(url)) else done(CloudResult.Failure("Signed link is not available"))
+            }
+            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Signed link is not available", it)) }
+    }
+
+    override fun peekWalkLogCount(done: (CloudResult<Long>) -> Unit) {
+        val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
+        val database = db ?: return done(CloudResult.Failure("Firebase is not configured"))
+        database.collection("walkLogs").whereEqualTo("userId", uid).count()
+            .get(com.google.firebase.firestore.AggregateSource.SERVER)
+            .addOnSuccessListener { snapshot -> done(CloudResult.Success(snapshot.count)) }
+            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Could not load", it)) }
+    }
+
+    override fun reportError(screen: String, message: String, code: String?) {
+        val uid = userId ?: return
+        val database = db ?: return
+        // Best-effort only: swallow every possible failure here silently -
+        // an error report that itself errors must never surface anything to
+        // the user or recurse into reporting itself.
+        runCatching {
+            database.collection("errorReports").add(
+                mapOf(
+                    "userId" to uid,
+                    "screen" to screen,
+                    "message" to message.take(500),
+                    "code" to code,
+                    "resolved" to false,
+                    "createdAt" to FieldValue.serverTimestamp(),
+                )
+            )
+        }
     }
 
     override fun upsertUserRecord(collection: String, documentId: String, values: Map<String, Any?>, done: (CloudResult<Unit>) -> Unit) {

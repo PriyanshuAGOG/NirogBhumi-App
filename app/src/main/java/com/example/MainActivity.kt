@@ -65,6 +65,27 @@ class MainActivity : ComponentActivity() {
     setContent {
       MyApplicationTheme {
         val state = nirogState
+        val snackbarHostState = remember { SnackbarHostState() }
+
+        // Every cloud read/write failure across the app (chat send, reactions,
+        // photo/voice upload, profile edits, ...) sets state.cloudMessage - but
+        // until now nothing ever displayed it, so every one of those failures
+        // was completely silent to the user (no toast, no error, nothing).
+        // This is the single global place that surfaces it.
+        LaunchedEffect(state.cloudMessage) {
+          if (state.cloudMessage.isNotBlank()) {
+            val message = state.cloudMessage
+            val screen = state.currentScreen
+            state.cloudMessage = ""
+            // Same single choke point also reports the failure for the admin
+            // console's error dashboard - real device failures (a stale auth
+            // token race, a permission gap that only shows up for one role)
+            // are otherwise invisible without this, since reproducing them
+            // blind isn't always possible.
+            state.repository.reportError(screen, message)
+            snackbarHostState.showSnackbar(message)
+          }
+        }
 
         Scaffold(
           modifier = Modifier.fillMaxSize(),
@@ -73,7 +94,8 @@ class MainActivity : ComponentActivity() {
           // reserves status/navigation-bar insets itself. Letting this outer Scaffold also
           // default to WindowInsets.safeDrawing double-reserves the bottom inset, which is
           // what was pushing the bottom nav bar up and leaving an empty gap beneath it.
-          contentWindowInsets = WindowInsets(0, 0, 0, 0)
+          contentWindowInsets = WindowInsets(0, 0, 0, 0),
+          snackbarHost = { SnackbarHost(snackbarHostState) },
         ) { innerPadding ->
           Column(
             modifier = Modifier
@@ -275,7 +297,22 @@ fun ActiveScreenContent(state: NirogState) {
     }
   }
   UpdateLifecycleEffects(state)
-  Box(modifier = Modifier.fillMaxSize()) {
+  // Single, high-leverage inset fix: every screen dispatched below used to
+  // handle (or, in ~40 of 45 cases, simply not handle) its own status-bar/
+  // nav-bar/keyboard insets individually, which is why headers looked "too
+  // raised into the top" and bottom content/inputs sat flush against (or
+  // under) the gesture nav bar or keyboard. "dashboard" (MainHub) is the one
+  // exception - it already reserves its own insets correctly via its inner
+  // Scaffold's topBar/bottomBar, so wrapping it again here would double-pad it.
+  val selfManagesInsets = state.currentScreen == "dashboard"
+  Box(
+    modifier = Modifier
+      .fillMaxSize()
+      .then(
+        if (selfManagesInsets) Modifier
+        else Modifier.statusBarsPadding().navigationBarsPadding().imePadding()
+      )
+  ) {
     when (state.currentScreen) {
       "splash" -> SplashScreen(state)
       "welcome" -> WelcomeScreen(state)

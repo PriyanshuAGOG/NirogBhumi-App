@@ -62,6 +62,12 @@ class NirogState {
     var profileWeight by mutableStateOf("72")
     var profileCity by mutableStateOf("Jaipur")
     var profileLanguage by mutableStateOf("English")
+    // Private (users/{uid}/profile-photo/... - readable only by the owner or
+    // an admin, same as any other private upload). Not yet surfaced to other
+    // members (e.g. as a chat sender avatar) - that would need a public-read
+    // Storage path, which is a deliberate separate decision from "let me set
+    // my own profile picture."
+    var photoUrl by mutableStateOf("")
 
     // Health Details Setup
     var selectedDiabetesStatus by mutableStateOf("None")
@@ -89,8 +95,15 @@ class NirogState {
 
     // Care+ (Announcements/Chat) admin capability - resolved from the signed-in user's
     // Firebase custom claims, not a client-trusted flag, so it can only ever reflect
-    // what the server actually granted.
+    // what the server actually granted. True for admin and super_admin.
     var isAdmin by mutableStateOf(false)
+    // Raw role claim ("", "user", "coach", "admin", "super_admin").
+    var staffRole by mutableStateOf("")
+    // Program IDs this coach is the assigned coachId for (per the `programs`
+    // read rule: coach() && coachId == uid) - empty for non-coaches. Lets
+    // announcement/pin actions recognize the actual per-batch program
+    // manager, not just the platform-wide admin role.
+    var coachProgramIds by mutableStateOf(setOf<String>())
 
     // Active Tab under Dashboard
     var activeTab by mutableStateOf("Today") // "Today", "Track", "Insights", "Care", "Learn"
@@ -109,6 +122,11 @@ class NirogState {
     // Lets a quick-log entry point (a chip, a tile's "+" ) jump the Daily Check-in
     // wizard straight to the relevant step instead of starting over at sugar.
     var checkinStartStep by mutableStateOf(0)
+    // One-time "N walks logged" milestone moment - set right after the timed
+    // walk that crosses a threshold, consumed (and cleared) by the first
+    // screen that shows it, same one-shot pattern as the check-in streak
+    // milestone in CheckInFlow.kt.
+    var walkMilestoneCount by mutableStateOf<Long?>(null)
 
     // Sugar History & Tracking State - populated only from real Firestore reads
     val sugarLogs = mutableStateListOf<SugarLog>()
@@ -120,13 +138,11 @@ class NirogState {
     // Daily Checklist State
     var dailyRitualsCompleted = mutableStateListOf<String>()
 
-    // Active Experiment State
+    // Active Experiment State - startedAtMillis anchors real progress
+    // (nights of 7+ hours actually logged since start), not just a manually
+    // incremented day counter disconnected from real sleep data.
     var isExperimentActive by mutableStateOf(false)
-    var experimentDayCount by mutableStateOf(1)
-
-    // Active Journey Protocol State
-    var activeJourneyProgress by mutableStateOf(0)
-    val completedProtocols = mutableStateListOf<String>()
+    var experimentStartedAtMillis by mutableStateOf(0L)
 
     // Book Consultation State
     var consultStep by mutableStateOf(1) // 1: Service, 2: Slot & Form, 3: Success
@@ -151,3 +167,7 @@ class NirogState {
     var updateCheckBusy by mutableStateOf(false)
     var updateCheckError by mutableStateOf("")
 }
+
+/** Mirrors the programStaff() Firestore rule (admin() || assignedCoach(programId)). */
+fun NirogState.canManageProgram(programId: String): Boolean =
+    isAdmin || (staffRole == "coach" && programId.isNotBlank() && coachProgramIds.contains(programId))

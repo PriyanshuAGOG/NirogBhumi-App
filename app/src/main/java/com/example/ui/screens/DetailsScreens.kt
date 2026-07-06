@@ -10,6 +10,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.*
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -30,6 +31,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.google.firebase.Timestamp
 import com.nirogbhumi.app.data.CloudResult
 import com.nirogbhumi.app.notifications.EventReminderWorker
@@ -46,6 +49,7 @@ import com.nirogbhumi.app.health.HealthConnectManager
 import com.nirogbhumi.app.health.HealthConnectStatus
 import com.nirogbhumi.app.health.computeSleepGlucoseInsight
 import com.nirogbhumi.app.ui.NirogState
+import com.nirogbhumi.app.ui.canManageProgram
 import com.nirogbhumi.app.ui.SugarLog
 import com.nirogbhumi.app.ui.components.NirogCard
 import com.nirogbhumi.app.ui.components.RowCard
@@ -59,7 +63,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun BloodSugarDetailScreen(state: NirogState) {
     DisposableEffect(Unit) {
-        val subscription = state.repository.listenUserCollection("glucoseReadings", 30) { result ->
+        val subscription = state.repository.listenUserCollection("glucoseReadings", 30, orderByField = "measuredAt", descending = true) { result ->
             when (result) {
                 is com.nirogbhumi.app.data.CloudResult.Success -> {
                     val synced = result.value.mapIndexedNotNull { index, doc ->
@@ -580,15 +584,69 @@ fun ConsultTypeOption(title: String, desc: String, info: String, selected: Boole
 }
 
 // Screen 4: Active Journey Screen (reversal checklist progress)
+private data class DailyProtocol(val id: String, val title: String, val autoCompletable: Boolean, val onOpen: (NirogState) -> Unit)
+
+// Deliberately generic, safe daily wellness actions - no named herbs,
+// supplements, or home remedies (e.g. "ashwagandha," "lemon water with
+// ginger"), since recommending those without an expert reviewing the
+// member's actual conditions/medications isn't something this app should
+// do on its own. Four of five are auto-completable straight from real
+// logged data (never a manual "trust me" toggle); tapping an incomplete
+// one deep-links into the exact screen that logs it.
+private val DAILY_PROTOCOLS = listOf(
+    DailyProtocol("fasting_reading", "Log a fasting sugar reading", autoCompletable = true) { it.isQuickLogFastingOpen = true },
+    DailyProtocol("checkin", "Complete today's check-in", autoCompletable = true) { it.checkinStartStep = 0; it.currentScreen = "daily_checkin" },
+    DailyProtocol("walk", "Walk 10 minutes", autoCompletable = true) { it.currentScreen = "walk_timer" },
+    DailyProtocol("sleep", "Log last night's sleep", autoCompletable = true) { it.currentScreen = "sleep_overview" },
+    DailyProtocol("movement", "5-minute stretch or light movement", autoCompletable = false) {},
+)
+
 @Composable
 fun ActiveJourneyScreen(state: NirogState) {
-    val protocolsList = listOf(
-        "Fasting Blood Sugar",
-        "Warm Lemon Water with Ginger",
-        "Mandukasana Posture Sequence",
-        "Brisk 10-Min Walk post lunch",
-        "Bedtime Ashwagandha milk loop"
-    )
+    var loggedReadingToday by remember { mutableStateOf(false) }
+    var walkLoggedToday by remember { mutableStateOf(false) }
+    var sleepLoggedToday by remember { mutableStateOf(false) }
+    // Persisted like the "daily_post_dinner_walk" checklist item (a
+    // checklistLogs doc keyed by day) instead of state.completedProtocols,
+    // which lived only in memory and silently reset on every app restart
+    // even though the row visually showed as checked off.
+    var movementDoneToday by remember { mutableStateOf(false) }
+    val movementDayKey = remember { com.nirogbhumi.app.ui.localDayKey(System.currentTimeMillis()) }
+    val movementDocId = "daily_movement_stretch_$movementDayKey"
+
+    DisposableEffect(state.repository.userId) {
+        val todayKey = com.nirogbhumi.app.ui.localDayKey(System.currentTimeMillis())
+        fun loggedToday(doc: com.nirogbhumi.app.data.CloudDocument): Boolean {
+            val ts = (doc.values["measuredAt"] as? Timestamp) ?: (doc.values["createdAt"] as? Timestamp)
+            return ts != null && com.nirogbhumi.app.ui.localDayKey(ts.toDate().time) == todayKey
+        }
+        val sugarSub = state.repository.listenUserCollection("glucoseReadings", 7, orderByField = "measuredAt", descending = true) { result ->
+            if (result is CloudResult.Success) loggedReadingToday = result.value.any(::loggedToday)
+        }
+        val walkSub = state.repository.listenUserCollection("walkLogs", 5, orderByField = "createdAt", descending = true) { result ->
+            if (result is CloudResult.Success) walkLoggedToday = result.value.any(::loggedToday)
+        }
+        val sleepSub = state.repository.listenUserCollection("sleepLogs", 5, orderByField = "createdAt", descending = true) { result ->
+            if (result is CloudResult.Success) sleepLoggedToday = result.value.any(::loggedToday)
+        }
+        val checklistSub = state.repository.listenUserCollection("checklistLogs", 10, orderByField = "createdAt", descending = true) { result ->
+            if (result is CloudResult.Success) {
+                movementDoneToday = result.value.any { doc ->
+                    doc.values["taskId"] == "daily_movement_stretch" && doc.values["status"] == "done" && loggedToday(doc)
+                }
+            }
+        }
+        onDispose { sugarSub.cancel(); walkSub.cancel(); sleepSub.cancel(); checklistSub.cancel() }
+    }
+
+    fun isDone(protocol: DailyProtocol): Boolean = when (protocol.id) {
+        "fasting_reading" -> loggedReadingToday
+        "checkin" -> state.checkedInToday
+        "walk" -> walkLoggedToday
+        "sleep" -> sleepLoggedToday
+        else -> movementDoneToday
+    }
+    val completedCount = DAILY_PROTOCOLS.count { isDone(it) }
 
     Column(
         modifier = Modifier
@@ -651,7 +709,7 @@ fun ActiveJourneyScreen(state: NirogState) {
                         }
                         // Core value representation
                         Text(
-                            "${state.activeJourneyProgress}%",
+                            "${completedCount * 20}%",
                             fontSize = 32.sp,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
@@ -662,7 +720,7 @@ fun ActiveJourneyScreen(state: NirogState) {
                     Spacer(modifier = Modifier.height(16.dp))
 
                     Text(
-                        "${state.completedProtocols.size} of 5 Protocols checked off.",
+                        "$completedCount of ${DAILY_PROTOCOLS.size} checked off today.",
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFF426820),
                         fontSize = 14.sp
@@ -672,20 +730,29 @@ fun ActiveJourneyScreen(state: NirogState) {
 
             Text("Daily Protocols", fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
 
-            // Protocol checked card checklist
+            // Protocol checked card checklist - auto-completable items reflect
+            // real logged data (tapping while incomplete deep-links to the
+            // right logging screen instead of just self-reporting); only the
+            // one non-loggable item is a manual toggle.
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                protocolsList.forEach { protocol ->
-                    val checked = state.completedProtocols.contains(protocol)
+                DAILY_PROTOCOLS.forEach { protocol ->
+                    val checked = isDone(protocol)
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable {
-                                if (checked) {
-                                    state.completedProtocols.remove(protocol)
+                                if (protocol.autoCompletable) {
+                                    if (!checked) protocol.onOpen(state)
                                 } else {
-                                    state.completedProtocols.add(protocol)
+                                    val nextStatus = if (checked) "pending" else "done"
+                                    movementDoneToday = !checked
+                                    state.repository.upsertUserRecord("checklistLogs", movementDocId, mapOf(
+                                        "taskId" to "daily_movement_stretch",
+                                        "title" to protocol.title,
+                                        "status" to nextStatus,
+                                        "completedAt" to if (nextStatus == "done") com.google.firebase.firestore.FieldValue.serverTimestamp() else null,
+                                    )) { result -> if (result is CloudResult.Failure) state.cloudMessage = result.message }
                                 }
-                                state.activeJourneyProgress = (state.completedProtocols.size * 20)
                             }
                             .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.25f), shape = RoundedCornerShape(16.dp)),
                         colors = CardDefaults.cardColors(containerColor = if (checked) Color(0xFFEBF7E8) else Color.White),
@@ -696,7 +763,7 @@ fun ActiveJourneyScreen(state: NirogState) {
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text(protocol, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, color = Color(0xFF141E15))
+                            Text(protocol.title, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, color = Color(0xFF141E15))
 
                             if (checked) {
                                 Icon(Icons.Filled.CheckCircle, "Completed", tint = Color(0xFF426820))
@@ -723,10 +790,10 @@ fun InsightDetailScreen(state: NirogState) {
     var sleepLogs by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>>(emptyList()) }
     var glucoseReadings by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>>(emptyList()) }
     DisposableEffect(state.repository.userId) {
-        val sleepSub = state.repository.listenUserCollection("sleepLogs", limit = 60) { result ->
+        val sleepSub = state.repository.listenUserCollection("sleepLogs", limit = 60, orderByField = "createdAt", descending = true) { result ->
             if (result is CloudResult.Success) sleepLogs = result.value
         }
-        val glucoseSub = state.repository.listenUserCollection("glucoseReadings", limit = 60) { result ->
+        val glucoseSub = state.repository.listenUserCollection("glucoseReadings", limit = 60, orderByField = "measuredAt", descending = true) { result ->
             if (result is CloudResult.Success) glucoseReadings = result.value
         }
         onDispose { sleepSub.cancel(); glucoseSub.cancel() }
@@ -813,8 +880,67 @@ fun InsightDetailScreen(state: NirogState) {
 
             Divider(color = Color(0xFFC3C8C0).copy(alpha = 0.3f))
 
-            // Experiment CTA
+            // Data coverage: a real, live reason to come back - shows how
+            // consistently the last 7 days have actually been logged, using
+            // the same sleepLogs/glucoseReadings already fetched above.
+            Text("This week's logging", fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+            val nowMillis = remember { System.currentTimeMillis() }
+            val weekAgoDayKey = remember(nowMillis) { com.nirogbhumi.app.ui.localDayKey(nowMillis) - 6 }
+            val sleepDaysThisWeek = remember(sleepLogs, nowMillis) {
+                sleepLogs.mapNotNull { log ->
+                    val ts = (log.values["measuredAt"] as? Timestamp) ?: (log.values["createdAt"] as? Timestamp)
+                    ts?.toDate()?.time?.let { com.nirogbhumi.app.ui.localDayKey(it) }
+                }.filter { it >= weekAgoDayKey }.toSet().size
+            }
+            val readingDaysThisWeek = remember(glucoseReadings, nowMillis) {
+                glucoseReadings.mapNotNull { doc ->
+                    val ts = (doc.values["measuredAt"] as? Timestamp) ?: (doc.values["createdAt"] as? Timestamp)
+                    ts?.toDate()?.time?.let { com.nirogbhumi.app.ui.localDayKey(it) }
+                }.filter { it >= weekAgoDayKey }.toSet().size
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Card(
+                    modifier = Modifier.weight(1f).border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.3f), shape = RoundedCornerShape(18.dp)),
+                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    shape = RoundedCornerShape(18.dp),
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Text("$readingDaysThisWeek/7", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+                        Text("days with a sugar reading", fontSize = 11.sp, color = Color(0xFF737972))
+                    }
+                }
+                Card(
+                    modifier = Modifier.weight(1f).border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.3f), shape = RoundedCornerShape(18.dp)),
+                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    shape = RoundedCornerShape(18.dp),
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Text("$sleepDaysThisWeek/7", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+                        Text("nights of sleep logged", fontSize = 11.sp, color = Color(0xFF737972))
+                    }
+                }
+            }
+
+            Divider(color = Color(0xFFC3C8C0).copy(alpha = 0.3f))
+
+            // Experiment CTA - real progress: nights of 7+ hours actually
+            // logged since starting, not a manually-incremented counter.
             Text("Resolve the correlation pattern", fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+
+            val nightsSinceStart = remember(sleepLogs, state.experimentStartedAtMillis) {
+                if (state.experimentStartedAtMillis <= 0) 0 else sleepLogs.count { log ->
+                    val ts = (log.values["measuredAt"] as? Timestamp) ?: (log.values["createdAt"] as? Timestamp)
+                    val hours = (log.values["duration"] as? Number)?.toDouble() ?: 0.0
+                    ts != null && ts.toDate().time >= state.experimentStartedAtMillis && hours >= 7.0
+                }
+            }
+            val experimentDaysElapsed = remember(state.experimentStartedAtMillis) {
+                if (state.experimentStartedAtMillis <= 0) 0 else
+                    (((System.currentTimeMillis() - state.experimentStartedAtMillis) / (1000L * 60 * 60 * 24)) + 1).toInt().coerceAtMost(7)
+            }
+            LaunchedEffect(experimentDaysElapsed) {
+                if (state.isExperimentActive && experimentDaysElapsed >= 7) state.isExperimentActive = false
+            }
 
             Card(
                 modifier = Modifier
@@ -827,7 +953,7 @@ fun InsightDetailScreen(state: NirogState) {
                     Text("ACTIVE EXPERIMENT", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF426820))
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = if (state.isExperimentActive) "Experiment Active: Day ${state.experimentDayCount} of 7" else "7-Day Rest Reset Experiment",
+                        text = if (state.isExperimentActive) "Experiment Active: Day $experimentDaysElapsed of 7" else "7-Day Rest Reset Experiment",
                         fontSize = 18.sp,
                         fontFamily = FontFamily.Serif,
                         fontWeight = FontWeight.Bold,
@@ -835,7 +961,10 @@ fun InsightDetailScreen(state: NirogState) {
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        "We challenge you to log at least seven hours of restful sleep daily for the next week. Observe if this aligns fasting sugars down to sub-100 ranges.",
+                        if (state.isExperimentActive)
+                            "$nightsSinceStart of $experimentDaysElapsed nights so far had 7+ hours logged. Keep logging sleep and sugar readings to see if it lines up with lower fasting numbers."
+                        else
+                            "We challenge you to log at least seven hours of restful sleep daily for the next week - tracked from your real sleep logs, not a manual checkbox.",
                         fontSize = 13.sp,
                         color = Color(0xFF434842),
                         lineHeight = 18.sp
@@ -847,7 +976,7 @@ fun InsightDetailScreen(state: NirogState) {
                         onClick = {
                             state.isExperimentActive = !state.isExperimentActive
                             if (state.isExperimentActive) {
-                                state.experimentDayCount = 1
+                                state.experimentStartedAtMillis = System.currentTimeMillis()
                             }
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF314936)),
@@ -1038,6 +1167,29 @@ fun ProfileScreen(state: NirogState) {
     val context = LocalContext.current
     var updateCheckMessage by remember { mutableStateOf<String?>(null) }
     var checkingUpdate by remember { mutableStateOf(false) }
+    var uploadingPhoto by remember { mutableStateOf(false) }
+    val photoPickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        uploadingPhoto = true
+        state.repository.uploadPrivateFile("profile-photo", uri) { uploadResult ->
+            when (uploadResult) {
+                is com.nirogbhumi.app.data.CloudResult.Success -> {
+                    val url = uploadResult.value
+                    state.repository.saveProfile(mapOf("photoUrl" to url)) { saveResult ->
+                        uploadingPhoto = false
+                        when (saveResult) {
+                            is com.nirogbhumi.app.data.CloudResult.Success -> state.photoUrl = url
+                            is com.nirogbhumi.app.data.CloudResult.Failure -> state.cloudMessage = saveResult.message
+                        }
+                    }
+                }
+                is com.nirogbhumi.app.data.CloudResult.Failure -> {
+                    uploadingPhoto = false
+                    state.cloudMessage = uploadResult.message
+                }
+            }
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -1061,13 +1213,43 @@ fun ProfileScreen(state: NirogState) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(
-                modifier = Modifier.size(56.dp).clip(CircleShape).background(Color(0xFF314936)),
+                modifier = Modifier
+                    .size(56.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFF314936))
+                    .clickable(enabled = !uploadingPhoto) { photoPickerLauncher.launch("image/*") },
                 contentAlignment = Alignment.Center
             ) {
-                Text(
-                    state.profileName.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?",
-                    color = Color.White, fontWeight = FontWeight.Bold, fontSize = 22.sp
-                )
+                if (state.photoUrl.isNotBlank()) {
+                    coil.compose.AsyncImage(
+                        model = state.photoUrl,
+                        contentDescription = "Your profile photo",
+                        modifier = Modifier.fillMaxSize().clip(CircleShape),
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                    )
+                } else {
+                    Text(
+                        state.profileName.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?",
+                        color = Color.White, fontWeight = FontWeight.Bold, fontSize = 22.sp
+                    )
+                }
+                if (uploadingPhoto) {
+                    Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.45f)), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = Color.White)
+                    }
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .size(20.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFFC9A24B))
+                            .border(1.5.dp, Color.White, CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Filled.PhotoCamera, contentDescription = "Change profile photo", tint = Color.White, modifier = Modifier.size(12.dp))
+                    }
+                }
             }
             Spacer(modifier = Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {
@@ -2027,7 +2209,7 @@ fun FamilyMemberDetailScreen(state: NirogState) {
 fun OrdersScreen(state: NirogState) {
     var records by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>?>(null) }
     DisposableEffect(Unit) {
-        val subscription = state.repository.listenUserCollection("orders", 30) { result ->
+        val subscription = state.repository.listenUserCollection("orders", 30, orderByField = "createdAt", descending = true) { result ->
             records = when (result) {
                 is com.nirogbhumi.app.data.CloudResult.Success -> result.value
                 is com.nirogbhumi.app.data.CloudResult.Failure -> emptyList()
@@ -2107,7 +2289,7 @@ private fun OrderStatusBadge(status: String) {
 fun NotificationInboxScreen(state: NirogState) {
     var records by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>?>(null) }
     DisposableEffect(Unit) {
-        val subscription = state.repository.listenUserCollection("notifications", 30) { result ->
+        val subscription = state.repository.listenUserCollection("notifications", 30, orderByField = "createdAt", descending = true) { result ->
             records = when (result) {
                 is com.nirogbhumi.app.data.CloudResult.Success -> result.value
                 is com.nirogbhumi.app.data.CloudResult.Failure -> emptyList()
@@ -2139,19 +2321,25 @@ fun NotificationInboxScreen(state: NirogState) {
             records!!.isEmpty() -> EmptyStateCard(Icons.Filled.NotificationsNone, "No notifications yet. Health reminders, order and consultation updates will show up here.")
             else -> Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 records!!.sortedByDescending { (it.values["createdAt"] as? com.google.firebase.Timestamp)?.seconds ?: 0 }.forEach { record ->
-                    val category = record.values["category"]?.toString() ?: "update"
+                    // Cloud Functions always stamp "type" (critical_alert, announcement,
+                    // coach_message, report, weekly_digest, reminder) - this used to read
+                    // a "category" field nothing ever wrote, so every notification fell
+                    // through to the generic bell icon regardless of its real kind.
+                    val type = record.values["type"]?.toString() ?: "update"
                     val title = record.values["title"]?.toString() ?: "Nirog Bhumi"
                     val body = record.values["body"]?.toString().orEmpty()
                     val route = record.values["route"]?.toString() ?: "dashboard"
                     val timestamp = (record.values["createdAt"] as? com.google.firebase.Timestamp)?.toDate()
                     val relative = timestamp?.let { relativeTimeLabel(it) } ?: ""
-                    val icon = when (category) {
+                    val icon = when (type) {
                         "reminder" -> Icons.Filled.NotificationsActive
+                        "critical_alert" -> Icons.Filled.NotificationsActive
                         "order" -> Icons.Filled.ShoppingBag
                         "consultation" -> Icons.Filled.MedicalServices
+                        "announcement" -> Icons.Filled.Campaign
                         "program" -> Icons.Filled.Checklist
-                        "report" -> Icons.Filled.Insights
-                        "expert_message" -> Icons.Filled.Person
+                        "report", "weekly_digest" -> Icons.Filled.Insights
+                        "coach_message", "expert_message" -> Icons.Filled.Person
                         else -> Icons.Filled.Notifications
                     }
                     Card(
@@ -2580,16 +2768,16 @@ private fun ReminderToggleRow(label: String, checked: Boolean, showDivider: Bool
     }
 }
 
-// Care+ program calendar - a simple day-by-day agenda rather than a full month-grid
-// widget, since a program's meaningful unit is "day N of the program," not a
-// specific calendar date; today is highlighted so members always know where they are.
+// Care+ program calendar: a real month-grid, since "is there a session on the
+// 14th" is a calendar-shaped question, not a linear-scroll one. Days with a
+// scheduled programEvent get a dot marker; tapping any day shows that day's
+// schedule below the grid, defaulting to today's on open.
 @Composable
 fun ProgramCalendarScreen(state: NirogState) {
     val context = LocalContext.current
     val totalDays = state.programDurationDays.toInt().coerceAtLeast(1)
     val startMillis = state.programStartedAtMillis.takeIf { it > 0 } ?: System.currentTimeMillis()
-    val todayIndex = (((System.currentTimeMillis() - startMillis) / (1000L * 60 * 60 * 24)) + 1).toInt().coerceIn(1, totalDays)
-    val listState = rememberLazyListState(initialFirstVisibleItemIndex = (todayIndex - 3).coerceAtLeast(0))
+    val dayNumber = (((System.currentTimeMillis() - startMillis) / (1000L * 60 * 60 * 24)) + 1).toInt().coerceIn(1, totalDays)
 
     var events by remember { mutableStateOf<List<Map<String, Any?>>>(emptyList()) }
     DisposableEffect(state.activeProgramId) {
@@ -2599,108 +2787,141 @@ fun ProgramCalendarScreen(state: NirogState) {
         }
         onDispose { sub.cancel() }
     }
-    val upcoming = events.filter { ((it["startsAt"] as? Timestamp)?.toDate()?.time ?: 0L) >= System.currentTimeMillis() }
 
-    Column(modifier = Modifier.fillMaxSize().background(Color(0xFFF8F6EF))) {
+    val zone = remember { java.time.ZoneId.systemDefault() }
+    val today = remember { java.time.LocalDate.now(zone) }
+    var visibleMonth by remember { mutableStateOf(java.time.YearMonth.from(today)) }
+    var selectedDate by remember { mutableStateOf(today) }
+
+    val eventsByDay = remember(events) {
+        events.mapNotNull { event ->
+            val date = (event["startsAt"] as? Timestamp)?.toDate()?.toInstant()?.atZone(zone)?.toLocalDate()
+            if (date != null) date to event else null
+        }.groupBy({ it.first }, { it.second })
+    }
+
+    Column(modifier = Modifier.fillMaxSize().background(NirogColor.surface)) {
         DetailScreenHeader(state.activeProgramName.ifBlank { "Program Calendar" }, onBack = { state.currentScreen = "dashboard" })
 
-        if (upcoming.isNotEmpty()) {
+        Text(
+            "Day $dayNumber of $totalDays", style = NirogType.caption, color = NirogColor.inkMuted,
+            modifier = Modifier.padding(horizontal = NirogSpace.xl)
+        )
+        Spacer(Modifier.height(NirogSpace.sm))
+
+        MonthGridCalendar(
+            visibleMonth = visibleMonth,
+            today = today,
+            selectedDate = selectedDate,
+            eventsByDay = eventsByDay,
+            onMonthChange = { visibleMonth = it },
+            onDaySelected = { selectedDate = it },
+        )
+
+        Spacer(Modifier.height(NirogSpace.lg))
+        Divider(color = NirogColor.surfaceSunken, thickness = 1.dp)
+        Spacer(Modifier.height(NirogSpace.md))
+
+        DaySchedulePanel(
+            date = selectedDate,
+            isToday = selectedDate == today,
+            dayEvents = eventsByDay[selectedDate].orEmpty().sortedBy { (it["startsAt"] as? Timestamp)?.toDate()?.time ?: 0L },
+            onRemind = { title, startsAt ->
+                EventReminderWorker.schedule(context, "${title}_${startsAt.time}", title, "Starting now - $title", startsAt.time)
+            },
+        )
+    }
+}
+
+@Composable
+private fun MonthGridCalendar(
+    visibleMonth: java.time.YearMonth,
+    today: java.time.LocalDate,
+    selectedDate: java.time.LocalDate,
+    eventsByDay: Map<java.time.LocalDate, List<Map<String, Any?>>>,
+    onMonthChange: (java.time.YearMonth) -> Unit,
+    onDaySelected: (java.time.LocalDate) -> Unit,
+) {
+    Column(modifier = Modifier.padding(horizontal = NirogSpace.lg)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = { onMonthChange(visibleMonth.minusMonths(1)) }) {
+                Icon(Icons.Filled.ChevronLeft, contentDescription = "Previous month", tint = NirogColor.inkPrimary)
+            }
             Text(
-                "UPCOMING EVENTS", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFFC7902F),
-                letterSpacing = 1.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
+                "${visibleMonth.month.getDisplayName(java.time.format.TextStyle.FULL, java.util.Locale.getDefault())} ${visibleMonth.year}",
+                style = NirogType.sectionHeading, color = NirogColor.inkPrimary,
             )
-            Column(modifier = Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                upcoming.forEach { event ->
-                    val title = event["title"] as? String ?: "Program event"
-                    val type = event["type"] as? String
-                    val description = event["description"] as? String
-                    val startsAt = (event["startsAt"] as? Timestamp)?.toDate()
-                    val location = event["location"] as? String
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(containerColor = Color.White),
-                        shape = RoundedCornerShape(18.dp)
-                    ) {
-                        Column(Modifier.padding(16.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(title, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFF1B2219), modifier = Modifier.weight(1f))
-                                if (type != null) {
-                                    Surface(color = Color(0xFFF4E9D3), shape = RoundedCornerShape(20.dp)) {
-                                        Text(type.uppercase(), fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFFB9832B), modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp))
+            IconButton(onClick = { onMonthChange(visibleMonth.plusMonths(1)) }) {
+                Icon(Icons.Filled.ChevronRight, contentDescription = "Next month", tint = NirogColor.inkPrimary)
+            }
+        }
+
+        Row(modifier = Modifier.fillMaxWidth().padding(top = NirogSpace.sm)) {
+            listOf("M", "T", "W", "T", "F", "S", "S").forEach { label ->
+                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    Text(label, style = NirogType.overline, color = NirogColor.inkMuted, maxLines = 1)
+                }
+            }
+        }
+
+        val firstOfMonth = visibleMonth.atDay(1)
+        val leadingBlanks = firstOfMonth.dayOfWeek.value - 1 // Monday=1..Sunday=7
+        val daysInMonth = visibleMonth.lengthOfMonth()
+        val totalCells = leadingBlanks + daysInMonth
+        val rows = (totalCells + 6) / 7
+
+        Column(modifier = Modifier.padding(top = NirogSpace.xs)) {
+            for (row in 0 until rows) {
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    for (col in 0 until 7) {
+                        val cellIndex = row * 7 + col
+                        val dayOfMonth = cellIndex - leadingBlanks + 1
+                        Box(
+                            modifier = Modifier.weight(1f).aspectRatio(1f).padding(2.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (dayOfMonth in 1..daysInMonth) {
+                                val date = visibleMonth.atDay(dayOfMonth)
+                                val isToday = date == today
+                                val isSelected = date == selectedDate
+                                val hasEvents = eventsByDay.containsKey(date)
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .clip(CircleShape)
+                                        .then(
+                                            when {
+                                                isSelected -> Modifier.background(NirogColor.forest)
+                                                isToday -> Modifier.border(1.5.dp, NirogColor.forest, CircleShape)
+                                                else -> Modifier
+                                            }
+                                        )
+                                        .clickable { onDaySelected(date) },
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text(
+                                            dayOfMonth.toString(),
+                                            style = NirogType.body,
+                                            color = if (isSelected) NirogColor.onAccent else NirogColor.inkPrimary,
+                                            fontWeight = if (isToday || isSelected) FontWeight.Bold else FontWeight.Normal,
+                                        )
+                                        if (hasEvents) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .padding(top = 2.dp)
+                                                    .size(4.dp)
+                                                    .clip(CircleShape)
+                                                    .background(if (isSelected) NirogColor.onAccent else NirogColor.gold)
+                                            )
+                                        }
                                     }
                                 }
                             }
-                            if (startsAt != null) {
-                                Text(
-                                    java.text.SimpleDateFormat("EEE, d MMM · h:mm a", java.util.Locale.getDefault()).format(startsAt),
-                                    fontSize = 12.sp, color = Color(0xFF697169), modifier = Modifier.padding(top = 4.dp)
-                                )
-                            }
-                            if (!location.isNullOrBlank()) {
-                                Text(location, fontSize = 12.sp, color = Color(0xFF697169))
-                            }
-                            if (!description.isNullOrBlank()) {
-                                Text(description, fontSize = 12.5.sp, color = Color(0xFF434842), modifier = Modifier.padding(top = 6.dp))
-                            }
-                            if (startsAt != null) {
-                                TextButton(
-                                    onClick = {
-                                        EventReminderWorker.schedule(context, "${title}_${startsAt.time}", title, "Starting now - $title", startsAt.time)
-                                    },
-                                    modifier = Modifier.padding(top = 4.dp)
-                                ) {
-                                    Icon(Icons.Filled.NotificationsActive, contentDescription = null, modifier = Modifier.size(14.dp), tint = Color(0xFF314936))
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Remind me", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF314936))
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            Spacer(modifier = Modifier.height(12.dp))
-        }
-
-        Text(
-            "Day $todayIndex of $totalDays", fontSize = 13.sp, color = Color(0xFF697169),
-            modifier = Modifier.padding(horizontal = 20.dp)
-        )
-        Spacer(modifier = Modifier.height(12.dp))
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            contentPadding = PaddingValues(bottom = 32.dp)
-        ) {
-            items(totalDays) { index ->
-                val dayNumber = index + 1
-                val dayDate = java.util.Date(startMillis + (dayNumber - 1) * 24L * 60 * 60 * 1000)
-                val isToday = dayNumber == todayIndex
-                val isPast = dayNumber < todayIndex
-                Card(
-                    modifier = Modifier.fillMaxWidth().then(
-                        if (isToday) Modifier.border(1.5.dp, Color(0xFF314936), RoundedCornerShape(16.dp)) else Modifier
-                    ),
-                    colors = CardDefaults.cardColors(containerColor = if (isToday) Color(0xFFEBF7E8) else Color.White),
-                    shape = RoundedCornerShape(16.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp).fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Day $dayNumber", fontWeight = FontWeight.Bold, color = Color(0xFF1B3221), fontSize = 14.sp)
-                            Text(
-                                java.text.SimpleDateFormat("EEEE, d MMMM", java.util.Locale.getDefault()).format(dayDate),
-                                fontSize = 12.sp, color = Color(0xFF697169)
-                            )
-                        }
-                        if (isToday) {
-                            Surface(color = Color(0xFF314936), shape = RoundedCornerShape(10.dp)) {
-                                Text("TODAY", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
-                            }
-                        } else if (isPast) {
-                            Icon(Icons.Filled.CheckCircle, contentDescription = "Past", tint = Color(0xFF9CB79F), modifier = Modifier.size(18.dp))
                         }
                     }
                 }
@@ -2709,9 +2930,83 @@ fun ProgramCalendarScreen(state: NirogState) {
     }
 }
 
-// Care+ admin announcement feed - read-only for regular program members, with a
-// compose action shown only when the signed-in account actually has the admin
-// custom claim (server-verified, not a client-trusted flag).
+@Composable
+private fun ColumnScope.DaySchedulePanel(
+    date: java.time.LocalDate,
+    isToday: Boolean,
+    dayEvents: List<Map<String, Any?>>,
+    onRemind: (String, java.util.Date) -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth().weight(1f).padding(horizontal = NirogSpace.xl)) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = NirogSpace.sm)) {
+            Text(
+                date.format(java.time.format.DateTimeFormatter.ofPattern("EEEE, d MMMM")),
+                style = NirogType.bodyStrong, color = NirogColor.inkPrimary, modifier = Modifier.weight(1f),
+            )
+            if (isToday) {
+                Surface(color = NirogColor.forest, shape = NirogRadius.pillShape) {
+                    Text("TODAY", style = NirogType.overline, color = NirogColor.onAccent, modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp))
+                }
+            }
+        }
+
+        if (dayEvents.isEmpty()) {
+            EmptyStateCard(Icons.Filled.EventAvailable, "No sessions scheduled for this day.")
+        } else {
+            Column(
+                modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(NirogSpace.sm),
+            ) {
+                dayEvents.forEach { event ->
+                    val title = event["title"] as? String ?: "Program event"
+                    val type = event["type"] as? String
+                    val description = event["description"] as? String
+                    val startsAt = (event["startsAt"] as? Timestamp)?.toDate()
+                    val location = event["location"] as? String
+                    NirogCard {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(title, style = NirogType.bodyStrong, color = NirogColor.inkPrimary, modifier = Modifier.weight(1f))
+                            if (type != null) {
+                                Surface(color = NirogColor.goldSoft, shape = NirogRadius.pillShape) {
+                                    Text(type.uppercase(), style = NirogType.overline, color = NirogColor.gold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp))
+                                }
+                            }
+                        }
+                        if (startsAt != null) {
+                            Text(
+                                java.text.SimpleDateFormat("h:mm a", java.util.Locale.getDefault()).format(startsAt),
+                                style = NirogType.caption, color = NirogColor.inkMuted, modifier = Modifier.padding(top = 4.dp)
+                            )
+                        }
+                        if (!location.isNullOrBlank()) {
+                            Text(location, style = NirogType.caption, color = NirogColor.inkMuted)
+                        }
+                        if (!description.isNullOrBlank()) {
+                            Text(description, style = NirogType.body, color = NirogColor.inkSecondary, modifier = Modifier.padding(top = 6.dp))
+                        }
+                        if (startsAt != null) {
+                            TextButton(onClick = { onRemind(title, startsAt) }, modifier = Modifier.padding(top = 4.dp)) {
+                                Icon(Icons.Filled.NotificationsActive, contentDescription = null, modifier = Modifier.size(14.dp), tint = NirogColor.forest)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Remind me", style = NirogType.secondary, color = NirogColor.forest)
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(NirogSpace.xxl))
+            }
+        }
+    }
+}
+
+// Care+ admin announcement feed, styled as a WhatsApp-Community-style
+// broadcast channel: one channel identity posts (never an individual
+// member), every post fans out to the whole batch, and there is no reply/
+// compose surface for regular members - read-only by design, not just by
+// omission. The compose action only shows when the signed-in account
+// actually has server-side authorization to post to *this* program
+// (canManageProgram - admin, or the assigned coach), never a client-trusted
+// flag.
 @Composable
 fun AnnouncementsScreen(state: NirogState) {
     var records by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>?>(null) }
@@ -2740,18 +3035,38 @@ fun AnnouncementsScreen(state: NirogState) {
             "Announcements",
             onBack = { state.currentScreen = "dashboard" },
             trailing = {
-                if (state.isAdmin) {
+                if (state.canManageProgram(state.activeProgramId)) {
                     IconButton(onClick = { showComposer = true }) {
                         Icon(Icons.Filled.Add, contentDescription = "New announcement", tint = NirogColor.forest)
                     }
                 }
             }
         )
-        Text(
-            "Updates from your coach · every member is notified",
-            style = NirogType.caption, color = NirogColor.inkMuted,
-            modifier = Modifier.padding(horizontal = NirogSpace.lg)
-        )
+        // Channel identity strip - a WhatsApp Community channel is a single
+        // broadcasting identity, not a thread of individual senders, so this
+        // renders once per screen rather than once per message.
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = NirogSpace.lg, vertical = NirogSpace.xs),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier.size(36.dp).clip(CircleShape).background(NirogColor.forest),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Filled.Campaign, contentDescription = null, tint = NirogColor.onAccent, modifier = Modifier.size(18.dp))
+            }
+            Spacer(Modifier.width(NirogSpace.sm))
+            Column {
+                Text(
+                    state.activeProgramName.ifBlank { "Your program" },
+                    style = NirogType.bodyStrong, color = NirogColor.inkPrimary,
+                )
+                Text(
+                    "Broadcast channel · only your coach posts here",
+                    style = NirogType.caption, color = NirogColor.inkMuted,
+                )
+            }
+        }
         Spacer(Modifier.height(NirogSpace.sm))
         Column(modifier = Modifier.fillMaxSize().weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = NirogSpace.lg)) {
             when {
@@ -2765,8 +3080,17 @@ fun AnnouncementsScreen(state: NirogState) {
                     records!!.forEach { record ->
                         val timestamp = (record.values["createdAt"] as? com.google.firebase.Timestamp)?.toDate()
                         NirogCard {
-                            Text(record.values["title"]?.toString() ?: "Announcement", style = NirogType.bodyStrong, color = NirogColor.inkPrimary)
-                            Spacer(modifier = Modifier.height(NirogSpace.xs))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier.size(28.dp).clip(CircleShape).background(NirogColor.forestSoft.copy(alpha = 0.25f)),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(Icons.Filled.Campaign, contentDescription = null, tint = NirogColor.forest, modifier = Modifier.size(14.dp))
+                                }
+                                Spacer(modifier = Modifier.width(NirogSpace.sm))
+                                Text(record.values["title"]?.toString() ?: "Announcement", style = NirogType.bodyStrong, color = NirogColor.inkPrimary, modifier = Modifier.weight(1f))
+                            }
+                            Spacer(modifier = Modifier.height(NirogSpace.sm))
                             Text(record.values["body"]?.toString().orEmpty(), style = NirogType.body, color = NirogColor.inkSecondary)
                             if (timestamp != null) {
                                 Spacer(modifier = Modifier.height(NirogSpace.sm))
@@ -2832,23 +3156,40 @@ private fun mentionAnnotatedText(text: String, mentionColor: Color): androidx.co
     }
 
 // One MediaPlayer per visible bubble (released via DisposableEffect when the
-// item scrolls out of the LazyColumn) - deliberately doesn't pause other
-// bubbles' playback when one starts, unlike WhatsApp. Acceptable v1 scope
-// cut: voice notes are short and this is a rare multi-tap scenario.
+// item scrolls out of the LazyColumn). activePlaybackId is hoisted to
+// ProgramChatScreen so starting one bubble's playback pauses whichever other
+// one was playing, matching WhatsApp instead of letting multiple notes overlap.
 @Composable
-private fun VoiceNoteBubble(url: String, durationSec: Int, isMine: Boolean) {
+private fun VoiceNoteBubble(
+    messageId: String,
+    url: String,
+    durationSec: Int,
+    isMine: Boolean,
+    activePlaybackId: String?,
+    onPlaybackStart: (String) -> Unit,
+) {
     var isPlaying by remember { mutableStateOf(false) }
     var isPrepared by remember { mutableStateOf(false) }
     var elapsedSec by remember { mutableStateOf(0) }
+    var dragFraction by remember { mutableStateOf<Float?>(null) }
     val player = remember { android.media.MediaPlayer() }
 
     DisposableEffect(url) {
         onDispose { runCatching { player.release() } }
     }
 
+    // Only one voice note plays at a time (WhatsApp behavior) - starting a
+    // different bubble's playback pauses this one instead of overlapping audio.
+    LaunchedEffect(activePlaybackId) {
+        if (activePlaybackId != messageId && isPlaying) {
+            runCatching { player.pause() }
+            isPlaying = false
+        }
+    }
+
     LaunchedEffect(isPlaying) {
         while (isPlaying) {
-            kotlinx.coroutines.delay(500)
+            kotlinx.coroutines.delay(200)
             elapsedSec = runCatching { player.currentPosition / 1000 }.getOrDefault(elapsedSec)
         }
     }
@@ -2859,6 +3200,7 @@ private fun VoiceNoteBubble(url: String, durationSec: Int, isMine: Boolean) {
             isPlaying = false
             return
         }
+        onPlaybackStart(messageId)
         if (isPrepared) {
             runCatching { player.start() }
             isPlaying = true
@@ -2882,21 +3224,50 @@ private fun VoiceNoteBubble(url: String, durationSec: Int, isMine: Boolean) {
 
     Row(
         modifier = Modifier
+            .widthIn(min = 200.dp)
             .clip(NirogRadius.pillShape)
             .background(if (isMine) Color.White.copy(alpha = 0.12f) else NirogColor.surfaceSunken)
-            .clickable { togglePlayback() }
-            .semantics { contentDescription = if (isPlaying) "Pause voice note" else "Play voice note" }
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .padding(horizontal = 10.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(if (isPlaying) "⏸" else "▶", style = NirogType.cardTitle, color = if (isMine) NirogColor.onAccent else NirogColor.forest)
-        Spacer(Modifier.width(8.dp))
-        val shownSec = if (isPlaying || elapsedSec > 0) elapsedSec else durationSec
-        Text(
-            "%d:%02d".format(shownSec / 60, shownSec % 60),
-            style = NirogType.caption,
-            color = if (isMine) NirogColor.onAccent.copy(alpha = 0.85f) else NirogColor.inkSecondary,
-        )
+        IconButton(
+            onClick = { togglePlayback() },
+            modifier = Modifier.size(32.dp).semantics { contentDescription = if (isPlaying) "Pause voice note" else "Play voice note" },
+        ) {
+            Text(if (isPlaying) "⏸" else "▶", style = NirogType.cardTitle, color = if (isMine) NirogColor.onAccent else NirogColor.forest)
+        }
+        Spacer(Modifier.width(4.dp))
+        val liveFraction = if (durationSec > 0) (elapsedSec.toFloat() / durationSec).coerceIn(0f, 1f) else 0f
+        val shownFraction = dragFraction ?: liveFraction
+        val shownSec = if (dragFraction != null) (dragFraction!! * durationSec).toInt() else if (isPlaying || elapsedSec > 0) elapsedSec else durationSec
+        Column(modifier = Modifier.weight(1f)) {
+            Slider(
+                value = shownFraction,
+                onValueChange = { if (isPrepared) dragFraction = it },
+                onValueChangeFinished = {
+                    dragFraction?.let { fraction ->
+                        runCatching { player.seekTo((fraction * durationSec * 1000).toInt()) }
+                        elapsedSec = (fraction * durationSec).toInt()
+                    }
+                    dragFraction = null
+                },
+                enabled = isPrepared,
+                modifier = Modifier.fillMaxWidth().height(20.dp),
+                colors = SliderDefaults.colors(
+                    thumbColor = if (isMine) NirogColor.onAccent else NirogColor.forest,
+                    activeTrackColor = if (isMine) NirogColor.onAccent else NirogColor.forest,
+                    inactiveTrackColor = if (isMine) Color.White.copy(alpha = 0.25f) else NirogColor.surface,
+                    disabledThumbColor = if (isMine) NirogColor.onAccent else NirogColor.forest,
+                    disabledActiveTrackColor = if (isMine) NirogColor.onAccent else NirogColor.forest,
+                    disabledInactiveTrackColor = if (isMine) Color.White.copy(alpha = 0.25f) else NirogColor.surface,
+                ),
+            )
+            Text(
+                "%d:%02d".format(shownSec / 60, shownSec % 60),
+                style = NirogType.caption,
+                color = if (isMine) NirogColor.onAccent.copy(alpha = 0.85f) else NirogColor.inkSecondary,
+            )
+        }
     }
 }
 
@@ -2941,6 +3312,58 @@ private fun TypingIndicatorRow(names: List<String>) {
     }
 }
 
+// The no-arg MediaRecorder() constructor is deprecated from API 31 onward in
+// favor of the context-aware overload; isolated in its own function so the
+// suppression is scoped to exactly the one legacy call path instead of an
+// entire block.
+@Suppress("DEPRECATION")
+private fun newMediaRecorder(context: android.content.Context): android.media.MediaRecorder =
+    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) android.media.MediaRecorder(context) else android.media.MediaRecorder()
+
+// A raw picked photo can be several MB at full camera resolution - uploading
+// that as-is (the previous behavior) made sends slow and data-heavy on a poor
+// connection, unlike WhatsApp which always compresses before sending. Downscale
+// to a chat-appropriate size and re-encode as JPEG; also corrects orientation,
+// since a bitmap decoded straight off a content:// Uri ignores EXIF rotation
+// (only gallery apps that read EXIF themselves show it right-side-up).
+private fun compressImageForChat(context: android.content.Context, uri: Uri, maxDimension: Int = 1600, quality: Int = 82): Uri {
+    val resolver = context.contentResolver
+    val orientation = resolver.openInputStream(uri)?.use { stream ->
+        runCatching { android.media.ExifInterface(stream).getAttributeInt(android.media.ExifInterface.TAG_ORIENTATION, android.media.ExifInterface.ORIENTATION_NORMAL) }
+            .getOrDefault(android.media.ExifInterface.ORIENTATION_NORMAL)
+    } ?: android.media.ExifInterface.ORIENTATION_NORMAL
+
+    val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    resolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, bounds) }
+    var sampleSize = 1
+    while (bounds.outWidth / sampleSize > maxDimension * 2 || bounds.outHeight / sampleSize > maxDimension * 2) sampleSize *= 2
+
+    val decoded = resolver.openInputStream(uri)?.use {
+        android.graphics.BitmapFactory.decodeStream(it, null, android.graphics.BitmapFactory.Options().apply { inSampleSize = sampleSize })
+    } ?: throw IllegalStateException("Could not read the photo")
+
+    val scale = maxDimension.toFloat() / maxOf(decoded.width, decoded.height)
+    val resized = if (scale < 1f) {
+        android.graphics.Bitmap.createScaledBitmap(decoded, (decoded.width * scale).toInt().coerceAtLeast(1), (decoded.height * scale).toInt().coerceAtLeast(1), true)
+    } else decoded
+
+    val matrix = android.graphics.Matrix().apply {
+        when (orientation) {
+            android.media.ExifInterface.ORIENTATION_ROTATE_90 -> postRotate(90f)
+            android.media.ExifInterface.ORIENTATION_ROTATE_180 -> postRotate(180f)
+            android.media.ExifInterface.ORIENTATION_ROTATE_270 -> postRotate(270f)
+        }
+    }
+    val oriented = if (!matrix.isIdentity) {
+        android.graphics.Bitmap.createBitmap(resized, 0, 0, resized.width, resized.height, matrix, true)
+    } else resized
+
+    val dir = java.io.File(context.cacheDir, "chat-photos").apply { mkdirs() }
+    val outFile = java.io.File(dir, "photo_${System.currentTimeMillis()}.jpg")
+    java.io.FileOutputStream(outFile).use { out -> oriented.compress(android.graphics.Bitmap.CompressFormat.JPEG, quality, out) }
+    return androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.files", outFile)
+}
+
 // Care+ community chat - one shared room per program, not one global room, so
 // conversation stays relevant to the program a member actually joined.
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
@@ -2960,25 +3383,42 @@ fun ProgramChatScreen(state: NirogState) {
     var uploadingAudio by remember { mutableStateOf(false) }
     var typingStatuses by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>>(emptyList()) }
     var typingTickMillis by remember { mutableStateOf(System.currentTimeMillis()) }
+    var viewingPhotoUrl by remember { mutableStateOf<String?>(null) }
+    // Only one voice note plays at a time - starting another pauses this one.
+    var activePlaybackId by remember { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
     val myUid = state.repository.userId
     val context = LocalContext.current
     val recorderHolder = remember { mutableStateOf<android.media.MediaRecorder?>(null) }
     val recordingFileHolder = remember { mutableStateOf<java.io.File?>(null) }
-    val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+    // The modern system Photo Picker (androidx.activity 1.7+) - unlike
+    // ACTION_GET_CONTENT it needs no storage permission at all on any OS
+    // version and is Google's current recommendation, so there's no
+    // permission-grant edge case that can silently swallow a pick.
+    val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) pendingPhotoUri = uri
     }
 
     fun startRecording() {
         val file = java.io.File.createTempFile("voice_note_", ".m4a", context.cacheDir)
-        @Suppress("DEPRECATION")
-        val recorder = android.media.MediaRecorder().apply {
+        val recorder = newMediaRecorder(context).apply {
             setAudioSource(android.media.MediaRecorder.AudioSource.MIC)
             setOutputFormat(android.media.MediaRecorder.OutputFormat.MPEG_4)
             setAudioEncoder(android.media.MediaRecorder.AudioEncoder.AAC)
             setOutputFile(file.absolutePath)
-            runCatching { prepare(); start() }
+        }
+        // prepare()/start() throw if the mic is held by another app or the
+        // device has no microphone - previously swallowed by runCatching
+        // while isRecording was still set true unconditionally, leaving the
+        // UI stuck showing "Recording..." for a voice note that never
+        // actually started and could never be stopped successfully.
+        val started = runCatching { recorder.prepare(); recorder.start() }.isSuccess
+        if (!started) {
+            runCatching { recorder.release() }
+            file.delete()
+            state.cloudMessage = "Couldn't access the microphone - it may be in use by another app"
+            return
         }
         recorderHolder.value = recorder
         recordingFileHolder.value = file
@@ -3023,6 +3463,19 @@ fun ProgramChatScreen(state: NirogState) {
                 }
             }
         }
+    }
+
+    // WhatsApp-style discard: stop the recorder and throw the file away instead
+    // of sending it - previously the only way out of a recording was to send it
+    // (or let it fail the <1s check), with no way to just change your mind.
+    fun cancelRecording() {
+        isRecording = false
+        val recorder = recorderHolder.value
+        val file = recordingFileHolder.value
+        recorderHolder.value = null
+        recordingFileHolder.value = null
+        runCatching { recorder?.apply { stop(); release() } }
+        file?.delete()
     }
 
     val micPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -3116,7 +3569,7 @@ fun ProgramChatScreen(state: NirogState) {
                         style = NirogType.caption, color = NirogColor.inkSecondary, maxLines = 2,
                     )
                 }
-                if (state.isAdmin) {
+                if (state.canManageProgram(state.activeProgramId)) {
                     IconButton(onClick = {
                         state.repository.togglePinMessage(pinned.id, state.activeProgramId, pinned = false) { result ->
                             if (result is com.nirogbhumi.app.data.CloudResult.Failure) state.cloudMessage = result.message
@@ -3148,6 +3601,7 @@ fun ProgramChatScreen(state: NirogState) {
                     val photoUrl = record.values["photoUrl"]?.toString()
                     val audioUrl = record.values["audioUrl"]?.toString()
                     val audioDurationSec = (record.values["audioDurationSec"] as? Number)?.toInt() ?: 0
+                    val sentAt = (record.values["createdAt"] as? Timestamp)?.toDate()
                     @Suppress("UNCHECKED_CAST")
                     val replyTo = record.values["replyTo"] as? Map<String, Any?>
                     @Suppress("UNCHECKED_CAST")
@@ -3157,65 +3611,97 @@ fun ProgramChatScreen(state: NirogState) {
                         modifier = Modifier.fillMaxWidth().animateItem(),
                         horizontalAlignment = if (isMine) Alignment.End else Alignment.Start,
                     ) {
-                        Column(
-                            modifier = Modifier
-                                .widthIn(max = 280.dp)
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(if (isMine) NirogColor.forest else NirogColor.surfaceCard)
-                                .then(if (isMine) Modifier else Modifier.border(0.5.dp, NirogColor.surfaceSunken, RoundedCornerShape(16.dp)))
-                                .combinedClickable(onClick = {}, onLongClick = { actionTarget = record })
-                                .padding(horizontal = 14.dp, vertical = 10.dp)
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.Bottom,
                         ) {
-                            if (!isMine) Text(senderName, style = NirogType.overline, color = NirogColor.forestSoft)
-                            if (replyTo != null) {
-                                Column(
-                                    modifier = Modifier
-                                        .padding(top = 4.dp, bottom = 6.dp)
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .background(
-                                            if (isMine) Color.White.copy(alpha = 0.12f) else NirogColor.surfaceSunken
-                                        )
-                                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                            if (!isMine) {
+                                Box(
+                                    modifier = Modifier.size(28.dp).clip(CircleShape).background(NirogColor.forestSoft),
+                                    contentAlignment = Alignment.Center,
                                 ) {
                                     Text(
-                                        replyTo["sender"]?.toString() ?: "Member",
-                                        style = NirogType.overline,
-                                        color = if (isMine) NirogColor.goldSoft else NirogColor.gold,
-                                    )
-                                    Text(
-                                        replyTo["text"]?.toString().orEmpty(),
-                                        style = NirogType.caption,
-                                        color = if (isMine) NirogColor.onAccent.copy(alpha = 0.85f) else NirogColor.inkSecondary,
-                                        maxLines = 2,
+                                        senderName.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?",
+                                        style = NirogType.caption, color = NirogColor.forest, fontWeight = FontWeight.Bold,
                                     )
                                 }
                             }
-                            if (photoUrl != null) {
-                                coil.compose.AsyncImage(
-                                    model = photoUrl, contentDescription = "Photo from $senderName",
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .heightIn(max = 220.dp)
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .then(if (text.isNotBlank()) Modifier.padding(bottom = 6.dp) else Modifier),
-                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                                )
+                            Column(
+                                modifier = Modifier
+                                    .widthIn(max = 260.dp)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(if (isMine) NirogColor.forest else NirogColor.surfaceCard)
+                                    .then(if (isMine) Modifier else Modifier.border(0.5.dp, NirogColor.surfaceSunken, RoundedCornerShape(16.dp)))
+                                    .combinedClickable(onClick = {}, onLongClick = { actionTarget = record })
+                                    .padding(horizontal = 14.dp, vertical = 10.dp)
+                            ) {
+                                if (!isMine) Text(senderName, style = NirogType.overline, color = NirogColor.forestSoft)
+                                if (replyTo != null) {
+                                    Column(
+                                        modifier = Modifier
+                                            .padding(top = 4.dp, bottom = 6.dp)
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(
+                                                if (isMine) Color.White.copy(alpha = 0.12f) else NirogColor.surfaceSunken
+                                            )
+                                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                                    ) {
+                                        Text(
+                                            replyTo["sender"]?.toString() ?: "Member",
+                                            style = NirogType.overline,
+                                            color = if (isMine) NirogColor.goldSoft else NirogColor.gold,
+                                        )
+                                        Text(
+                                            replyTo["text"]?.toString().orEmpty(),
+                                            style = NirogType.caption,
+                                            color = if (isMine) NirogColor.onAccent.copy(alpha = 0.85f) else NirogColor.inkSecondary,
+                                            maxLines = 2,
+                                        )
+                                    }
+                                }
+                                if (photoUrl != null) {
+                                    coil.compose.AsyncImage(
+                                        model = photoUrl, contentDescription = "Photo from $senderName - tap to view full screen",
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .heightIn(max = 220.dp)
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .clickable { viewingPhotoUrl = photoUrl }
+                                            .then(if (text.isNotBlank()) Modifier.padding(bottom = 6.dp) else Modifier),
+                                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                    )
+                                }
+                                if (audioUrl != null) {
+                                    VoiceNoteBubble(
+                                        messageId = record.id,
+                                        url = audioUrl,
+                                        durationSec = audioDurationSec,
+                                        isMine = isMine,
+                                        activePlaybackId = activePlaybackId,
+                                        onPlaybackStart = { activePlaybackId = it },
+                                    )
+                                }
+                                if (text.isNotBlank()) {
+                                    Text(
+                                        mentionAnnotatedText(text, mentionColor = if (isMine) NirogColor.goldSoft else NirogColor.gold),
+                                        style = NirogType.body.copy(color = if (isMine) NirogColor.onAccent else NirogColor.inkPrimary),
+                                    )
+                                }
                             }
-                            if (audioUrl != null) {
-                                VoiceNoteBubble(audioUrl, audioDurationSec, isMine)
-                            }
-                            if (text.isNotBlank()) {
-                                Text(
-                                    mentionAnnotatedText(text, mentionColor = if (isMine) NirogColor.goldSoft else NirogColor.gold),
-                                    style = NirogType.body.copy(color = if (isMine) NirogColor.onAccent else NirogColor.inkPrimary),
-                                )
-                            }
+                        }
+
+                        if (sentAt != null) {
+                            Text(
+                                java.text.SimpleDateFormat("h:mm a", java.util.Locale.getDefault()).format(sentAt),
+                                style = NirogType.caption, color = NirogColor.inkMuted,
+                                modifier = Modifier.padding(top = 2.dp, start = if (isMine) 0.dp else 34.dp, end = if (isMine) 4.dp else 0.dp),
+                            )
                         }
 
                         if (reactions.isNotEmpty()) {
                             Row(
-                                modifier = Modifier.padding(top = 4.dp),
+                                modifier = Modifier.padding(top = 4.dp, start = if (isMine) 0.dp else 34.dp),
                                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                             ) {
                                 reactions.forEach { (emoji, uidsAny) ->
@@ -3297,28 +3783,54 @@ fun ProgramChatScreen(state: NirogState) {
         ) {
             IconButton(
                 enabled = !uploadingPhoto && !sending && !isRecording && !uploadingAudio,
-                onClick = { photoPicker.launch("image/*") },
+                onClick = { photoPicker.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
                 modifier = Modifier.semantics { contentDescription = "Attach a photo" },
             ) {
-                Text("📷", style = NirogType.cardTitle)
+                Icon(Icons.Filled.AddPhotoAlternate, contentDescription = null, tint = NirogColor.forest)
             }
-            IconButton(
-                enabled = !uploadingPhoto && !sending && !uploadingAudio,
-                onClick = {
-                    if (isRecording) {
-                        stopRecordingAndSend()
-                    } else if (androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                        startRecording()
+            // Mic hides once there's something to send (text or a pending
+            // photo) - WhatsApp-style mic-to-send handoff - rather than
+            // showing mic and send simultaneously at all times.
+            val showMic = messageInput.isBlank() && pendingPhotoUri == null
+            if (isRecording) {
+                IconButton(
+                    onClick = { cancelRecording() },
+                    modifier = Modifier.semantics { contentDescription = "Discard voice note" },
+                ) {
+                    Icon(Icons.Filled.Delete, contentDescription = null, tint = NirogColor.inkMuted)
+                }
+            }
+            if (showMic || isRecording) {
+                val recordingPulse = rememberInfiniteTransition(label = "recording-pulse")
+                val pulseScale by recordingPulse.animateFloat(
+                    initialValue = 1f, targetValue = 1.18f,
+                    animationSpec = infiniteRepeatable(animation = tween(600), repeatMode = RepeatMode.Reverse),
+                    label = "recording-pulse-scale",
+                )
+                IconButton(
+                    enabled = !uploadingPhoto && !sending && !uploadingAudio,
+                    onClick = {
+                        if (isRecording) {
+                            stopRecordingAndSend()
+                        } else if (androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                            startRecording()
+                        } else {
+                            micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                        }
+                    },
+                    modifier = Modifier
+                        .then(if (isRecording) Modifier.graphicsLayer(scaleX = pulseScale, scaleY = pulseScale) else Modifier)
+                        .semantics { contentDescription = if (isRecording) "Stop and send voice note" else "Record a voice note" },
+                ) {
+                    if (uploadingAudio) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = NirogColor.forestSoft)
                     } else {
-                        micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                        Icon(
+                            if (isRecording) Icons.Filled.Stop else Icons.Filled.Mic,
+                            contentDescription = null,
+                            tint = if (isRecording) NirogColor.statusCritical else NirogColor.forest,
+                        )
                     }
-                },
-                modifier = Modifier.semantics { contentDescription = if (isRecording) "Stop and send voice note" else "Record a voice note" },
-            ) {
-                if (uploadingAudio) {
-                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = NirogColor.forestSoft)
-                } else {
-                    Text(if (isRecording) "⏹" else "🎤", style = NirogType.cardTitle, color = if (isRecording) NirogColor.statusCritical else Color.Unspecified)
                 }
             }
             if (isRecording) {
@@ -3340,7 +3852,7 @@ fun ProgramChatScreen(state: NirogState) {
             )
             Spacer(modifier = Modifier.width(NirogSpace.sm))
             IconButton(
-                enabled = !sending && !uploadingPhoto && !isRecording && !uploadingAudio,
+                enabled = !sending && !uploadingPhoto && !isRecording && !uploadingAudio && (messageInput.isNotBlank() || pendingPhotoUri != null),
                 onClick = {
                     val text = messageInput.trim()
                     val photo = pendingPhotoUri
@@ -3370,18 +3882,26 @@ fun ProgramChatScreen(state: NirogState) {
 
                     if (photo != null) {
                         uploadingPhoto = true
-                        state.repository.uploadProgramChatPhoto(state.activeProgramId, photo) { result ->
-                            uploadingPhoto = false
-                            when (result) {
-                                is com.nirogbhumi.app.data.CloudResult.Success -> send(result.value)
-                                is com.nirogbhumi.app.data.CloudResult.Failure -> state.cloudMessage = result.message
+                        coroutineScope.launch {
+                            val compressed = runCatching {
+                                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { compressImageForChat(context, photo) }
+                            }.getOrDefault(photo) // fall back to the original pick rather than blocking the send on a compression bug
+                            state.repository.uploadProgramChatPhoto(state.activeProgramId, compressed) { result ->
+                                uploadingPhoto = false
+                                when (result) {
+                                    is com.nirogbhumi.app.data.CloudResult.Success -> send(result.value)
+                                    is com.nirogbhumi.app.data.CloudResult.Failure -> state.cloudMessage = result.message
+                                }
                             }
                         }
                     } else {
                         send(null)
                     }
                 },
-                modifier = Modifier.size(48.dp).background(NirogColor.forest, CircleShape)
+                modifier = Modifier.size(48.dp).background(
+                    if (messageInput.isNotBlank() || pendingPhotoUri != null) NirogColor.forest else NirogColor.surfaceSunken,
+                    CircleShape,
+                )
             ) {
                 Icon(Icons.Filled.Send, contentDescription = "Send", tint = NirogColor.onAccent, modifier = Modifier.size(20.dp))
             }
@@ -3423,7 +3943,7 @@ fun ProgramChatScreen(state: NirogState) {
                         },
                         onClick = { replyTarget = target; actionTarget = null },
                     )
-                    if (state.isAdmin) {
+                    if (state.canManageProgram(state.activeProgramId)) {
                         val isPinned = target.values["pinned"] == true
                         RowCard(
                             title = if (isPinned) "Unpin message" else "Pin message",
@@ -3482,6 +4002,30 @@ fun ProgramChatScreen(state: NirogState) {
             },
             dismissButton = { TextButton(onClick = { reportTarget = null }, enabled = !reporting) { Text("Cancel", color = NirogColor.inkSecondary) } }
         )
+    }
+
+    viewingPhotoUrl?.let { url ->
+        Dialog(onDismissRequest = { viewingPhotoUrl = null }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black)
+                    .clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) { viewingPhotoUrl = null },
+                contentAlignment = Alignment.Center,
+            ) {
+                coil.compose.AsyncImage(
+                    model = url, contentDescription = "Full screen photo",
+                    modifier = Modifier.fillMaxWidth(),
+                    contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+                )
+                IconButton(
+                    onClick = { viewingPhotoUrl = null },
+                    modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(NirogSpace.md),
+                ) {
+                    Icon(Icons.Filled.Close, contentDescription = "Close", tint = Color.White)
+                }
+            }
+        }
     }
 }
 

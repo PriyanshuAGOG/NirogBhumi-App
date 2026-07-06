@@ -53,13 +53,13 @@ fun MainHub(state: NirogState) {
         val flags = booleanArrayOf(false, false, false)
         fun recompute() { state.checkedInToday = flags.any { it } }
         val subs = listOf(
-            state.repository.listenUserCollection("glucoseReadings", 5) { r ->
+            state.repository.listenUserCollection("glucoseReadings", 5, orderByField = "measuredAt", descending = true) { r ->
                 if (r is CloudResult.Success) { flags[0] = anyToday(r.value); recompute() }
             },
-            state.repository.listenUserCollection("bpReadings", 5) { r ->
+            state.repository.listenUserCollection("bpReadings", 5, orderByField = "createdAt", descending = true) { r ->
                 if (r is CloudResult.Success) { flags[1] = anyToday(r.value); recompute() }
             },
-            state.repository.listenUserCollection("weightLogs", 5) { r ->
+            state.repository.listenUserCollection("weightLogs", 5, orderByField = "createdAt", descending = true) { r ->
                 if (r is CloudResult.Success) { flags[2] = anyToday(r.value); recompute() }
             },
         )
@@ -88,7 +88,7 @@ fun MainHub(state: NirogState) {
                 onTabSelect = { state.activeTab = it }
             )
         },
-        containerColor = Color(0xFFF8F6EF),
+        containerColor = NirogColor.surface,
         // Top/bottom bars already apply statusBarsPadding()/navigationBarsPadding()
         // internally, so Scaffold must not reserve those insets a second time here -
         // that double-reservation was the cause of the large empty gaps above the
@@ -148,8 +148,8 @@ fun OnboardingTourOverlay(state: NirogState) {
             modifier = Modifier
                 .padding(24.dp)
                 .fillMaxWidth()
-                .background(Color(0xFFF8F6EF), RoundedCornerShape(24.dp))
-                .border(1.dp, Color(0xFF314936), RoundedCornerShape(24.dp))
+                .background(NirogColor.surface, RoundedCornerShape(24.dp))
+                .border(1.dp, NirogColor.forestSoft, RoundedCornerShape(24.dp))
                 .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
@@ -157,13 +157,13 @@ fun OnboardingTourOverlay(state: NirogState) {
             Box(
                 modifier = Modifier
                     .size(48.dp)
-                    .background(Color(0xFFE0ECDD), CircleShape),
+                    .background(NirogColor.surfaceAlt, CircleShape),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = Icons.Default.Stars,
                     contentDescription = "Feature Sparkle",
-                    tint = Color(0xFF314936),
+                    tint = NirogColor.forestSoft,
                     modifier = Modifier.size(28.dp)
                 )
             }
@@ -175,7 +175,7 @@ fun OnboardingTourOverlay(state: NirogState) {
                 fontSize = 20.sp,
                 fontFamily = FontFamily.Serif,
                 fontWeight = FontWeight.Bold,
-                color = Color(0xFF1B3221)
+                color = NirogColor.forest
             )
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -183,7 +183,7 @@ fun OnboardingTourOverlay(state: NirogState) {
             Text(
                 text = description,
                 fontSize = 14.sp,
-                color = Color(0xFF434842),
+                color = NirogColor.inkTertiary,
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                 lineHeight = 20.sp
             )
@@ -200,7 +200,7 @@ fun OnboardingTourOverlay(state: NirogState) {
                         modifier = Modifier
                             .size(if (i == step) 10.dp else 6.dp)
                             .background(
-                                color = if (i == step) Color(0xFF314936) else Color(0xFF1B3221).copy(alpha = 0.25f),
+                                color = if (i == step) NirogColor.forestSoft else NirogColor.forest.copy(alpha = 0.25f),
                                 shape = CircleShape
                             )
                     )
@@ -226,7 +226,7 @@ fun OnboardingTourOverlay(state: NirogState) {
                     }
                 },
                 modifier = Modifier.fillMaxWidth().height(48.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF314936)),
+                colors = ButtonDefaults.buttonColors(containerColor = NirogColor.forestSoft),
                 shape = RoundedCornerShape(24.dp)
             ) {
                 Text(
@@ -248,7 +248,7 @@ fun OnboardingTourOverlay(state: NirogState) {
                         }
                     }
                 ) {
-                    Text("Previous", color = Color(0xFF314936), fontWeight = FontWeight.Bold)
+                    Text("Previous", color = NirogColor.forestSoft, fontWeight = FontWeight.Bold)
                 }
             } else {
                 Spacer(modifier = Modifier.height(8.dp))
@@ -258,7 +258,7 @@ fun OnboardingTourOverlay(state: NirogState) {
                         markTourSeen(context)
                     }
                 ) {
-                    Text("Skip Tour", color = Color(0xFF1B3221).copy(alpha = 0.5f))
+                    Text("Skip Tour", color = NirogColor.forest.copy(alpha = 0.5f))
                 }
             }
         }
@@ -275,10 +275,10 @@ fun NirogTopAppBar(
     onChatClick: () -> Unit = {},
 ) {
     Surface(
-        color = Color(0xFFF1FDEE),
+        color = NirogColor.surfaceMint,
         modifier = Modifier
             .fillMaxWidth()
-            .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.5f))
+            .border(width = 0.5.dp, color = NirogColor.outlineVariant.copy(alpha = 0.5f))
     ) {
         Row(
             modifier = Modifier
@@ -294,8 +294,8 @@ fun NirogTopAppBar(
                     modifier = Modifier
                         .size(38.dp)
                         .clip(CircleShape)
-                        .background(Color(0xFF314936))
-                        .border(1.dp, Color(0xFFC3C8C0), CircleShape)
+                        .background(NirogColor.forestSoft)
+                        .border(1.dp, NirogColor.outlineVariant, CircleShape)
                         .clickable { onProfileClick() },
                     contentAlignment = Alignment.Center
                 ) {
@@ -314,7 +314,7 @@ fun NirogTopAppBar(
                     fontSize = 22.sp,
                     fontFamily = FontFamily.Serif,
                     fontWeight = FontWeight.Bold,
-                    color = Color(0xFF1B3221)
+                    color = NirogColor.forest
                 )
             }
 
@@ -326,7 +326,7 @@ fun NirogTopAppBar(
                         Icon(
                             imageVector = Icons.Filled.Forum,
                             contentDescription = "Batch messages",
-                            tint = Color(0xFF1B3221)
+                            tint = NirogColor.forest
                         )
                     }
                 } else {
@@ -334,7 +334,7 @@ fun NirogTopAppBar(
                         Icon(
                             imageVector = Icons.Filled.Notifications,
                             contentDescription = "Notifications",
-                            tint = Color(0xFF1B3221)
+                            tint = NirogColor.forest
                         )
                     }
                 }
@@ -347,11 +347,11 @@ fun NirogTopAppBar(
 @Composable
 fun NirogBottomNavigationBar(activeTab: String, onTabSelect: (String) -> Unit) {
     Surface(
-        color = Color(0xFFF1FDEE).copy(alpha = 0.95f),
+        color = NirogColor.surfaceMint.copy(alpha = 0.95f),
         modifier = Modifier
             .fillMaxWidth()
             .navigationBarsPadding()
-            .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.5f))
+            .border(width = 0.5.dp, color = NirogColor.outlineVariant.copy(alpha = 0.5f))
     ) {
         Row(
             modifier = Modifier
@@ -388,7 +388,7 @@ fun NirogBottomNavItem(
         Icon(
             imageVector = if (isActive) filledIcon else outlinedIcon,
             contentDescription = label,
-            tint = if (isActive) Color(0xFF1B3221) else Color(0xFF434842).copy(alpha = 0.55f),
+            tint = if (isActive) NirogColor.forest else NirogColor.inkTertiary.copy(alpha = 0.55f),
             modifier = Modifier.size(24.dp)
         )
         Spacer(modifier = Modifier.height(4.dp))
@@ -396,7 +396,7 @@ fun NirogBottomNavItem(
             text = label,
             fontSize = 11.sp,
             fontWeight = if (isActive) FontWeight.Bold else FontWeight.Medium,
-            color = if (isActive) Color(0xFF1B3221) else Color(0xFF434842).copy(alpha = 0.55f)
+            color = if (isActive) NirogColor.forest else NirogColor.inkTertiary.copy(alpha = 0.55f)
         )
     }
 }
@@ -404,9 +404,16 @@ fun NirogBottomNavItem(
 // TAB 1: Today Tab Dashboard
 @Composable
 fun TodayTab(state: NirogState) {
+    // Real, data-backed signals for TodayFocusEngine - the "one action for
+    // today" card picks from these instead of always showing the same fixed
+    // task, so it actually changes as the member logs real things.
+    var loggedReadingToday by remember { mutableStateOf(false) }
+    var walkLoggedToday by remember { mutableStateOf(false) }
+
     DisposableEffect(Unit) {
-        val sugarSub = state.repository.listenUserCollection("glucoseReadings", 7) { result ->
+        val sugarSub = state.repository.listenUserCollection("glucoseReadings", 7, orderByField = "measuredAt", descending = true) { result ->
             if (result is com.nirogbhumi.app.data.CloudResult.Success) {
+                val todayKey = com.nirogbhumi.app.ui.localDayKey(System.currentTimeMillis())
                 val synced = result.value.mapIndexedNotNull { index, doc ->
                     val readingType = doc.values["readingType"] as? String
                     // HbA1c is a lab percentage on a different scale than mg/dL readings,
@@ -427,9 +434,13 @@ fun TodayTab(state: NirogState) {
                     state.sugarLogs.addAll(synced)
                     state.fastingSugarValue = synced.firstOrNull { it.type == "Fasting" }?.value ?: state.fastingSugarValue
                 }
+                loggedReadingToday = result.value.any { doc ->
+                    val ts = (doc.values["measuredAt"] as? com.google.firebase.Timestamp) ?: (doc.values["createdAt"] as? com.google.firebase.Timestamp)
+                    ts != null && com.nirogbhumi.app.ui.localDayKey(ts.toDate().time) == todayKey
+                }
             }
         }
-        val bpSub = state.repository.listenUserCollection("bpReadings", 1) { result ->
+        val bpSub = state.repository.listenUserCollection("bpReadings", 1, orderByField = "createdAt", descending = true) { result ->
             if (result is com.nirogbhumi.app.data.CloudResult.Success) {
                 val latest = result.value.firstOrNull()
                 val systolic = (latest?.values?.get("systolic") as? Number)?.toInt()
@@ -437,10 +448,26 @@ fun TodayTab(state: NirogState) {
                 if (systolic != null && diastolic != null) state.latestBpReading = "$systolic/$diastolic"
             }
         }
+        // Real walk logs (from Activity/Walk Timer), independent of the
+        // manual "Mark Complete" checklist fallback below - if the member
+        // already logged a real walk today, the focus card treats it as done
+        // without requiring a separate manual tap.
+        val walkSub = state.repository.listenUserCollection("walkLogs", 5, orderByField = "createdAt", descending = true) { result ->
+            if (result is com.nirogbhumi.app.data.CloudResult.Success) {
+                val todayKey = com.nirogbhumi.app.ui.localDayKey(System.currentTimeMillis())
+                walkLoggedToday = result.value.any { doc ->
+                    val ts = (doc.values["measuredAt"] as? com.google.firebase.Timestamp) ?: (doc.values["createdAt"] as? com.google.firebase.Timestamp)
+                    ts != null && com.nirogbhumi.app.ui.localDayKey(ts.toDate().time) == todayKey
+                }
+            }
+        }
         // Restores today's checklist state from Firestore on every open - without
         // this, "Mark Complete" only ever lived in memory and silently reset the
         // moment the app was reopened, even though it visually said "Completed".
-        val checklistSub = state.repository.listenUserCollection("checklistLogs", 10) { result ->
+        // Ordered by createdAt so a growing history can't push today's own doc
+        // out of the fetch window (was previously unordered + limit(10), which
+        // silently stopped finding today's entry once the collection passed 10).
+        val checklistSub = state.repository.listenUserCollection("checklistLogs", 10, orderByField = "createdAt", descending = true) { result ->
             if (result is com.nirogbhumi.app.data.CloudResult.Success) {
                 val todayKey = com.nirogbhumi.app.ui.localDayKey(System.currentTimeMillis())
                 val walkDoneToday = result.value.any { doc ->
@@ -453,7 +480,7 @@ fun TodayTab(state: NirogState) {
                 else if (!walkDoneToday) state.dailyRitualsCompleted.remove("Walk")
             }
         }
-        onDispose { sugarSub.cancel(); bpSub.cancel(); checklistSub.cancel() }
+        onDispose { sugarSub.cancel(); bpSub.cancel(); walkSub.cancel(); checklistSub.cancel() }
     }
 
     var checkinStreak by remember { mutableStateOf(0) }
@@ -461,6 +488,15 @@ fun TodayTab(state: NirogState) {
         state.repository.peekCheckinStreak { result ->
             if (result is CloudResult.Success) checkinStreak = result.value
         }
+    }
+
+    val focusAction = remember(state.isProgramActive, state.checkedInToday, loggedReadingToday, walkLoggedToday, state.dailyRitualsCompleted.contains("Walk")) {
+        com.nirogbhumi.app.health.TodayFocusEngine.pick(
+            isProgramActive = state.isProgramActive,
+            checkedInToday = state.checkedInToday,
+            loggedReadingToday = loggedReadingToday,
+            walkDoneToday = walkLoggedToday || state.dailyRitualsCompleted.contains("Walk"),
+        )
     }
 
     Column(
@@ -484,12 +520,12 @@ fun TodayTab(state: NirogState) {
                 fontSize = 24.sp,
                 fontFamily = FontFamily.Serif,
                 fontWeight = FontWeight.Bold,
-                color = Color(0xFF1B3221)
+                color = NirogColor.forest
             )
             Text(
                 text = remember { java.text.SimpleDateFormat("EEEE, d MMMM", java.util.Locale.getDefault()).format(java.util.Date()) },
                 fontSize = 14.sp,
-                color = Color(0xFF434842),
+                color = NirogColor.inkTertiary,
                 modifier = Modifier.padding(top = 2.dp)
             )
         }
@@ -502,7 +538,7 @@ fun TodayTab(state: NirogState) {
             Row(
                 modifier = Modifier
                     .clip(RoundedCornerShape(50))
-                    .background(Color(0xFFF4E9D3))
+                    .background(NirogColor.statusAttentionBg)
                     .padding(horizontal = 14.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -519,12 +555,14 @@ fun TodayTab(state: NirogState) {
 
         FirstWeekChecklistCard(state, checkinStreak)
 
-        // Highlight daily task card
+        // Highlight daily task card - driven entirely by TodayFocusEngine, so
+        // this card genuinely changes with real usage instead of always
+        // showing the same fixed walk suggestion.
         Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .border(width = 0.5.dp, color = Color(0xFF9CB79F).copy(alpha = 0.4f), shape = RoundedCornerShape(24.dp)),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF314936)),
+                .border(width = 0.5.dp, color = NirogColor.forestSofter.copy(alpha = 0.4f), shape = RoundedCornerShape(24.dp)),
+            colors = CardDefaults.cardColors(containerColor = NirogColor.forestSoft),
             shape = RoundedCornerShape(24.dp),
             elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
         ) {
@@ -535,16 +573,17 @@ fun TodayTab(state: NirogState) {
                     text = "ONE ACTION FOR TODAY",
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color(0xFFB2CEB4),
+                    color = NirogColor.forestPale,
                     letterSpacing = 1.sp
                 )
 
                 Spacer(modifier = Modifier.height(6.dp))
 
-                val isWalkTaskDone = state.dailyRitualsCompleted.contains("Walk")
+                val isDone = focusAction.id == com.nirogbhumi.app.health.TodayFocusActionId.ALL_DONE ||
+                    (focusAction.id == com.nirogbhumi.app.health.TodayFocusActionId.WALK && state.dailyRitualsCompleted.contains("Walk"))
 
                 Text(
-                    text = if (isWalkTaskDone) "Walk logged and completed!" else "Walk 15 minutes after dinner",
+                    text = if (isDone) focusAction.doneLabel else focusAction.label,
                     fontSize = 22.sp,
                     fontFamily = FontFamily.Serif,
                     fontWeight = FontWeight.Bold,
@@ -553,55 +592,88 @@ fun TodayTab(state: NirogState) {
 
                 Spacer(modifier = Modifier.height(18.dp))
 
-                if (isWalkTaskDone) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(Color.White.copy(alpha = 0.12f), RoundedCornerShape(24.dp))
-                            .padding(vertical = 14.dp, horizontal = 16.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = Color(0xFFBFEE95), modifier = Modifier.size(18.dp))
+                when (focusAction.id) {
+                    com.nirogbhumi.app.health.TodayFocusActionId.ALL_DONE -> {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Color.White.copy(alpha = 0.12f), RoundedCornerShape(24.dp))
+                                .padding(vertical = 14.dp, horizontal = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = NirogColor.secondaryContainer, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("Completed for today", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        }
-                        TextButton(onClick = {
-                            state.dailyRitualsCompleted.remove("Walk")
-                            val dayKey = com.nirogbhumi.app.ui.localDayKey(System.currentTimeMillis())
-                            state.repository.upsertUserRecord("checklistLogs", "daily_post_dinner_walk_$dayKey", mapOf(
-                                "taskId" to "daily_post_dinner_walk",
-                                "title" to "Walk 15 minutes after dinner",
-                                "status" to "pending",
-                                "completedAt" to null
-                            )) { result -> if (result is com.nirogbhumi.app.data.CloudResult.Failure) state.cloudMessage = result.message }
-                        }) {
-                            Text("Undo", color = Color(0xFFB2CEB4), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Text("Check-in, a reading, and a walk - all logged today", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                         }
                     }
-                } else {
-                    Button(
-                        onClick = {
-                            state.dailyRitualsCompleted.add("Walk")
-                            val dayKey = com.nirogbhumi.app.ui.localDayKey(System.currentTimeMillis())
-                            state.repository.upsertUserRecord("checklistLogs", "daily_post_dinner_walk_$dayKey", mapOf(
-                                "taskId" to "daily_post_dinner_walk",
-                                "title" to "Walk 15 minutes after dinner",
-                                "status" to "done",
-                                "completedAt" to com.google.firebase.firestore.FieldValue.serverTimestamp()
-                            )) { result -> if (result is com.nirogbhumi.app.data.CloudResult.Failure) state.cloudMessage = result.message }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color.White),
-                        shape = RoundedCornerShape(24.dp)
-                    ) {
-                        Text(
-                            text = "Mark Complete",
-                            color = Color(0xFF314936),
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp
-                        )
+                    com.nirogbhumi.app.health.TodayFocusActionId.CHECK_IN -> {
+                        Button(
+                            onClick = { state.checkinStartStep = 0; state.currentScreen = "daily_checkin" },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color.White),
+                            shape = RoundedCornerShape(24.dp)
+                        ) { Text("Start check-in", color = NirogColor.forestSoft, fontWeight = FontWeight.Bold, fontSize = 14.sp) }
+                    }
+                    com.nirogbhumi.app.health.TodayFocusActionId.LOG_READING -> {
+                        Button(
+                            onClick = { state.isQuickLogFastingOpen = true },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color.White),
+                            shape = RoundedCornerShape(24.dp)
+                        ) { Text("Log a reading", color = NirogColor.forestSoft, fontWeight = FontWeight.Bold, fontSize = 14.sp) }
+                    }
+                    com.nirogbhumi.app.health.TodayFocusActionId.WALK -> {
+                        if (isDone) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(Color.White.copy(alpha = 0.12f), RoundedCornerShape(24.dp))
+                                    .padding(vertical = 14.dp, horizontal = 16.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = NirogColor.secondaryContainer, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Completed for today", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                }
+                                TextButton(onClick = {
+                                    state.dailyRitualsCompleted.remove("Walk")
+                                    val dayKey = com.nirogbhumi.app.ui.localDayKey(System.currentTimeMillis())
+                                    state.repository.upsertUserRecord("checklistLogs", "daily_post_dinner_walk_$dayKey", mapOf(
+                                        "taskId" to "daily_post_dinner_walk",
+                                        "title" to "Walk 15 minutes after a meal",
+                                        "status" to "pending",
+                                        "completedAt" to null
+                                    )) { result -> if (result is com.nirogbhumi.app.data.CloudResult.Failure) state.cloudMessage = result.message }
+                                }) {
+                                    Text("Undo", color = NirogColor.forestPale, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                }
+                            }
+                        } else {
+                            Button(
+                                onClick = {
+                                    state.dailyRitualsCompleted.add("Walk")
+                                    val dayKey = com.nirogbhumi.app.ui.localDayKey(System.currentTimeMillis())
+                                    state.repository.upsertUserRecord("checklistLogs", "daily_post_dinner_walk_$dayKey", mapOf(
+                                        "taskId" to "daily_post_dinner_walk",
+                                        "title" to "Walk 15 minutes after a meal",
+                                        "status" to "done",
+                                        "completedAt" to com.google.firebase.firestore.FieldValue.serverTimestamp()
+                                    )) { result -> if (result is com.nirogbhumi.app.data.CloudResult.Failure) state.cloudMessage = result.message }
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color.White),
+                                shape = RoundedCornerShape(24.dp)
+                            ) {
+                                Text(
+                                    text = "Mark Complete",
+                                    color = NirogColor.forestSoft,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -617,15 +689,15 @@ fun TodayTab(state: NirogState) {
                 text = "Today's Vitals",
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Bold,
-                color = Color(0xFF1B3221)
+                color = NirogColor.forest
             )
             TextButton(onClick = { state.checkinStartStep = 0; state.currentScreen = "daily_checkin" }) {
                 Text(
                     if (state.checkedInToday) "Add more" else "Log now",
-                    color = Color(0xFF314936), fontWeight = FontWeight.Bold, fontSize = 13.sp
+                    color = NirogColor.forestSoft, fontWeight = FontWeight.Bold, fontSize = 13.sp
                 )
                 Spacer(modifier = Modifier.width(2.dp))
-                Icon(Icons.Filled.ArrowForward, contentDescription = null, tint = Color(0xFF314936), modifier = Modifier.size(15.dp))
+                Icon(Icons.Filled.ArrowForward, contentDescription = null, tint = NirogColor.forestSoft, modifier = Modifier.size(15.dp))
             }
         }
 
@@ -638,7 +710,7 @@ fun TodayTab(state: NirogState) {
             ) {
                 VitalBentoCard(
                     icon = Icons.Filled.Bloodtype,
-                    iconColor = Color(0xFFBA1A1A),
+                    iconColor = NirogColor.errorColor,
                     title = "Fasting Sugar",
                     value = if (state.fastingSugarValue > 0) "${state.fastingSugarValue}" else "—",
                     unit = if (state.fastingSugarValue > 0) "mg/dL" else "",
@@ -653,7 +725,7 @@ fun TodayTab(state: NirogState) {
             ) {
                 VitalBentoCard(
                     icon = Icons.Filled.Favorite,
-                    iconColor = Color(0xFF426820),
+                    iconColor = NirogColor.secondaryGreen,
                     title = "Blood Pressure",
                     value = state.latestBpReading ?: "—",
                     unit = "",
@@ -686,7 +758,7 @@ fun TodayTab(state: NirogState) {
             ) {
                 VitalBentoCard(
                     icon = Icons.Filled.DirectionsWalk,
-                    iconColor = Color(0xFF426820),
+                    iconColor = NirogColor.secondaryGreen,
                     title = "Steps Done",
                     value = if (state.stepsLogged > 0) String.format("%,d", state.stepsLogged) else "—",
                     unit = if (state.stepsLogged > 0) "steps" else "",
@@ -702,7 +774,7 @@ fun TodayTab(state: NirogState) {
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable { state.currentScreen = "rhythm" }
-                .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.4f), shape = RoundedCornerShape(24.dp)),
+                .border(width = 0.5.dp, color = NirogColor.outlineVariant.copy(alpha = 0.4f), shape = RoundedCornerShape(24.dp)),
             colors = CardDefaults.cardColors(containerColor = Color.White),
             shape = RoundedCornerShape(24.dp)
         ) {
@@ -717,14 +789,14 @@ fun TodayTab(state: NirogState) {
                     Text(
                         text = "Weekly Rhythm",
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF1B3221),
+                        color = NirogColor.forest,
                         fontSize = 15.sp
                     )
                     IconButton(onClick = { state.activeTab = "Insights" }) {
                         Icon(
                             imageVector = Icons.Filled.ArrowForward,
                             contentDescription = "Insights Page",
-                            tint = Color(0xFF314936)
+                            tint = NirogColor.forestSoft
                         )
                     }
                 }
@@ -736,12 +808,12 @@ fun TodayTab(state: NirogState) {
                         modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Icon(Icons.Outlined.Insights, contentDescription = null, tint = Color(0xFF9CB79F), modifier = Modifier.size(28.dp))
+                        Icon(Icons.Outlined.Insights, contentDescription = null, tint = NirogColor.forestSofter, modifier = Modifier.size(28.dp))
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
                             "Start logging today to see your weekly rhythm here",
                             fontSize = 12.sp,
-                            color = Color(0xFF737972),
+                            color = NirogColor.outline,
                             textAlign = TextAlign.Center
                         )
                     }
@@ -765,13 +837,13 @@ fun TodayTab(state: NirogState) {
                             val isLast = index == recent.size - 1
 
                             drawRoundRect(
-                                color = Color(0xFFE5F1E2),
+                                color = NirogColor.surfaceNeutral,
                                 topLeft = androidx.compose.ui.geometry.Offset(x, 0f),
                                 size = androidx.compose.ui.geometry.Size(barWidth, totalHeight),
                                 cornerRadius = CornerRadius(4.dp.toPx(), 4.dp.toPx())
                             )
 
-                            val barColor = if (isLast) Color(0xFF1B3221) else Color(0xFF426820).copy(alpha = 0.5f)
+                            val barColor = if (isLast) NirogColor.forest else NirogColor.secondaryGreen.copy(alpha = 0.5f)
                             drawRoundRect(
                                 color = barColor,
                                 topLeft = androidx.compose.ui.geometry.Offset(x, y),
@@ -790,7 +862,7 @@ fun TodayTab(state: NirogState) {
                                 text = log.type.take(4),
                                 fontSize = 10.sp,
                                 fontWeight = if (i == recent.size - 1) FontWeight.Bold else FontWeight.Medium,
-                                color = if (i == recent.size - 1) Color(0xFF1B3221) else Color(0xFF737972),
+                                color = if (i == recent.size - 1) NirogColor.forest else NirogColor.outline,
                                 modifier = Modifier.width(36.dp),
                                 textAlign = TextAlign.Center
                             )
@@ -806,7 +878,7 @@ fun TodayTab(state: NirogState) {
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable { state.currentScreen = "health_file" }
-                .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.3f), shape = RoundedCornerShape(24.dp)),
+                .border(width = 0.5.dp, color = NirogColor.outlineVariant.copy(alpha = 0.3f), shape = RoundedCornerShape(24.dp)),
             colors = CardDefaults.cardColors(containerColor = Color.White),
             shape = RoundedCornerShape(24.dp)
         ) {
@@ -815,17 +887,17 @@ fun TodayTab(state: NirogState) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Box(
-                    modifier = Modifier.size(36.dp).clip(RoundedCornerShape(12.dp)).background(Color(0xFFEBF7E8)),
+                    modifier = Modifier.size(36.dp).clip(RoundedCornerShape(12.dp)).background(NirogColor.surfaceLow),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(Icons.Filled.Description, "Health File", tint = Color(0xFF1B3221), modifier = Modifier.size(18.dp))
+                    Icon(Icons.Filled.Description, "Health File", tint = NirogColor.forest, modifier = Modifier.size(18.dp))
                 }
                 Spacer(modifier = Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text("Health File", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B2219))
-                    Text("Always ready to show any doctor", fontSize = 11.5.sp, color = Color(0xFF8B9285))
+                    Text("Always ready to show any doctor", fontSize = 11.5.sp, color = NirogColor.inkMuted)
                 }
-                Text("Open", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+                Text("Open", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = NirogColor.forest)
             }
         }
 
@@ -858,15 +930,15 @@ private fun FirstWeekChecklistCard(state: NirogState, checkinStreak: Int) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.3f), shape = RoundedCornerShape(24.dp)),
+            .border(width = 0.5.dp, color = NirogColor.outlineVariant.copy(alpha = 0.3f), shape = RoundedCornerShape(24.dp)),
         colors = CardDefaults.cardColors(containerColor = Color.White),
         shape = RoundedCornerShape(24.dp)
     ) {
         Column(modifier = Modifier.padding(20.dp)) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("Getting started", fontWeight = FontWeight.Bold, color = Color(0xFF1B3221), fontSize = 15.sp)
+                Text("Getting started", fontWeight = FontWeight.Bold, color = NirogColor.forest, fontSize = 15.sp)
                 IconButton(onClick = { dismissed = true }, modifier = Modifier.size(28.dp)) {
-                    Icon(Icons.Filled.Close, contentDescription = "Dismiss checklist", tint = Color(0xFF9CB79F), modifier = Modifier.size(16.dp))
+                    Icon(Icons.Filled.Close, contentDescription = "Dismiss checklist", tint = NirogColor.forestSofter, modifier = Modifier.size(16.dp))
                 }
             }
             Spacer(modifier = Modifier.height(10.dp))
@@ -889,14 +961,14 @@ private fun ChecklistItemRow(label: String, done: Boolean, onClick: () -> Unit) 
         Icon(
             if (done) Icons.Filled.CheckCircle else Icons.Filled.RadioButtonUnchecked,
             contentDescription = null,
-            tint = if (done) Color(0xFF426820) else Color(0xFF9CB79F),
+            tint = if (done) NirogColor.secondaryGreen else NirogColor.forestSofter,
             modifier = Modifier.size(20.dp),
         )
         Spacer(modifier = Modifier.width(10.dp))
         Text(
             label,
             fontSize = 13.sp,
-            color = if (done) Color(0xFF737972) else Color(0xFF1B2219),
+            color = if (done) NirogColor.outline else Color(0xFF1B2219),
             textDecoration = if (done) TextDecoration.LineThrough else null,
         )
     }
@@ -916,10 +988,10 @@ private fun SleepGlucoseInsightCard(state: NirogState) {
     var glucoseReadings by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>>(emptyList()) }
 
     DisposableEffect(state.repository.userId) {
-        val sleepSub = state.repository.listenUserCollection("sleepLogs", limit = 60) { result ->
+        val sleepSub = state.repository.listenUserCollection("sleepLogs", limit = 60, orderByField = "createdAt", descending = true) { result ->
             if (result is CloudResult.Success) sleepLogs = result.value
         }
-        val glucoseSub = state.repository.listenUserCollection("glucoseReadings", limit = 60) { result ->
+        val glucoseSub = state.repository.listenUserCollection("glucoseReadings", limit = 60, orderByField = "measuredAt", descending = true) { result ->
             if (result is CloudResult.Success) glucoseReadings = result.value
         }
         onDispose { sleepSub.cancel(); glucoseSub.cancel() }
@@ -931,16 +1003,16 @@ private fun SleepGlucoseInsightCard(state: NirogState) {
         modifier = Modifier
             .fillMaxWidth()
             .clickable { state.currentScreen = "insight_detail" }
-            .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.3f), shape = RoundedCornerShape(24.dp)),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFFF4E9D3)),
+            .border(width = 0.5.dp, color = NirogColor.outlineVariant.copy(alpha = 0.3f), shape = RoundedCornerShape(24.dp)),
+        colors = CardDefaults.cardColors(containerColor = NirogColor.statusAttentionBg),
         shape = RoundedCornerShape(24.dp)
     ) {
         Row(modifier = Modifier.padding(16.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Box(
-                modifier = Modifier.size(36.dp).clip(RoundedCornerShape(12.dp)).background(Color(0xFFB9832B).copy(alpha = 0.16f)),
+                modifier = Modifier.size(36.dp).clip(RoundedCornerShape(12.dp)).background(NirogColor.statusAttention.copy(alpha = 0.16f)),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(Icons.Outlined.Insights, contentDescription = null, tint = Color(0xFFB9832B), modifier = Modifier.size(18.dp))
+                Icon(Icons.Outlined.Insights, contentDescription = null, tint = NirogColor.statusAttention, modifier = Modifier.size(18.dp))
             }
             Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
@@ -984,7 +1056,7 @@ private fun TodayProgramPreview(state: NirogState) {
         modifier = Modifier
             .fillMaxWidth()
             .clickable { state.currentScreen = "program_calendar" }
-            .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.3f), shape = RoundedCornerShape(24.dp)),
+            .border(width = 0.5.dp, color = NirogColor.outlineVariant.copy(alpha = 0.3f), shape = RoundedCornerShape(24.dp)),
         colors = CardDefaults.cardColors(containerColor = Color.White),
         shape = RoundedCornerShape(24.dp)
     ) {
@@ -993,30 +1065,30 @@ private fun TodayProgramPreview(state: NirogState) {
                 Column(
                     modifier = Modifier
                         .width(46.dp)
-                        .background(Color(0xFFF1EDE3), RoundedCornerShape(12.dp))
+                        .background(NirogColor.surfaceSunken, RoundedCornerShape(12.dp))
                         .padding(vertical = 6.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
                         java.text.SimpleDateFormat("d", java.util.Locale.getDefault()).format(startsAt),
-                        fontFamily = FontFamily.Serif, fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221)
+                        fontFamily = FontFamily.Serif, fontSize = 17.sp, fontWeight = FontWeight.Bold, color = NirogColor.forest
                     )
                     Text(
                         java.text.SimpleDateFormat("MMM", java.util.Locale.getDefault()).format(startsAt).uppercase(),
-                        fontSize = 9.5.sp, fontWeight = FontWeight.Bold, color = Color(0xFF8B9285)
+                        fontSize = 9.5.sp, fontWeight = FontWeight.Bold, color = NirogColor.inkMuted
                     )
                 }
                 Spacer(modifier = Modifier.width(12.dp))
             }
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Next in your program", fontSize = 10.5.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFFC7902F))
+                    Text("Next in your program", fontSize = 10.5.sp, fontWeight = FontWeight.ExtraBold, color = NirogColor.gold)
                 }
                 Text(title, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B2219))
                 if (startsAt != null) {
                     Text(
                         java.text.SimpleDateFormat("EEE, d MMM · h:mm a", java.util.Locale.getDefault()).format(startsAt) + (type?.let { " · $it" } ?: ""),
-                        fontSize = 11.5.sp, color = Color(0xFF8B9285)
+                        fontSize = 11.5.sp, color = NirogColor.inkMuted
                     )
                 }
             }
@@ -1038,7 +1110,7 @@ fun VitalBentoCard(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 4.dp)
-            .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.4f), shape = RoundedCornerShape(16.dp))
+            .border(width = 0.5.dp, color = NirogColor.outlineVariant.copy(alpha = 0.4f), shape = RoundedCornerShape(16.dp))
             .clickable { onClick() },
         colors = CardDefaults.cardColors(containerColor = Color.White),
         shape = RoundedCornerShape(16.dp)
@@ -1054,7 +1126,7 @@ fun VitalBentoCard(
                 Box(
                     modifier = Modifier
                         .size(36.dp)
-                        .background(Color(0xFFF1FDEE), CircleShape),
+                        .background(NirogColor.surfaceMint, CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(imageVector = icon, contentDescription = title, tint = iconColor, modifier = Modifier.size(18.dp))
@@ -1082,7 +1154,7 @@ fun VitalBentoCard(
                 text = title,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Medium,
-                color = Color(0xFF434842)
+                color = NirogColor.inkTertiary
             )
 
             Spacer(modifier = Modifier.height(2.dp))
@@ -1093,14 +1165,14 @@ fun VitalBentoCard(
                     fontSize = 22.sp,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold,
-                    color = Color(0xFF1B3221)
+                    color = NirogColor.forest
                 )
                 if (unit.isNotEmpty()) {
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
                         text = unit,
                         fontSize = 11.sp,
-                        color = Color(0xFF737972),
+                        color = NirogColor.outline,
                         modifier = Modifier.padding(bottom = 2.dp)
                     )
                 }
@@ -1127,12 +1199,12 @@ fun TrackTab(state: NirogState) {
                 fontSize = 32.sp,
                 fontFamily = FontFamily.Serif,
                 fontWeight = FontWeight.Bold,
-                color = Color(0xFF1B3221)
+                color = NirogColor.forest
             )
             Text(
                 text = "Your whole day's logging in one calm flow.",
                 fontSize = 15.sp,
-                color = Color(0xFF434842),
+                color = NirogColor.inkTertiary,
                 modifier = Modifier.padding(top = 4.dp)
             )
         }
@@ -1146,14 +1218,14 @@ fun TrackTab(state: NirogState) {
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable { state.checkinStartStep = 0; state.currentScreen = "daily_checkin" }
-                .border(width = 0.5.dp, color = Color(0xFF9CB79F).copy(alpha = 0.4f), shape = RoundedCornerShape(24.dp)),
-            colors = CardDefaults.cardColors(containerColor = if (state.checkedInToday) Color(0xFFEBF7E8) else Color(0xFF314936)),
+                .border(width = 0.5.dp, color = NirogColor.forestSofter.copy(alpha = 0.4f), shape = RoundedCornerShape(24.dp)),
+            colors = CardDefaults.cardColors(containerColor = if (state.checkedInToday) NirogColor.surfaceLow else NirogColor.forestSoft),
             shape = RoundedCornerShape(24.dp)
         ) {
             Row(modifier = Modifier.padding(20.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     modifier = Modifier.size(44.dp).background(
-                        if (state.checkedInToday) Color(0xFF314936).copy(alpha = 0.12f) else Color.White.copy(alpha = 0.15f),
+                        if (state.checkedInToday) NirogColor.forestSoft.copy(alpha = 0.12f) else Color.White.copy(alpha = 0.15f),
                         CircleShape
                     ),
                     contentAlignment = Alignment.Center
@@ -1161,7 +1233,7 @@ fun TrackTab(state: NirogState) {
                     Icon(
                         if (state.checkedInToday) Icons.Filled.CheckCircle else Icons.Filled.PlaylistAddCheck,
                         contentDescription = null,
-                        tint = if (state.checkedInToday) Color(0xFF3F7D58) else Color.White,
+                        tint = if (state.checkedInToday) NirogColor.statusInRange else Color.White,
                         modifier = Modifier.size(24.dp)
                     )
                 }
@@ -1170,39 +1242,39 @@ fun TrackTab(state: NirogState) {
                     Text(
                         if (state.checkedInToday) "Checked in for today" else "Daily Check-in",
                         fontSize = 18.sp, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold,
-                        color = if (state.checkedInToday) Color(0xFF1B3221) else Color.White
+                        color = if (state.checkedInToday) NirogColor.forest else Color.White
                     )
                     Text(
                         if (state.checkedInToday) "Nicely done — tap to add another reading" else "Sugar, BP & weight — under 2 minutes",
                         fontSize = 13.sp,
-                        color = if (state.checkedInToday) Color(0xFF4B6450) else Color(0xFFB2CEB4)
+                        color = if (state.checkedInToday) Color(0xFF4B6450) else NirogColor.forestPale
                     )
                 }
                 Icon(
                     Icons.Filled.ArrowForward,
                     contentDescription = "Start",
-                    tint = if (state.checkedInToday) Color(0xFF314936) else Color.White
+                    tint = if (state.checkedInToday) NirogColor.forestSoft else Color.White
                 )
             }
         }
 
         // Quick Log - single-tap entry for logging just one thing without the full flow
         Column {
-            Text("Or log just one thing", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+            Text("Or log just one thing", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = NirogColor.forest)
             Spacer(modifier = Modifier.height(10.dp))
             Row(
                 modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                QuickLogChip("Sugar", Icons.Filled.Bloodtype, Color(0xFFBA1A1A)) { state.checkinStartStep = 0; state.currentScreen = "daily_checkin" }
-                QuickLogChip("BP", Icons.Filled.Favorite, Color(0xFF1B3221)) { state.checkinStartStep = 1; state.currentScreen = "daily_checkin" }
+                QuickLogChip("Sugar", Icons.Filled.Bloodtype, NirogColor.errorColor) { state.checkinStartStep = 0; state.currentScreen = "daily_checkin" }
+                QuickLogChip("BP", Icons.Filled.Favorite, NirogColor.forest) { state.checkinStartStep = 1; state.currentScreen = "daily_checkin" }
                 QuickLogChip("Weight", Icons.Filled.MonitorWeight, Color(0xFF4B6450)) { state.checkinStartStep = 2; state.currentScreen = "daily_checkin" }
                 QuickLogChip("Medication", Icons.Filled.Medication, Color(0xFF6D4C1E)) { state.checkinStartStep = 3; state.currentScreen = "daily_checkin" }
-                QuickLogChip("Activity", Icons.Filled.DirectionsWalk, Color(0xFF426820)) { showActivityLog = true }
+                QuickLogChip("Activity", Icons.Filled.DirectionsWalk, NirogColor.secondaryGreen) { showActivityLog = true }
             }
         }
 
-        Text("Today's Summary", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+        Text("Today's Summary", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = NirogColor.forest)
 
         // Bento Grid Modules of Tracks
         Row(modifier = Modifier.fillMaxWidth()) {
@@ -1210,7 +1282,7 @@ fun TrackTab(state: NirogState) {
                 TrackModuleBox(
                     icon = Icons.Filled.Bloodtype,
                     iconBg = Color(0xFFFFDAD6),
-                    iconTint = Color(0xFFBA1A1A),
+                    iconTint = NirogColor.errorColor,
                     title = "Blood Sugar",
                     measuredValue = if (state.fastingSugarValue > 0) "${state.fastingSugarValue}" else "No data",
                     labelSuffix = if (state.fastingSugarValue > 0) "mg/dL" else "",
@@ -1220,8 +1292,8 @@ fun TrackTab(state: NirogState) {
             Box(modifier = Modifier.weight(1f).padding(start = 6.dp)) {
                 TrackModuleBox(
                     icon = Icons.Filled.Favorite,
-                    iconBg = Color(0xFFCDEAD0),
-                    iconTint = Color(0xFF1B3221),
+                    iconBg = NirogColor.forestPaleLight,
+                    iconTint = NirogColor.forest,
                     title = "BP",
                     measuredValue = state.latestBpReading ?: "No data",
                     labelSuffix = "",
@@ -1234,7 +1306,7 @@ fun TrackTab(state: NirogState) {
             Box(modifier = Modifier.weight(1f).padding(end = 6.dp)) {
                 TrackModuleBox(
                     icon = Icons.Filled.Bedtime,
-                    iconBg = Color(0xFFE5F1E2),
+                    iconBg = NirogColor.surfaceNeutral,
                     iconTint = Color(0xFF4B6450),
                     title = "Sleep",
                     measuredValue = if (state.sleepHours > 0 || state.sleepMinutes > 0) "${state.sleepHours}h ${state.sleepMinutes}m" else "No data",
@@ -1245,8 +1317,8 @@ fun TrackTab(state: NirogState) {
             Box(modifier = Modifier.weight(1f).padding(start = 6.dp)) {
                 TrackModuleBox(
                     icon = Icons.Filled.DirectionsWalk,
-                    iconBg = Color(0xFFBFEE95).copy(alpha = 0.5f),
-                    iconTint = Color(0xFF426820),
+                    iconBg = NirogColor.secondaryContainer.copy(alpha = 0.5f),
+                    iconTint = NirogColor.secondaryGreen,
                     title = "Walking & Activity",
                     measuredValue = if (state.stepsLogged > 0) String.format("%,d", state.stepsLogged) else "No data",
                     labelSuffix = "",
@@ -1257,8 +1329,8 @@ fun TrackTab(state: NirogState) {
 
         TrackModuleBox(
             icon = Icons.Filled.Science,
-            iconBg = Color(0xFFE5F1E2),
-            iconTint = Color(0xFF1B3221),
+            iconBg = NirogColor.surfaceNeutral,
+            iconTint = NirogColor.forest,
             title = "Lab Reports",
             measuredValue = "Upload",
             labelSuffix = "",
@@ -1291,7 +1363,7 @@ fun QuickLogChip(label: String, icon: androidx.compose.ui.graphics.vector.ImageV
             Icon(icon, contentDescription = "Log $label", tint = tint, modifier = Modifier.size(22.dp))
         }
         Spacer(modifier = Modifier.height(6.dp))
-        Text(label, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+        Text(label, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = NirogColor.forest)
     }
 }
 
@@ -1315,7 +1387,7 @@ fun TrackModuleBox(
         modifier = Modifier
             .fillMaxWidth()
             .then(if (fullWidth) Modifier else Modifier.aspectRatio(1.0f))
-            .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.4f), roundedCorner = 24)
+            .border(width = 0.5.dp, color = NirogColor.outlineVariant.copy(alpha = 0.4f), roundedCorner = 24)
             .clickable { onClick() },
         colors = CardDefaults.cardColors(containerColor = Color.White)
     ) {
@@ -1339,7 +1411,7 @@ fun TrackModuleBox(
                     text = title.uppercase(),
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color(0xFF434842),
+                    color = NirogColor.inkTertiary,
                     letterSpacing = 0.75.sp
                 )
                 Spacer(modifier = Modifier.height(2.dp))
@@ -1349,14 +1421,14 @@ fun TrackModuleBox(
                         fontSize = 24.sp,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF1B3221)
+                        color = NirogColor.forest
                     )
                     if (labelSuffix.isNotEmpty()) {
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
                             text = labelSuffix,
                             fontSize = 11.sp,
-                            color = Color(0xFF737972),
+                            color = NirogColor.outline,
                             modifier = Modifier.padding(bottom = 2.dp)
                         )
                     }
@@ -1411,12 +1483,12 @@ fun InsightsTab(state: NirogState) {
                 fontSize = 32.sp,
                 fontFamily = FontFamily.Serif,
                 fontWeight = FontWeight.Bold,
-                color = Color(0xFF1B3221)
+                color = NirogColor.forest
             )
             Text(
                 text = weekRange,
                 fontSize = 13.sp,
-                color = Color(0xFF737972)
+                color = NirogColor.outline
             )
         }
 
@@ -1429,7 +1501,7 @@ fun InsightsTab(state: NirogState) {
 
         if (!hasEnoughData) {
             Card(
-                modifier = Modifier.fillMaxWidth().border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.4f), shape = RoundedCornerShape(24.dp)),
+                modifier = Modifier.fillMaxWidth().border(width = 0.5.dp, color = NirogColor.outlineVariant.copy(alpha = 0.4f), shape = RoundedCornerShape(24.dp)),
                 colors = CardDefaults.cardColors(containerColor = Color.White),
                 shape = RoundedCornerShape(24.dp)
             ) {
@@ -1437,26 +1509,26 @@ fun InsightsTab(state: NirogState) {
                     modifier = Modifier.fillMaxWidth().padding(28.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Icon(Icons.Outlined.Insights, contentDescription = null, tint = Color(0xFF9CB79F), modifier = Modifier.size(36.dp))
+                    Icon(Icons.Outlined.Insights, contentDescription = null, tint = NirogColor.forestSofter, modifier = Modifier.size(36.dp))
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
                         "No insights yet",
                         fontWeight = FontWeight.Bold,
                         fontSize = 16.sp,
-                        color = Color(0xFF1B3221)
+                        color = NirogColor.forest
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
                         "Log at least 3 sugar readings this week and we'll show you real trends, not guesses.",
                         fontSize = 13.sp,
-                        color = Color(0xFF737972),
+                        color = NirogColor.outline,
                         textAlign = TextAlign.Center,
                         lineHeight = 18.sp
                     )
                     Spacer(modifier = Modifier.height(16.dp))
                     Button(
                         onClick = { state.activeTab = "Track" },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF314936)),
+                        colors = ButtonDefaults.buttonColors(containerColor = NirogColor.forestSoft),
                         shape = RoundedCornerShape(20.dp)
                     ) {
                         Text("Log a Reading", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
@@ -1471,7 +1543,7 @@ fun InsightsTab(state: NirogState) {
                     // Opens the real Rhythm screen, not the old generic "trends_30"
                     // catalog template.
                     .clickable { state.currentScreen = "rhythm" }
-                    .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.4f), shape = RoundedCornerShape(24.dp)),
+                    .border(width = 0.5.dp, color = NirogColor.outlineVariant.copy(alpha = 0.4f), shape = RoundedCornerShape(24.dp)),
                 colors = CardDefaults.cardColors(containerColor = Color.White),
                 shape = RoundedCornerShape(24.dp)
             ) {
@@ -1479,7 +1551,7 @@ fun InsightsTab(state: NirogState) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Filled.WaterDrop, "Sugar", tint = Color(0xFF43242A), modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Avg Fasting Sugar", fontWeight = FontWeight.SemiBold, color = Color(0xFF434842))
+                        Text("Avg Fasting Sugar", fontWeight = FontWeight.SemiBold, color = NirogColor.inkTertiary)
                     }
 
                     Spacer(modifier = Modifier.height(8.dp))
@@ -1490,21 +1562,21 @@ fun InsightsTab(state: NirogState) {
                         verticalAlignment = Alignment.Bottom
                     ) {
                         Row(verticalAlignment = Alignment.Bottom) {
-                            Text(avgFastingSugar?.toString() ?: "—", fontSize = 28.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+                            Text(avgFastingSugar?.toString() ?: "—", fontSize = 28.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = NirogColor.forest)
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("mg/dL", fontSize = 12.sp, color = Color(0xFF737972))
+                            Text("mg/dL", fontSize = 12.sp, color = NirogColor.outline)
                         }
 
                         sugarTrend?.let { (label, icon) ->
                             Box(
                                 modifier = Modifier
-                                    .background(Color(0xFFE5F1E2), RoundedCornerShape(12.dp))
+                                    .background(NirogColor.surfaceNeutral, RoundedCornerShape(12.dp))
                                     .padding(horizontal = 8.dp, vertical = 4.dp)
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(icon, label, tint = Color(0xFF426820), modifier = Modifier.size(14.dp))
+                                    Icon(icon, label, tint = NirogColor.secondaryGreen, modifier = Modifier.size(14.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
-                                    Text(label, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+                                    Text(label, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = NirogColor.forest)
                                 }
                             }
                         }
@@ -1517,22 +1589,22 @@ fun InsightsTab(state: NirogState) {
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable { state.currentScreen = "bp_overview" }
-                    .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.4f), shape = RoundedCornerShape(24.dp)),
+                    .border(width = 0.5.dp, color = NirogColor.outlineVariant.copy(alpha = 0.4f), shape = RoundedCornerShape(24.dp)),
                 colors = CardDefaults.cardColors(containerColor = Color.White),
                 shape = RoundedCornerShape(24.dp)
             ) {
                 Column(modifier = Modifier.padding(20.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Filled.Favorite, "BP", tint = Color(0xFFBA1A1A), modifier = Modifier.size(18.dp))
+                        Icon(Icons.Filled.Favorite, "BP", tint = NirogColor.errorColor, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Latest Blood Pressure", fontWeight = FontWeight.SemiBold, color = Color(0xFF434842))
+                        Text("Latest Blood Pressure", fontWeight = FontWeight.SemiBold, color = NirogColor.inkTertiary)
                     }
                     Spacer(modifier = Modifier.height(8.dp))
                     Row(verticalAlignment = Alignment.Bottom) {
-                        Text(state.latestBpReading ?: "—", fontSize = 28.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+                        Text(state.latestBpReading ?: "—", fontSize = 28.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = NirogColor.forest)
                         if (state.latestBpReading != null) {
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("mmHg", fontSize = 12.sp, color = Color(0xFF737972))
+                            Text("mmHg", fontSize = 12.sp, color = NirogColor.outline)
                         }
                     }
                 }
@@ -1545,7 +1617,7 @@ fun InsightsTab(state: NirogState) {
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable { state.currentScreen = "sleep_overview" }
-                            .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.4f), shape = RoundedCornerShape(24.dp)),
+                            .border(width = 0.5.dp, color = NirogColor.outlineVariant.copy(alpha = 0.4f), shape = RoundedCornerShape(24.dp)),
                         colors = CardDefaults.cardColors(containerColor = Color.White),
                         shape = RoundedCornerShape(24.dp)
                     ) {
@@ -1553,12 +1625,12 @@ fun InsightsTab(state: NirogState) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.Filled.Bedtime, "Sleep", tint = Color(0xFF4B6450), modifier = Modifier.size(14.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("Sleep", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF434842))
+                                Text("Sleep", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = NirogColor.inkTertiary)
                             }
                             Spacer(modifier = Modifier.height(12.dp))
                             Text(
                                 if (state.sleepHours > 0 || state.sleepMinutes > 0) "${state.sleepHours}h ${state.sleepMinutes}m" else "—",
-                                fontSize = 18.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221)
+                                fontSize = 18.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = NirogColor.forest
                             )
                         }
                     }
@@ -1568,20 +1640,20 @@ fun InsightsTab(state: NirogState) {
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable { state.currentScreen = "walking_overview" }
-                            .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.4f), shape = RoundedCornerShape(24.dp)),
+                            .border(width = 0.5.dp, color = NirogColor.outlineVariant.copy(alpha = 0.4f), shape = RoundedCornerShape(24.dp)),
                         colors = CardDefaults.cardColors(containerColor = Color.White),
                         shape = RoundedCornerShape(24.dp)
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Filled.DirectionsWalk, "Steps", tint = Color(0xFF426820), modifier = Modifier.size(14.dp))
+                                Icon(Icons.Filled.DirectionsWalk, "Steps", tint = NirogColor.secondaryGreen, modifier = Modifier.size(14.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("Daily Walk", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF434842))
+                                Text("Daily Walk", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = NirogColor.inkTertiary)
                             }
                             Spacer(modifier = Modifier.height(12.dp))
                             Text(
                                 if (state.stepsLogged > 0) String.format("%,d", state.stepsLogged) else "—",
-                                fontSize = 18.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221)
+                                fontSize = 18.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = NirogColor.forest
                             )
                         }
                     }
@@ -1593,15 +1665,15 @@ fun InsightsTab(state: NirogState) {
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.2f), shape = RoundedCornerShape(24.dp)),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFFE0ECDD)),
+                        .border(width = 0.5.dp, color = NirogColor.outlineVariant.copy(alpha = 0.2f), shape = RoundedCornerShape(24.dp)),
+                    colors = CardDefaults.cardColors(containerColor = NirogColor.surfaceAlt),
                     shape = RoundedCornerShape(24.dp)
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Filled.Spa, "Insight", tint = Color(0xFF1B3221), modifier = Modifier.size(16.dp))
+                            Icon(Icons.Filled.Spa, "Insight", tint = NirogColor.forest, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("THIS WEEK'S GUIDANCE", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+                            Text("THIS WEEK'S GUIDANCE", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = NirogColor.forest)
                         }
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
@@ -1611,20 +1683,23 @@ fun InsightsTab(state: NirogState) {
                                 else -> "Your average fasting sugar this week is $avg mg/dL, within a typical range. Keep up your current routine, and keep logging so trends stay accurate."
                             },
                             fontSize = 13.sp,
-                            color = Color(0xFF141E15),
+                            color = NirogColor.inkPrimary,
                             lineHeight = 18.sp
                         )
                     }
                 }
             }
 
-            // Share CTA
+            // Share CTA - the real, fully-built Health File screen (PDF share +
+            // shareable link/QR, actual vitals/lab data), not the old generic
+            // "Share Report" catalog screen (a fake options list that always
+            // just triggered the same share sheet regardless of what you picked).
             OutlinedButton(
-                onClick = { state.currentScreen = "share_report" },
+                onClick = { state.currentScreen = "health_file" },
                 modifier = Modifier.fillMaxWidth().height(48.dp),
                 shape = RoundedCornerShape(24.dp),
-                border = BorderStroke(1.dp, Color(0xFFC3C8C0)),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF1B3221))
+                border = BorderStroke(1.dp, NirogColor.outlineVariant),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = NirogColor.forest)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Filled.Share, "Share", modifier = Modifier.size(16.dp))
@@ -1641,6 +1716,12 @@ fun InsightsTab(state: NirogState) {
 @Composable
 fun CareTab(state: NirogState) {
     val context = LocalContext.current
+    fun openConsultationBooking() {
+        runCatching {
+            context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://nirogbhumi.com/consultation")))
+        }.onFailure { state.cloudMessage = "Couldn't open the browser - visit nirogbhumi.com/consultation directly." }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1654,33 +1735,29 @@ fun CareTab(state: NirogState) {
                 fontSize = 32.sp,
                 fontFamily = FontFamily.Serif,
                 fontWeight = FontWeight.Bold,
-                color = Color(0xFF1B3221)
+                color = NirogColor.forest
             )
             Text(
                 text = if (state.isProgramActive) "Your program, your batch, your coach." else "A guided program with a real coach and a community on the same path.",
                 fontSize = 15.sp,
-                color = Color(0xFF434842),
+                color = NirogColor.inkTertiary,
                 modifier = Modifier.padding(top = 4.dp)
             )
         }
 
-        // Booking currently lives on the website, not in-app - the in-app
-        // stepper was pulled with the Razorpay removal and isn't being
-        // rebuilt yet, so this is an honest handoff instead of a dead-end
-        // flow or a fabricated "coming soon" screen.
-        CareRow(Icons.Outlined.MedicalServices, "Book a Consultation", "Opens nirogbhumi.com to pick an expert and a time.") {
-            runCatching {
-                context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://nirogbhumi.com/consultation")))
-            }.onFailure { state.cloudMessage = "Couldn't open the browser - visit nirogbhumi.com/consultation directly." }
-        }
-
         if (!state.isProgramActive) {
+            // Booking currently lives on the website, not in-app - the in-app
+            // stepper was pulled with the Razorpay removal and isn't being
+            // rebuilt yet, so this is an honest handoff instead of a dead-end
+            // flow or a fabricated "coming soon" screen.
+            CareRow(Icons.Outlined.MedicalServices, "Book a Consultation", "Opens nirogbhumi.com to pick an expert and a time.") { openConsultationBooking() }
+
             // Care+'s calendar/community layer is a second tier only for enrolled
             // program members. Rather than a single thin locked card, show what's
             // actually inside so the upsell isn't just an empty-feeling wall.
             Card(
-                modifier = Modifier.fillMaxWidth().border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.3f), shape = RoundedCornerShape(24.dp)),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF314936)),
+                modifier = Modifier.fillMaxWidth().border(width = 0.5.dp, color = NirogColor.outlineVariant.copy(alpha = 0.3f), shape = RoundedCornerShape(24.dp)),
+                colors = CardDefaults.cardColors(containerColor = NirogColor.forestSoft),
                 shape = RoundedCornerShape(24.dp)
             ) {
                 Column(modifier = Modifier.padding(20.dp)) {
@@ -1695,7 +1772,7 @@ fun CareTab(state: NirogState) {
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         "Join a Nirog Bhumi program to unlock a coach, a batch of people on the same journey, and a program calendar.",
-                        fontSize = 13.sp, color = Color(0xFFB2CEB4), lineHeight = 18.sp
+                        fontSize = 13.sp, color = NirogColor.forestPale, lineHeight = 18.sp
                     )
                     Spacer(modifier = Modifier.height(16.dp))
                     Button(
@@ -1704,7 +1781,7 @@ fun CareTab(state: NirogState) {
                             state.currentScreen = "program_code_optional"
                         },
                         modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC7902F)),
+                        colors = ButtonDefaults.buttonColors(containerColor = NirogColor.gold),
                         shape = RoundedCornerShape(20.dp)
                     ) { Text("Enter program code", fontWeight = FontWeight.Bold, color = Color(0xFF241706)) }
                 }
@@ -1717,29 +1794,148 @@ fun CareTab(state: NirogState) {
             val dayNumber = if (state.programStartedAtMillis > 0) {
                 (((System.currentTimeMillis() - state.programStartedAtMillis) / (1000L * 60 * 60 * 24)) + 1).coerceAtLeast(1)
             } else 1
-            Card(
-                modifier = Modifier.fillMaxWidth().border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.3f), shape = RoundedCornerShape(24.dp)),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF314936)),
-                shape = RoundedCornerShape(24.dp)
-            ) {
-                Column(modifier = Modifier.padding(20.dp)) {
-                    Text(state.activeProgramName.ifBlank { "Your Program" }, fontSize = 18.sp, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color.White)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        if (state.programDurationDays > 0) "Day $dayNumber of ${state.programDurationDays}" else "Day $dayNumber",
-                        fontSize = 13.sp, color = Color(0xFFB2CEB4)
-                    )
-                }
+
+            // One unified hero instead of two stacked same-weight cards: program
+            // day and batch pulse are both "where things stand right now," so
+            // they read as a single glance rather than two separate stops.
+            ProgramStatusHero(state, dayNumber)
+
+            SectionLabel("TODAY", color = NirogColor.gold)
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                CareTile(
+                    Icons.Outlined.Checklist, "Checklist", "Today's actions",
+                    modifier = Modifier.weight(1f),
+                ) { state.currentScreen = "active_journey" }
+                CareTile(
+                    Icons.Outlined.CalendarMonth, "Calendar", "Sessions & walks",
+                    modifier = Modifier.weight(1f),
+                ) { state.currentScreen = "program_calendar" }
             }
 
-            BatchPulseCard(state)
+            SectionLabel("COMMUNITY", color = NirogColor.gold)
             PinnedAnnouncementCard(state)
 
-            CareRow(Icons.Outlined.Checklist, "Today's Checklist", "Your daily program actions") { state.currentScreen = "active_journey" }
-            CareRow(Icons.Outlined.CalendarMonth, "Program Calendar", "Live sessions, group walks, and lab weeks") { state.currentScreen = "program_calendar" }
+            SectionLabel("SUPPORT", color = NirogColor.gold)
+            CareRow(Icons.Outlined.MedicalServices, "Book a Consultation", "Opens nirogbhumi.com to pick an expert and a time.") { openConsultationBooking() }
         }
 
         Spacer(modifier = Modifier.height(32.dp))
+    }
+}
+
+@Composable
+private fun ProgramStatusHero(state: NirogState, dayNumber: Long) {
+    var pulse by remember { mutableStateOf<Map<String, Any?>?>(null) }
+    DisposableEffect(state.activeProgramId) {
+        if (state.activeProgramId.isBlank()) return@DisposableEffect onDispose {}
+        val sub = state.repository.listenBatchPulse(state.activeProgramId) { result ->
+            if (result is CloudResult.Success) pulse = result.value?.values
+        }
+        onDispose { sub.cancel() }
+    }
+    val checkedIn = (pulse?.get("checkedInCount") as? Number)?.toInt() ?: 0
+    val memberCount = (pulse?.get("memberCount") as? Number)?.toInt() ?: 0
+    val collectiveMinutes = (pulse?.get("collectiveMinutes") as? Number)?.toInt() ?: 0
+
+    // Program-day milestone (30/60/90) - a device-local one-time flag (not
+    // Firestore-synced state) since it's a celebratory toast, not data the
+    // rest of the app needs to agree on.
+    val context = LocalContext.current
+    var showDayMilestone by remember { mutableStateOf(false) }
+    LaunchedEffect(dayNumber, state.activeProgramId) {
+        if (dayNumber != 30L && dayNumber != 60L && dayNumber != 90L || state.activeProgramId.isBlank()) return@LaunchedEffect
+        val prefs = context.getSharedPreferences("nirog_prefs", android.content.Context.MODE_PRIVATE)
+        val key = "program_day_milestone_${state.activeProgramId}_$dayNumber"
+        if (!prefs.getBoolean(key, false)) {
+            prefs.edit().putBoolean(key, true).apply()
+            showDayMilestone = true
+        }
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth().border(width = 0.5.dp, color = NirogColor.outlineVariant.copy(alpha = 0.3f), shape = RoundedCornerShape(24.dp)),
+        colors = CardDefaults.cardColors(containerColor = NirogColor.forestSoft),
+        shape = RoundedCornerShape(24.dp)
+    ) {
+        Column(modifier = Modifier.padding(20.dp)) {
+            Text(state.activeProgramName.ifBlank { "Your Program" }, fontSize = 18.sp, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color.White)
+            Spacer(modifier = Modifier.height(16.dp))
+            Row(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        if (state.programDurationDays > 0) "Day $dayNumber of ${state.programDurationDays}" else "Day $dayNumber",
+                        fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color.White,
+                    )
+                    Text("your program", fontSize = 12.sp, color = NirogColor.forestPale)
+                }
+                Box(modifier = Modifier.width(1.dp).height(36.dp).background(Color.White.copy(alpha = 0.18f)))
+                Column(modifier = Modifier.weight(1f).padding(start = 20.dp)) {
+                    if (memberCount > 0) {
+                        Text("$checkedIn/$memberCount", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        Text("batchmates checked in today", fontSize = 12.sp, color = NirogColor.forestPale)
+                    } else {
+                        // A lone "-" read as meaningless at a glance - spell out
+                        // what's actually being counted (no one's checked in
+                        // yet today) instead of an unexplained placeholder symbol.
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Filled.WavingHand, contentDescription = null, tint = NirogColor.secondaryContainer, modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Be first!", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        }
+                        Text("No batchmates checked in yet today", fontSize = 12.sp, color = NirogColor.forestPale)
+                    }
+                }
+            }
+            if (showDayMilestone) {
+                Spacer(modifier = Modifier.height(16.dp))
+                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.18f)))
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("🎉", fontSize = 18.sp)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Day $dayNumber - a real milestone in your program!", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                }
+            }
+            // Cooperative, never a per-member ranking - a team total only.
+            if (collectiveMinutes > 0) {
+                Spacer(modifier = Modifier.height(16.dp))
+                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.18f)))
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    "$collectiveMinutes minutes walked as a batch this month - no rankings, just the team total.",
+                    fontSize = 12.sp, color = NirogColor.forestPale, lineHeight = 17.sp,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CareTile(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    Card(
+        modifier = modifier
+            .clickable(onClick = onClick)
+            .border(width = 0.5.dp, color = NirogColor.outlineVariant.copy(alpha = 0.3f), shape = RoundedCornerShape(20.dp)),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        shape = RoundedCornerShape(20.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp).fillMaxWidth()) {
+            Box(
+                modifier = Modifier.size(36.dp).background(NirogColor.surfaceLow, CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(icon, title, tint = NirogColor.forest, modifier = Modifier.size(18.dp))
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+            Text(title, fontWeight = FontWeight.Bold, color = NirogColor.inkPrimary, fontSize = 15.sp)
+            Text(subtitle, fontSize = 12.sp, color = NirogColor.outline)
+        }
     }
 }
 
@@ -1764,15 +1960,15 @@ private fun PinnedAnnouncementCard(state: NirogState) {
         modifier = Modifier
             .fillMaxWidth()
             .clickable { state.currentScreen = "announcements" }
-            .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.3f), shape = RoundedCornerShape(20.dp)),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFFF4E9D3)),
+            .border(width = 0.5.dp, color = NirogColor.outlineVariant.copy(alpha = 0.3f), shape = RoundedCornerShape(20.dp)),
+        colors = CardDefaults.cardColors(containerColor = NirogColor.statusAttentionBg),
         shape = RoundedCornerShape(20.dp)
     ) {
         Row(modifier = Modifier.padding(16.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Box(
-                modifier = Modifier.size(36.dp).background(Color(0xFFB9832B).copy(alpha = 0.16f), CircleShape),
+                modifier = Modifier.size(36.dp).background(NirogColor.statusAttention.copy(alpha = 0.16f), CircleShape),
                 contentAlignment = Alignment.Center
-            ) { Icon(Icons.Filled.Campaign, contentDescription = null, tint = Color(0xFFB9832B), modifier = Modifier.size(18.dp)) }
+            ) { Icon(Icons.Filled.Campaign, contentDescription = null, tint = NirogColor.statusAttention, modifier = Modifier.size(18.dp)) }
             Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
@@ -1790,99 +1986,29 @@ private fun PinnedAnnouncementCard(state: NirogState) {
     }
 }
 
-/**
- * Batch Pulse (PRD v2, Care+): cooperative presence + a collective goal -
- * deliberately never a per-member ranking. Reads a Function-aggregated,
- * PII-free document; shows an honest "be the first" state at zero rather
- * than fabricating activity.
- */
-@Composable
-private fun BatchPulseCard(state: NirogState) {
-    var pulse by remember { mutableStateOf<Map<String, Any?>?>(null) }
-    var loaded by remember { mutableStateOf(false) }
-
-    DisposableEffect(state.activeProgramId) {
-        if (state.activeProgramId.isBlank()) {
-            loaded = true
-            return@DisposableEffect onDispose {}
-        }
-        val sub = state.repository.listenBatchPulse(state.activeProgramId) { result ->
-            if (result is CloudResult.Success) pulse = result.value?.values
-            loaded = true
-        }
-        onDispose { sub.cancel() }
-    }
-
-    if (!loaded) return
-    val checkedIn = (pulse?.get("checkedInCount") as? Number)?.toInt() ?: 0
-    val memberCount = (pulse?.get("memberCount") as? Number)?.toInt() ?: 0
-    val collectiveMinutes = (pulse?.get("collectiveMinutes") as? Number)?.toInt() ?: 0
-
-    Card(
-        modifier = Modifier.fillMaxWidth().border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.3f), shape = RoundedCornerShape(24.dp)),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        shape = RoundedCornerShape(24.dp)
-    ) {
-        Column(Modifier.padding(NirogSpace.xl)) {
-            SectionLabel("Batch pulse")
-            Spacer(Modifier.height(NirogSpace.sm))
-            if (memberCount == 0) {
-                Text(
-                    "Be the first in your batch to check in today.",
-                    style = NirogType.body,
-                    color = NirogColor.inkSecondary,
-                )
-            } else {
-                Row(verticalAlignment = Alignment.Bottom) {
-                    Text("$checkedIn", style = NirogType.display, color = NirogColor.forest)
-                    Text("/$memberCount", style = NirogType.cardTitle, color = NirogColor.inkMuted)
-                }
-                Text(
-                    "batchmates checked in today" + if (checkedIn > 0) " - you're one of them" else "",
-                    style = NirogType.caption,
-                    color = NirogColor.inkMuted,
-                )
-            }
-            if (collectiveMinutes > 0) {
-                Spacer(Modifier.height(NirogSpace.md))
-                Text(
-                    "Batch goal: walk together this month",
-                    style = NirogType.secondary,
-                    color = NirogColor.inkSecondary,
-                )
-                Text(
-                    "$collectiveMinutes minutes walked as a batch so far - no rankings, just the team total.",
-                    style = NirogType.caption,
-                    color = NirogColor.inkMuted,
-                )
-            }
-        }
-    }
-}
-
 @Composable
 private fun CareRow(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, subtitle: String, onClick: () -> Unit) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.3f), shape = RoundedCornerShape(20.dp)),
+            .border(width = 0.5.dp, color = NirogColor.outlineVariant.copy(alpha = 0.3f), shape = RoundedCornerShape(20.dp)),
         colors = CardDefaults.cardColors(containerColor = Color.White),
         shape = RoundedCornerShape(20.dp)
     ) {
         Row(modifier = Modifier.padding(16.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Box(
-                modifier = Modifier.size(40.dp).background(Color(0xFFEBF7E8), CircleShape),
+                modifier = Modifier.size(40.dp).background(NirogColor.surfaceLow, CircleShape),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(icon, title, tint = Color(0xFF1B3221), modifier = Modifier.size(18.dp))
+                Icon(icon, title, tint = NirogColor.forest, modifier = Modifier.size(18.dp))
             }
             Spacer(modifier = Modifier.width(14.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(title, fontWeight = FontWeight.Bold, color = Color(0xFF141E15), fontSize = 15.sp)
-                Text(subtitle, fontSize = 12.sp, color = Color(0xFF737972))
+                Text(title, fontWeight = FontWeight.Bold, color = NirogColor.inkPrimary, fontSize = 15.sp)
+                Text(subtitle, fontSize = 12.sp, color = NirogColor.outline)
             }
-            Icon(Icons.Filled.ChevronRight, null, tint = Color(0xFF737972))
+            Icon(Icons.Filled.ChevronRight, null, tint = NirogColor.outline)
         }
     }
 }
@@ -1907,12 +2033,12 @@ fun LearnTab(state: NirogState) {
                 fontSize = 32.sp,
                 fontFamily = FontFamily.Serif,
                 fontWeight = FontWeight.Bold,
-                color = Color(0xFF1B3221)
+                color = NirogColor.forest
             )
             Text(
                 text = "Discover Ayurvedic wisdom & modern metabolic sciences.",
                 fontSize = 15.sp,
-                color = Color(0xFF434842),
+                color = NirogColor.inkTertiary,
                 modifier = Modifier.padding(top = 4.dp)
             )
         }
@@ -1922,12 +2048,12 @@ fun LearnTab(state: NirogState) {
             value = state.searchQuery,
             onValueChange = { state.searchQuery = it },
             modifier = Modifier.fillMaxWidth(),
-            leadingIcon = { Icon(Icons.Filled.Search, "Search", tint = Color(0xFF737972)) },
+            leadingIcon = { Icon(Icons.Filled.Search, "Search", tint = NirogColor.outline) },
             label = { Text("Search articles, guides, or products") },
-            placeholder = { Text("Search articles, guides, or products...", color = Color(0xFFC3C8C0)) },
+            placeholder = { Text("Search articles, guides, or products...", color = NirogColor.outlineVariant) },
             shape = RoundedCornerShape(12.dp),
             colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = Color(0xFF1B3221),
+                focusedBorderColor = NirogColor.forest,
                 unfocusedBorderColor = Color.Transparent,
                 focusedContainerColor = Color(0xFFEEE8DC).copy(alpha = 0.7f),
                 unfocusedContainerColor = Color(0xFFEEE8DC).copy(alpha = 0.7f)
@@ -1940,12 +2066,12 @@ fun LearnTab(state: NirogState) {
             fontSize = 20.sp,
             fontFamily = FontFamily.Serif,
             fontWeight = FontWeight.Bold,
-            color = Color(0xFF1B3221)
+            color = NirogColor.forest
         )
 
         Row(modifier = Modifier.fillMaxWidth()) {
             Box(modifier = Modifier.weight(1f).padding(end = 6.dp)) {
-                LearnCategoryCard("Diabetes", Icons.Filled.Spa, Color(0xFFBFEE95)) { state.currentScreen = "articles" }
+                LearnCategoryCard("Diabetes", Icons.Filled.Spa, NirogColor.secondaryContainer) { state.currentScreen = "articles" }
             }
             Box(modifier = Modifier.weight(1f).padding(start = 6.dp)) {
                 LearnCategoryCard("Food", Icons.Filled.Restaurant, Color(0xFFFFD9DE)) { state.currentScreen = "articles" }
@@ -1954,10 +2080,10 @@ fun LearnTab(state: NirogState) {
 
         Row(modifier = Modifier.fillMaxWidth()) {
             Box(modifier = Modifier.weight(1f).padding(end = 6.dp)) {
-                LearnCategoryCard("Movement", Icons.Filled.DirectionsWalk, Color(0xFFCDEAD0)) { state.currentScreen = "articles" }
+                LearnCategoryCard("Movement", Icons.Filled.DirectionsWalk, NirogColor.forestPaleLight) { state.currentScreen = "articles" }
             }
             Box(modifier = Modifier.weight(1f).padding(start = 6.dp)) {
-                LearnCategoryCard("Mindfulness", Icons.Filled.SelfImprovement, Color(0xFFE5F1E2)) { state.currentScreen = "articles" }
+                LearnCategoryCard("Mindfulness", Icons.Filled.SelfImprovement, NirogColor.surfaceNeutral) { state.currentScreen = "articles" }
             }
         }
 
@@ -1967,13 +2093,13 @@ fun LearnTab(state: NirogState) {
             fontSize = 20.sp,
             fontFamily = FontFamily.Serif,
             fontWeight = FontWeight.Bold,
-            color = Color(0xFF1B3221)
+            color = NirogColor.forest
         )
 
         val featured = featuredArticle?.getOrNull()?.firstOrNull()
         when {
             featuredArticle == null -> Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 8.dp)) {
-                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Color(0xFF9CB79F))
+                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = NirogColor.forestSofter)
                 Spacer(modifier = Modifier.width(8.dp))
                 Text("Loading from nirogbhumi.com...", fontSize = 13.sp, color = Color(0xFF697169))
             }
@@ -1984,7 +2110,7 @@ fun LearnTab(state: NirogState) {
             else -> Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.35f), shape = RoundedCornerShape(24.dp))
+                    .border(width = 0.5.dp, color = NirogColor.outlineVariant.copy(alpha = 0.35f), shape = RoundedCornerShape(24.dp))
                     .clickable {
                         runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(featured.link))) }
                     },
@@ -2011,14 +2137,14 @@ fun LearnTab(state: NirogState) {
                             fontSize = 18.sp,
                             fontFamily = FontFamily.Serif,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF1B3221)
+                            color = NirogColor.forest
                         )
                         if (featured.excerpt.isNotBlank()) {
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
                                 text = featured.excerpt,
                                 fontSize = 13.sp,
-                                color = Color(0xFF434842),
+                                color = NirogColor.inkTertiary,
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -2029,11 +2155,11 @@ fun LearnTab(state: NirogState) {
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(featured.dateLabel, fontSize = 11.sp, color = Color(0xFF737972))
+                            Text(featured.dateLabel, fontSize = 11.sp, color = NirogColor.outline)
                             Box(
                                 modifier = Modifier
                                     .size(32.dp)
-                                    .background(Color(0xFF314936), CircleShape),
+                                    .background(NirogColor.forestSoft, CircleShape),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(Icons.Filled.ChevronRight, "Read", tint = Color.White)
@@ -2050,7 +2176,7 @@ fun LearnTab(state: NirogState) {
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable { state.currentScreen = "coming_soon" }
-                .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.35f), shape = RoundedCornerShape(24.dp)),
+                .border(width = 0.5.dp, color = NirogColor.outlineVariant.copy(alpha = 0.35f), shape = RoundedCornerShape(24.dp)),
             colors = CardDefaults.cardColors(containerColor = Color(0xFFEEE8DC)),
             shape = RoundedCornerShape(24.dp)
         ) {
@@ -2064,11 +2190,11 @@ fun LearnTab(state: NirogState) {
                         fontSize = 18.sp,
                         fontFamily = FontFamily.Serif,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF1B3221)
+                        color = NirogColor.forest
                     )
-                    Text("Wellness tools and kits - coming soon", fontSize = 12.sp, color = Color(0xFF737972))
+                    Text("Wellness tools and kits - coming soon", fontSize = 12.sp, color = NirogColor.outline)
                 }
-                Icon(Icons.Filled.ChevronRight, "Coming soon", tint = Color(0xFF1B3221))
+                Icon(Icons.Filled.ChevronRight, "Coming soon", tint = NirogColor.forest)
             }
         }
         Spacer(modifier = Modifier.height(32.dp))
@@ -2082,7 +2208,7 @@ fun LearnCategoryCard(title: String, icon: androidx.compose.ui.graphics.vector.I
             .fillMaxWidth()
             .heightIn(min = 110.dp)
             .clickable(onClick = onClick)
-            .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.35f), shape = RoundedCornerShape(16.dp)),
+            .border(width = 0.5.dp, color = NirogColor.outlineVariant.copy(alpha = 0.35f), shape = RoundedCornerShape(16.dp)),
         colors = CardDefaults.cardColors(containerColor = Color.White),
         shape = RoundedCornerShape(16.dp)
     ) {
@@ -2098,9 +2224,9 @@ fun LearnCategoryCard(title: String, icon: androidx.compose.ui.graphics.vector.I
                     .background(iconBg.copy(alpha = 0.35f), CircleShape),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(imageVector = icon, contentDescription = title, tint = Color(0xFF1B3221), modifier = Modifier.size(18.dp))
+                Icon(imageVector = icon, contentDescription = title, tint = NirogColor.forest, modifier = Modifier.size(18.dp))
             }
-            Text(text = title, fontWeight = FontWeight.SemiBold, color = Color(0xFF1B3221), fontSize = 14.sp)
+            Text(text = title, fontWeight = FontWeight.SemiBold, color = NirogColor.forest, fontSize = 14.sp)
         }
     }
 }
