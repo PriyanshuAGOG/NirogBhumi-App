@@ -164,6 +164,54 @@ blocker - it needs an exception added for this project, or an
 command for any future function the first time it's deployed, until the
 underlying WIF service account's grant is confirmed sufficient end to end.
 
+**Confirmed 2026-07-06**: this is exactly what happens here. The command
+above fails for every function with:
+
+```
+ERROR: (gcloud.run.services.add-iam-policy-binding) FAILED_PRECONDITION: One or more users named in the policy do not belong to a permitted customer, perhaps due to an organization policy.
+```
+
+`gcloud org-policies describe iam.allowedPolicyMemberDomains --project=nirog-bhumi-app --effective`
+confirms the **Domain Restricted Sharing** constraint is active, scoped to
+Cloud Identity customer `C01cisooi`, inherited from above the project -
+`allUsers` isn't part of any customer, so it's blocked outright regardless
+of the caller's IAM role (this is why `roles/run.admin` from step 3 above
+doesn't help - it's an org policy, not a permission gap).
+
+Attempting the standard override also fails, for a second, separate
+reason - the account running these commands doesn't hold Organization
+Policy Administrator on this project:
+
+```
+ERROR: (gcloud.org-policies.set-policy) [<account>] does not have permission to access projects instance [nirog-bhumi-app] ...: Permission 'orgpolicy.policies.create' denied ...
+```
+
+**This needs whoever actually administers the Cloud org/Workspace for this
+project** (confirmed to be a different person than whoever is running these
+deploy commands) to do ONE of the following:
+
+1. Grant `roles/orgpolicy.policyAdmin` on the `nirog-bhumi-app` project to
+   the account that needs to make this change, who can then run the
+   `set-policy` override from step 3 above themselves, or
+2. Make the override directly themselves:
+   ```sh
+   cat > /tmp/allow-all-domains.yaml <<'EOF'
+   name: projects/nirog-bhumi-app/policies/iam.allowedPolicyMemberDomains
+   spec:
+     rules:
+     - allowAll: true
+   EOF
+   gcloud org-policies set-policy /tmp/allow-all-domains.yaml
+   ```
+3. Then re-run the `add-iam-policy-binding` loop above for every function in
+   the `for SERVICE in ...` list - it should succeed once the domain
+   restriction no longer blocks `allUsers` for this project.
+
+Until this happens, every `onCall` function added to this project will
+continue to silently fail its first deploy's invoker step, and stay
+uninvokable (looking like an app-level auth bug) until someone with this
+access runs the fix.
+
 ## 4. Add the two GitHub repo secrets
 
 Get the provider's full resource name:
