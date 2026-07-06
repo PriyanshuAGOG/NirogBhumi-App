@@ -3156,23 +3156,40 @@ private fun mentionAnnotatedText(text: String, mentionColor: Color): androidx.co
     }
 
 // One MediaPlayer per visible bubble (released via DisposableEffect when the
-// item scrolls out of the LazyColumn) - deliberately doesn't pause other
-// bubbles' playback when one starts, unlike WhatsApp. Acceptable v1 scope
-// cut: voice notes are short and this is a rare multi-tap scenario.
+// item scrolls out of the LazyColumn). activePlaybackId is hoisted to
+// ProgramChatScreen so starting one bubble's playback pauses whichever other
+// one was playing, matching WhatsApp instead of letting multiple notes overlap.
 @Composable
-private fun VoiceNoteBubble(url: String, durationSec: Int, isMine: Boolean) {
+private fun VoiceNoteBubble(
+    messageId: String,
+    url: String,
+    durationSec: Int,
+    isMine: Boolean,
+    activePlaybackId: String?,
+    onPlaybackStart: (String) -> Unit,
+) {
     var isPlaying by remember { mutableStateOf(false) }
     var isPrepared by remember { mutableStateOf(false) }
     var elapsedSec by remember { mutableStateOf(0) }
+    var dragFraction by remember { mutableStateOf<Float?>(null) }
     val player = remember { android.media.MediaPlayer() }
 
     DisposableEffect(url) {
         onDispose { runCatching { player.release() } }
     }
 
+    // Only one voice note plays at a time (WhatsApp behavior) - starting a
+    // different bubble's playback pauses this one instead of overlapping audio.
+    LaunchedEffect(activePlaybackId) {
+        if (activePlaybackId != messageId && isPlaying) {
+            runCatching { player.pause() }
+            isPlaying = false
+        }
+    }
+
     LaunchedEffect(isPlaying) {
         while (isPlaying) {
-            kotlinx.coroutines.delay(500)
+            kotlinx.coroutines.delay(200)
             elapsedSec = runCatching { player.currentPosition / 1000 }.getOrDefault(elapsedSec)
         }
     }
@@ -3183,6 +3200,7 @@ private fun VoiceNoteBubble(url: String, durationSec: Int, isMine: Boolean) {
             isPlaying = false
             return
         }
+        onPlaybackStart(messageId)
         if (isPrepared) {
             runCatching { player.start() }
             isPlaying = true
@@ -3206,25 +3224,44 @@ private fun VoiceNoteBubble(url: String, durationSec: Int, isMine: Boolean) {
 
     Row(
         modifier = Modifier
-            .widthIn(min = 160.dp)
+            .widthIn(min = 200.dp)
             .clip(NirogRadius.pillShape)
             .background(if (isMine) Color.White.copy(alpha = 0.12f) else NirogColor.surfaceSunken)
-            .clickable { togglePlayback() }
-            .semantics { contentDescription = if (isPlaying) "Pause voice note" else "Play voice note" }
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .padding(horizontal = 10.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(if (isPlaying) "⏸" else "▶", style = NirogType.cardTitle, color = if (isMine) NirogColor.onAccent else NirogColor.forest)
-        Spacer(Modifier.width(8.dp))
-        val shownSec = if (isPlaying || elapsedSec > 0) elapsedSec else durationSec
+        IconButton(
+            onClick = { togglePlayback() },
+            modifier = Modifier.size(32.dp).semantics { contentDescription = if (isPlaying) "Pause voice note" else "Play voice note" },
+        ) {
+            Text(if (isPlaying) "⏸" else "▶", style = NirogType.cardTitle, color = if (isMine) NirogColor.onAccent else NirogColor.forest)
+        }
+        Spacer(Modifier.width(4.dp))
+        val liveFraction = if (durationSec > 0) (elapsedSec.toFloat() / durationSec).coerceIn(0f, 1f) else 0f
+        val shownFraction = dragFraction ?: liveFraction
+        val shownSec = if (dragFraction != null) (dragFraction!! * durationSec).toInt() else if (isPlaying || elapsedSec > 0) elapsedSec else durationSec
         Column(modifier = Modifier.weight(1f)) {
-            LinearProgressIndicator(
-                progress = { if (durationSec > 0) (shownSec.toFloat() / durationSec).coerceIn(0f, 1f) else 0f },
-                modifier = Modifier.fillMaxWidth().height(3.dp).clip(NirogRadius.pillShape),
-                color = if (isMine) NirogColor.onAccent else NirogColor.forest,
-                trackColor = if (isMine) Color.White.copy(alpha = 0.25f) else NirogColor.surface,
+            Slider(
+                value = shownFraction,
+                onValueChange = { if (isPrepared) dragFraction = it },
+                onValueChangeFinished = {
+                    dragFraction?.let { fraction ->
+                        runCatching { player.seekTo((fraction * durationSec * 1000).toInt()) }
+                        elapsedSec = (fraction * durationSec).toInt()
+                    }
+                    dragFraction = null
+                },
+                enabled = isPrepared,
+                modifier = Modifier.fillMaxWidth().height(20.dp),
+                colors = SliderDefaults.colors(
+                    thumbColor = if (isMine) NirogColor.onAccent else NirogColor.forest,
+                    activeTrackColor = if (isMine) NirogColor.onAccent else NirogColor.forest,
+                    inactiveTrackColor = if (isMine) Color.White.copy(alpha = 0.25f) else NirogColor.surface,
+                    disabledThumbColor = if (isMine) NirogColor.onAccent else NirogColor.forest,
+                    disabledActiveTrackColor = if (isMine) NirogColor.onAccent else NirogColor.forest,
+                    disabledInactiveTrackColor = if (isMine) Color.White.copy(alpha = 0.25f) else NirogColor.surface,
+                ),
             )
-            Spacer(Modifier.height(4.dp))
             Text(
                 "%d:%02d".format(shownSec / 60, shownSec % 60),
                 style = NirogType.caption,
@@ -3283,6 +3320,50 @@ private fun TypingIndicatorRow(names: List<String>) {
 private fun newMediaRecorder(context: android.content.Context): android.media.MediaRecorder =
     if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) android.media.MediaRecorder(context) else android.media.MediaRecorder()
 
+// A raw picked photo can be several MB at full camera resolution - uploading
+// that as-is (the previous behavior) made sends slow and data-heavy on a poor
+// connection, unlike WhatsApp which always compresses before sending. Downscale
+// to a chat-appropriate size and re-encode as JPEG; also corrects orientation,
+// since a bitmap decoded straight off a content:// Uri ignores EXIF rotation
+// (only gallery apps that read EXIF themselves show it right-side-up).
+private fun compressImageForChat(context: android.content.Context, uri: Uri, maxDimension: Int = 1600, quality: Int = 82): Uri {
+    val resolver = context.contentResolver
+    val orientation = resolver.openInputStream(uri)?.use { stream ->
+        runCatching { android.media.ExifInterface(stream).getAttributeInt(android.media.ExifInterface.TAG_ORIENTATION, android.media.ExifInterface.ORIENTATION_NORMAL) }
+            .getOrDefault(android.media.ExifInterface.ORIENTATION_NORMAL)
+    } ?: android.media.ExifInterface.ORIENTATION_NORMAL
+
+    val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    resolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, bounds) }
+    var sampleSize = 1
+    while (bounds.outWidth / sampleSize > maxDimension * 2 || bounds.outHeight / sampleSize > maxDimension * 2) sampleSize *= 2
+
+    val decoded = resolver.openInputStream(uri)?.use {
+        android.graphics.BitmapFactory.decodeStream(it, null, android.graphics.BitmapFactory.Options().apply { inSampleSize = sampleSize })
+    } ?: throw IllegalStateException("Could not read the photo")
+
+    val scale = maxDimension.toFloat() / maxOf(decoded.width, decoded.height)
+    val resized = if (scale < 1f) {
+        android.graphics.Bitmap.createScaledBitmap(decoded, (decoded.width * scale).toInt().coerceAtLeast(1), (decoded.height * scale).toInt().coerceAtLeast(1), true)
+    } else decoded
+
+    val matrix = android.graphics.Matrix().apply {
+        when (orientation) {
+            android.media.ExifInterface.ORIENTATION_ROTATE_90 -> postRotate(90f)
+            android.media.ExifInterface.ORIENTATION_ROTATE_180 -> postRotate(180f)
+            android.media.ExifInterface.ORIENTATION_ROTATE_270 -> postRotate(270f)
+        }
+    }
+    val oriented = if (!matrix.isIdentity) {
+        android.graphics.Bitmap.createBitmap(resized, 0, 0, resized.width, resized.height, matrix, true)
+    } else resized
+
+    val dir = java.io.File(context.cacheDir, "chat-photos").apply { mkdirs() }
+    val outFile = java.io.File(dir, "photo_${System.currentTimeMillis()}.jpg")
+    java.io.FileOutputStream(outFile).use { out -> oriented.compress(android.graphics.Bitmap.CompressFormat.JPEG, quality, out) }
+    return androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.files", outFile)
+}
+
 // Care+ community chat - one shared room per program, not one global room, so
 // conversation stays relevant to the program a member actually joined.
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
@@ -3303,6 +3384,8 @@ fun ProgramChatScreen(state: NirogState) {
     var typingStatuses by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>>(emptyList()) }
     var typingTickMillis by remember { mutableStateOf(System.currentTimeMillis()) }
     var viewingPhotoUrl by remember { mutableStateOf<String?>(null) }
+    // Only one voice note plays at a time - starting another pauses this one.
+    var activePlaybackId by remember { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
     val myUid = state.repository.userId
@@ -3380,6 +3463,19 @@ fun ProgramChatScreen(state: NirogState) {
                 }
             }
         }
+    }
+
+    // WhatsApp-style discard: stop the recorder and throw the file away instead
+    // of sending it - previously the only way out of a recording was to send it
+    // (or let it fail the <1s check), with no way to just change your mind.
+    fun cancelRecording() {
+        isRecording = false
+        val recorder = recorderHolder.value
+        val file = recordingFileHolder.value
+        recorderHolder.value = null
+        recordingFileHolder.value = null
+        runCatching { recorder?.apply { stop(); release() } }
+        file?.delete()
     }
 
     val micPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -3577,7 +3673,14 @@ fun ProgramChatScreen(state: NirogState) {
                                     )
                                 }
                                 if (audioUrl != null) {
-                                    VoiceNoteBubble(audioUrl, audioDurationSec, isMine)
+                                    VoiceNoteBubble(
+                                        messageId = record.id,
+                                        url = audioUrl,
+                                        durationSec = audioDurationSec,
+                                        isMine = isMine,
+                                        activePlaybackId = activePlaybackId,
+                                        onPlaybackStart = { activePlaybackId = it },
+                                    )
                                 }
                                 if (text.isNotBlank()) {
                                     Text(
@@ -3689,6 +3792,14 @@ fun ProgramChatScreen(state: NirogState) {
             // photo) - WhatsApp-style mic-to-send handoff - rather than
             // showing mic and send simultaneously at all times.
             val showMic = messageInput.isBlank() && pendingPhotoUri == null
+            if (isRecording) {
+                IconButton(
+                    onClick = { cancelRecording() },
+                    modifier = Modifier.semantics { contentDescription = "Discard voice note" },
+                ) {
+                    Icon(Icons.Filled.Delete, contentDescription = null, tint = NirogColor.inkMuted)
+                }
+            }
             if (showMic || isRecording) {
                 val recordingPulse = rememberInfiniteTransition(label = "recording-pulse")
                 val pulseScale by recordingPulse.animateFloat(
@@ -3771,11 +3882,16 @@ fun ProgramChatScreen(state: NirogState) {
 
                     if (photo != null) {
                         uploadingPhoto = true
-                        state.repository.uploadProgramChatPhoto(state.activeProgramId, photo) { result ->
-                            uploadingPhoto = false
-                            when (result) {
-                                is com.nirogbhumi.app.data.CloudResult.Success -> send(result.value)
-                                is com.nirogbhumi.app.data.CloudResult.Failure -> state.cloudMessage = result.message
+                        coroutineScope.launch {
+                            val compressed = runCatching {
+                                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { compressImageForChat(context, photo) }
+                            }.getOrDefault(photo) // fall back to the original pick rather than blocking the send on a compression bug
+                            state.repository.uploadProgramChatPhoto(state.activeProgramId, compressed) { result ->
+                                uploadingPhoto = false
+                                when (result) {
+                                    is com.nirogbhumi.app.data.CloudResult.Success -> send(result.value)
+                                    is com.nirogbhumi.app.data.CloudResult.Failure -> state.cloudMessage = result.message
+                                }
                             }
                         }
                     } else {
