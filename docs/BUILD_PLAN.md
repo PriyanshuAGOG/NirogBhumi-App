@@ -465,3 +465,69 @@ by the user. Work sequentially, CI-verified per slice, small commits.
     and a "Day 30/60/90" program milestone on the Care+ hero, de-duplicated
     with a local `SharedPreferences` flag since these are device-side
     celebratory moments, not data other screens need to agree on.
+20. [x] **`DashboardHub.kt` design-token restyle** — closed Phase 1 item 1's
+    last open visual-consistency gap: every ad-hoc `Color(0xFF...)` on
+    Today/Track/Insights/Care replaced with `NirogColor`/`NirogSpace`/
+    `NirogType`, matching Chat/Announcements/Calendar/Details. Compose UI
+    tests added for the check-in flow and Rhythm screen alongside it.
+21. [x] **Chat fixes, enterprise error reporting, and admin console
+    performance/correctness pass** — user-reported bugs run to ground with
+    root causes, not just symptom patches:
+    - Voice notes and photo sending were fully broken: `startRecording()`
+      set `isRecording = true` even when `MediaRecorder.prepare()/start()`
+      threw (mic held by another app, no mic present), leaving the UI stuck
+      showing "Recording…" forever. Fixed with real success-checking, the
+      modern `MediaRecorder(context)` constructor, and switched the photo
+      picker to the system `PickVisualMedia` (no storage-permission edge
+      case). Confirmed via code + rules audit (not just re-reading the
+      diff) that mentions rendering and the photo/voice Storage paths are
+      otherwise correctly wired - see the enrollment-gating note below for
+      why they can still *look* broken to a given account.
+    - `redeemProgramCode` "unauthenticated": a callable Function is a real
+      network round-trip needing a genuinely fresh ID token, unlike
+      Firestore writes which queue locally regardless of token state. Now
+      forces a token refresh before the first attempt and retries once
+      more on an `UNAUTHENTICATED` failure specifically, and every failure
+      message embeds the real `FirebaseFunctionsException` code for
+      diagnosis instead of a generic string.
+    - New production error-reporting pipeline: every `CloudResult.Failure`
+      surfaced to a real user also writes to `errorReports` (screen,
+      message, code, `resolved`) via the same single global choke point
+      MainActivity already used to show the snackbar. New admin-only
+      Error Reports console page (bounded/ordered query, open/resolved/all
+      filter, mark-resolved) makes real-device-only failures visible
+      without needing to reproduce them blind.
+    - Admin console Dashboard tiles used permanent `onSnapshot` listeners
+      just to read a count, including one on the *entire* `users`
+      collection - which every check-in app-wide rewrites - for the
+      "Total members" tile. Replaced with periodic `getCountFromServer`
+      aggregation polling (45s). Separately found "quiet member" tracking
+      silently broken everywhere (Dashboard/Members/Batches/MemberDetail
+      all read `lastCheckinAt` off `programMembers`, but it was only ever
+      written to `users/{uid}`) - added a Firestore trigger
+      (`onUserCheckinMirror`) to mirror it server-side, and bounded the
+      now-hot-write `programMembers`/`users` listeners so per-admin reads
+      scale with what's needed rather than the whole platform's write
+      volume.
+    - Coaches (the actual per-batch program managers) could not post
+      announcements or pin/unpin chat messages from the app at all - the
+      client's admin check only matched the literal claim `role ==
+      "admin"`, excluding both `coach` and `super_admin`, even though the
+      Firestore rules already authorized both (`programStaff()` =
+      `admin() || assignedCoach(programId)`). Fixed with a
+      `canManageProgram(programId)` helper that mirrors the server rule
+      exactly (coach eligibility resolved via a query that only the
+      assigned coach could get a result from).
+    - Announcements restyled as a WhatsApp-Community-style broadcast
+      channel: a channel-identity header (icon + program name + "only
+      your coach posts here") and a channel-badge icon per post instead
+      of an individual sender identity, reinforcing the one-to-many
+      read-only mental model rather than looking like a chat thread.
+    - Root-cause note for the user's combined "enrollment fails AND chat/
+      voice/images/mentions don't work" report: every Care+ Firestore/
+      Storage rule (`programMember()`) requires `activeProgramId`/
+      `programActive == true` on `users/{uid}`, which only
+      `redeemProgramCode` ever sets. If enrollment doesn't complete, every
+      downstream Care+ feature is rules-gated shut for that account
+      regardless of whether its own code is correct - consistent with
+      everything else in this item auditing clean on inspection.
