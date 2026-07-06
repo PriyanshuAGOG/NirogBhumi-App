@@ -115,20 +115,44 @@ fix) never actually took effect for real accounts even after being deployed.
 `run.services.setIamPolicy`, so this points at either an incomplete role
 grant or an org policy (e.g. Domain Restricted Sharing / Public Access
 Prevention) that blocks granting `allUsers` as a Cloud Run invoker
-regardless of the grantee's role. **Owner action required** - from Cloud
-Shell (using your own elevated login, the same one the original manual
-deploys before WIF existed already used successfully):
+regardless of the grantee's role.
+
+**This almost certainly also explains the original, most-reported bug in
+this project**: `redeemProgramCode` (the program-enrollment function) was
+itself a brand-new function when it was first deployed, and every symptom
+matches exactly - users get `unauthenticated` trying to redeem a program
+code, which is `requireUser()`'s own error for "no valid auth on this
+request," i.e. the request never got a chance to prove who it was, because
+it was rejected at the platform layer before reaching our code at all. If
+its first deploy hit this same IAM gap and nobody happened to fix it since
+(subsequent code updates never re-attempt the IAM step - only a function's
+literal first-ever deploy does), it has likely been broken since the day it
+was added, independent of anything client-side.
+
+**Owner action required** - from Cloud Shell (using your own elevated
+login, the same one the original manual deploys before WIF existed already
+used successfully). This is safe to run for every `onCall` function in the
+codebase, not just the newest ones - it's a no-op for any service that
+already has the binding:
 
 ```sh
 PROJECT_ID="nirog-bhumi-app"
 REGION="asia-south1"
 
-for SERVICE in createstaffaccount ensureprogrammembership bootstrapsuperadmin; do
+for SERVICE in \
+  redeemprogramcode ensureprogrammembership requestdataexport \
+  requestaccountdeletion gethealthfilesharelink createauditlog \
+  setuserrole createstaffaccount bootstrapsuperadmin sendbulknotification; do
   gcloud run services add-iam-policy-binding "$SERVICE" \
     --project="$PROJECT_ID" --region="$REGION" \
     --member="allUsers" --role="roles/run.invoker"
 done
 ```
+
+After running this, have the reporter retry joining a program with a code -
+if `redeemProgramCode` was indeed stuck since its first deploy, this should
+be the fix for the "unauthenticated" enrollment bug that's been reported
+repeatedly this session.
 
 If this command itself fails with an organization policy error (rather than
 a permission error), the constraint name in that error is the actual

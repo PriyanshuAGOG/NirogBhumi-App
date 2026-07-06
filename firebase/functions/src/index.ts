@@ -234,6 +234,19 @@ export const sendPendingNotifications = onSchedule({ schedule: 'every 15 minutes
 
 function requireUser(request: { auth?: { uid: string; token: Record<string, unknown> } }) { if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in required'); return request.auth; }
 
+// The console's program editor (Programs.tsx) only ever sets durationWeeks -
+// durationDays has never actually been written by anything, so reading it
+// directly always silently resolved to 0 and every enrolled member's
+// programDurationDays came out 0 (shows as "Day N" with no total instead of
+// "Day N of 42" in the app). Prefer a legacy durationDays if one's ever set
+// by something else, otherwise derive it from the field that's actually populated.
+function programDurationDays(programDoc: FirebaseFirestore.DocumentSnapshot): number {
+  const rawDays = programDoc.get('durationDays');
+  if (rawDays != null) return Math.round(Number(rawDays)) || 0;
+  const weeks = Number(programDoc.get('durationWeeks') ?? 0);
+  return Math.round(weeks * 7) || 0;
+}
+
 // Redeems a Care+ program invite code. This used to be a client-side
 // Firestore query + self-scoped write (programs.code was publicly readable,
 // and users/{uid}.programActive/activeProgramId were owner-writable) - that
@@ -253,7 +266,7 @@ export const redeemProgramCode = onCall({ region }, async request => {
 
   const programId = programDoc.id;
   const programName = String(programDoc.get('name') ?? 'Nirog Bhumi Program');
-  const durationDays = Math.round(Number(programDoc.get('durationDays') ?? 0)) || 0;
+  const durationDays = programDurationDays(programDoc);
 
   const userDoc = await db.doc(`users/${auth.uid}`).get();
   const memberName = String(userDoc.get('fullName') ?? '').trim() || 'Member';
@@ -297,6 +310,53 @@ export const ensureProgramMembership = onCall({ region }, async request => {
   const memberName = String(userDoc.get('fullName') ?? '').trim() || 'Member';
   await memberRef.set({ programId, uid: auth.uid, name: memberName, status: 'active', joinedAt: FieldValue.serverTimestamp() }, { merge: true });
   return { repaired: true, programId };
+});
+
+// Console-side manual enrollment - the same underlying write redeemProgramCode
+// does, but triggered by staff picking an existing user + program from the
+// Users & Roles page, for the case a member can't redeem their own code
+// (the "unauthenticated" enrollment bug some accounts have hit, or simply
+// someone who never got a code). Same staff/own-program authorization
+// boundary as sendBulkNotification: admin/super_admin can enroll into any
+// program, a coach only into a program they're assigned to.
+export const adminEnrollUser = onCall({ region }, async request => {
+  const auth = requireUser(request);
+  const role = auth.token.role;
+  const uid = String(request.data?.uid ?? '');
+  const programId = String(request.data?.programId ?? '');
+  if (!uid || !programId) throw new HttpsError('invalid-argument', 'A uid and programId are required');
+
+  const programDoc = await db.doc(`programs/${programId}`).get();
+  if (!programDoc.exists) throw new HttpsError('not-found', "That program wasn't found");
+
+  if (role !== 'admin' && role !== 'super_admin') {
+    if (role !== 'coach') throw new HttpsError('permission-denied', 'Staff only');
+    if (programDoc.get('coachId') !== auth.uid) throw new HttpsError('permission-denied', 'Not your program');
+  }
+
+  const targetUser = await db.doc(`users/${uid}`).get();
+  if (!targetUser.exists) throw new HttpsError('not-found', "That user wasn't found");
+
+  const programName = String(programDoc.get('name') ?? 'Nirog Bhumi Program');
+  const durationDays = programDurationDays(programDoc);
+  const memberName = String(targetUser.get('fullName') ?? '').trim() || 'Member';
+
+  const batch = db.batch();
+  batch.set(db.doc(`users/${uid}`), {
+    programActive: true,
+    activeProgramId: programId,
+    activeProgramName: programName,
+    programDurationDays: durationDays,
+    programStartedAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+  }, { merge: true });
+  batch.set(db.doc(`programMembers/${programId}_${uid}`), {
+    programId, uid, name: memberName, status: 'active', joinedAt: FieldValue.serverTimestamp(),
+  }, { merge: true });
+  await batch.commit();
+
+  await db.collection('auditLogs').add({ actorId: auth.uid, actorRole: role ?? 'admin', action: 'admin_enroll_user', entityType: 'user', entityId: uid, metadata: { programId, programName }, createdAt: FieldValue.serverTimestamp() });
+  return { activeProgramId: programId, activeProgramName: programName, programDurationDays: durationDays };
 });
 
 export const requestDataExport = onCall({ region }, async request => {

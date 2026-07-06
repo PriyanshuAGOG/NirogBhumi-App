@@ -7,6 +7,7 @@ import { db, functions } from '../lib/firebase'
 import { useAuth } from '../auth/AuthProvider'
 import { errText } from '../lib/errors'
 import { PERMISSION_KEYS, type Permission } from '../auth/AuthProvider'
+import { usePrograms } from '../lib/usePrograms'
 import './Users.css'
 
 interface UserRow {
@@ -18,6 +19,7 @@ interface UserRow {
   role?: string
   status?: string
   programActive?: boolean
+  activeProgramName?: string
   permissions?: Permission[]
 }
 
@@ -61,8 +63,13 @@ type NewStaffRole = 'coach' | 'admin' | 'super_admin'
 const BOOTSTRAP_SUPER_ADMIN_EMAIL = 'priyanshu@nirogbhumi.com'
 
 export default function Users() {
-  const { user, role: viewerRole } = useAuth()
+  const { user, role: viewerRole, hasPermission } = useAuth()
   const isSuperAdmin = viewerRole === 'super_admin'
+  const canManagePrograms = isSuperAdmin || viewerRole === 'admin' || hasPermission('programs')
+  const { programs } = usePrograms()
+  const [enrollingFor, setEnrollingFor] = useState<string | null>(null)
+  const [enrollProgramId, setEnrollProgramId] = useState('')
+  const [enrolling, setEnrolling] = useState(false)
   const canBootstrap = !isSuperAdmin && user?.email?.toLowerCase() === BOOTSTRAP_SUPER_ADMIN_EMAIL
   const [bootstrapping, setBootstrapping] = useState(false)
   const [bootstrapError, setBootstrapError] = useState<string | null>(null)
@@ -149,6 +156,37 @@ export default function Users() {
             : errText(err, 'Could not set role'),
         },
       }))
+    }
+  }
+
+  async function enrollUser(u: UserRow) {
+    if (!enrollProgramId) return
+    setEnrolling(true)
+    setRowState((prev) => ({ ...prev, [u.id]: { saving: false, message: null, error: null } }))
+    try {
+      const adminEnrollUser = httpsCallable<
+        { uid: string; programId: string },
+        { activeProgramName: string }
+      >(functions, 'adminEnrollUser')
+      const res = await adminEnrollUser({ uid: u.userId ?? u.id, programId: enrollProgramId })
+      setRowState((prev) => ({
+        ...prev,
+        [u.id]: { saving: false, message: `Enrolled in ${res.data.activeProgramName}.`, error: null },
+      }))
+      setEnrollingFor(null)
+      setEnrollProgramId('')
+    } catch (err) {
+      const notDeployed = err instanceof FirebaseError && NOT_DEPLOYED.has(err.code)
+      setRowState((prev) => ({
+        ...prev,
+        [u.id]: {
+          saving: false,
+          message: null,
+          error: notDeployed ? 'Enrollment service not deployed yet.' : errText(err, 'Could not enroll'),
+        },
+      }))
+    } finally {
+      setEnrolling(false)
     }
   }
 
@@ -358,6 +396,26 @@ export default function Users() {
                       </Link>
                     )}
                     <span className={`tag ${roleTagClass(u.role)}`}>{u.role ?? 'user'}</span>
+                    {u.programActive ? (
+                      <span className="tag tag-good">{u.activeProgramName ?? 'In program'}</span>
+                    ) : (
+                      <span className="tag tag-neutral">Not enrolled</span>
+                    )}
+                    {canManagePrograms && (
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => {
+                          if (enrollingFor === u.id) {
+                            setEnrollingFor(null)
+                          } else {
+                            setEnrollingFor(u.id)
+                            setEnrollProgramId(programs[0]?.id ?? '')
+                          }
+                        }}
+                      >
+                        {u.programActive ? 'Move program' : 'Enroll'}
+                      </button>
+                    )}
                     {canEdit ? (
                       <>
                         <select
@@ -406,6 +464,36 @@ export default function Users() {
                           {PERMISSION_LABELS[p]}
                         </label>
                       ))}
+                    </div>
+                  </div>
+                )}
+                {enrollingFor === u.id && (
+                  <div className="perm-grid">
+                    <span className="perm-label">
+                      {u.programActive ? 'Move to a different program' : 'Enroll in a program'}
+                    </span>
+                    <div className="composer-actions" style={{ justifyContent: 'flex-start', gap: 8 }}>
+                      <select
+                        className="select"
+                        value={enrollProgramId}
+                        onChange={(e) => setEnrollProgramId(e.target.value)}
+                      >
+                        {programs.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name ?? p.id}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        className="btn btn-forest btn-sm"
+                        disabled={enrolling || !enrollProgramId}
+                        onClick={() => void enrollUser(u)}
+                      >
+                        {enrolling ? 'Enrolling…' : 'Confirm'}
+                      </button>
+                      <button className="btn btn-ghost btn-sm" onClick={() => setEnrollingFor(null)}>
+                        Cancel
+                      </button>
                     </div>
                   </div>
                 )}
