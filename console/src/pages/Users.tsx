@@ -21,8 +21,8 @@ interface UserRow {
   permissions?: Permission[]
 }
 
-type AssignableRole = 'user' | 'coach' | 'admin'
-const ROLE_OPTIONS: AssignableRole[] = ['user', 'coach', 'admin']
+type AssignableRole = 'user' | 'coach' | 'admin' | 'super_admin'
+const ROLE_OPTIONS: AssignableRole[] = ['user', 'coach', 'admin', 'super_admin']
 
 const PERMISSION_LABELS: Record<Permission, string> = {
   moderation: 'Moderation',
@@ -56,11 +56,16 @@ function roleTagClass(role: string | undefined): string {
   }
 }
 
-type NewStaffRole = 'coach' | 'admin'
+type NewStaffRole = 'coach' | 'admin' | 'super_admin'
+
+const BOOTSTRAP_SUPER_ADMIN_EMAIL = 'priyanshu@nirogbhumi.com'
 
 export default function Users() {
-  const { role: viewerRole } = useAuth()
+  const { user, role: viewerRole } = useAuth()
   const isSuperAdmin = viewerRole === 'super_admin'
+  const canBootstrap = !isSuperAdmin && user?.email?.toLowerCase() === BOOTSTRAP_SUPER_ADMIN_EMAIL
+  const [bootstrapping, setBootstrapping] = useState(false)
+  const [bootstrapError, setBootstrapError] = useState<string | null>(null)
   // Only a super admin may grant the admin role or change an existing
   // admin's role - the setUserRole function enforces this server-side too;
   // this just keeps a plain admin from attempting (and being rejected on) a
@@ -147,6 +152,26 @@ export default function Users() {
     }
   }
 
+  async function claimSuperAdmin() {
+    if (!user) return
+    setBootstrapping(true)
+    setBootstrapError(null)
+    try {
+      const bootstrapSuperAdmin = httpsCallable(functions, 'bootstrapSuperAdmin')
+      await bootstrapSuperAdmin()
+      // Only a full reload reliably re-syncs every claim-gated bit of state
+      // across the app (nav, permission checks, this very page) after a
+      // one-time role change like this - simpler and safer than threading a
+      // manual refresh through everywhere that reads `role` from useAuth().
+      await user.getIdTokenResult(true)
+      window.location.reload()
+    } catch (err) {
+      const notDeployed = err instanceof FirebaseError && NOT_DEPLOYED.has(err.code)
+      setBootstrapError(notDeployed ? 'Bootstrap service not deployed yet.' : errText(err, 'Could not claim super admin'))
+      setBootstrapping(false)
+    }
+  }
+
   async function createStaff() {
     const email = newEmail.trim()
     if (!email) return
@@ -181,6 +206,19 @@ export default function Users() {
           function that updates their access.
         </p>
       </header>
+
+      {canBootstrap && (
+        <div className="banner banner-info" role="status">
+          <strong>This account is eligible for the one-time super admin bootstrap.</strong>{' '}
+          Claiming it lets you promote other accounts to admin or super admin.
+          {bootstrapError && <p className="user-err">{bootstrapError}</p>}
+          <div className="composer-actions">
+            <button className="btn btn-forest" disabled={bootstrapping} onClick={() => void claimSuperAdmin()}>
+              {bootstrapping ? 'Claiming…' : 'Claim super admin'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {created && (
         <div className="banner banner-success" role="status">
@@ -243,6 +281,7 @@ export default function Users() {
             <select className="select" value={newRole} onChange={(e) => setNewRole(e.target.value as NewStaffRole)}>
               <option value="coach">Coach</option>
               {isSuperAdmin && <option value="admin">Admin</option>}
+              {isSuperAdmin && <option value="super_admin">Super Admin</option>}
             </select>
           </div>
           <div className="composer-actions">
@@ -287,10 +326,12 @@ export default function Users() {
             const canEdit = isSuperAdmin || !isTargetElevated
             const current = targetRole as AssignableRole
             const selected = pending[u.id] ?? current
-            // super_admin isn't an assignable option (setUserRole never grants
-            // it), but it needs to appear so the select shows the real current
-            // role instead of silently falling back to "user".
-            const displayOptions = targetRole === 'super_admin' ? ['super_admin' as const, ...roleOptions] : roleOptions
+            // A plain admin's roleOptions omits super_admin entirely, but the
+            // select still needs to show it as the current value for an
+            // already-super_admin row instead of silently falling back to "user".
+            const displayOptions = targetRole === 'super_admin' && !roleOptions.includes('super_admin')
+              ? ['super_admin' as const, ...roleOptions]
+              : roleOptions
             const state = rowState[u.id]
             const currentPerms = u.permissions ?? PERMISSION_KEYS
             const selectedPerms = pendingPerms[u.id] ?? currentPerms
@@ -327,7 +368,7 @@ export default function Users() {
                           }
                         >
                           {displayOptions.map((r) => (
-                            <option key={r} value={r} disabled={r === 'super_admin'}>
+                            <option key={r} value={r} disabled={r === 'super_admin' && !isSuperAdmin}>
                               {r}
                             </option>
                           ))}

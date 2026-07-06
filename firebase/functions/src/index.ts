@@ -392,15 +392,16 @@ export const setUserRole = onCall({ region }, async request => {
   if (callerRole !== 'admin' && callerRole !== 'super_admin') throw new HttpsError('permission-denied', 'Admin only');
   const uid = String(request.data?.uid ?? '');
   const role = String(request.data?.role ?? '');
-  if (!uid || !['user', 'coach', 'admin'].includes(role)) throw new HttpsError('invalid-argument', 'A uid and a valid role (user|coach|admin) are required');
-  if (uid === auth.uid && role !== 'admin') throw new HttpsError('failed-precondition', 'You cannot remove your own admin role');
+  if (!uid || !['user', 'coach', 'admin', 'super_admin'].includes(role)) throw new HttpsError('invalid-argument', 'A uid and a valid role (user|coach|admin|super_admin) are required');
+  if (uid === auth.uid && role !== 'admin' && role !== 'super_admin') throw new HttpsError('failed-precondition', 'You cannot remove your own admin role');
 
   // A plain admin and super_admin were previously equal in enforcement here,
   // meaning any one admin account (compromised or malicious) could mint or
   // demote unlimited other admins. Only super_admin may now grant the admin
-  // role, or change the role of an account that's already admin/super_admin.
+  // or super_admin role, or change the role of an account that's already
+  // admin/super_admin.
   if (callerRole !== 'super_admin') {
-    if (role === 'admin') throw new HttpsError('permission-denied', 'Only a super admin can grant the admin role');
+    if (role === 'admin' || role === 'super_admin') throw new HttpsError('permission-denied', 'Only a super admin can grant the admin or super admin role');
     const target = await getAuth().getUser(uid).catch(() => null);
     const targetRole = target?.customClaims?.role;
     if (targetRole === 'admin' || targetRole === 'super_admin') {
@@ -439,8 +440,8 @@ export const createStaffAccount = onCall({ region }, async request => {
   const role = String(request.data?.role ?? '');
   const name = String(request.data?.name ?? '').trim();
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new HttpsError('invalid-argument', 'A valid email is required');
-  if (!['coach', 'admin'].includes(role)) throw new HttpsError('invalid-argument', 'Role must be coach or admin');
-  if (role === 'admin' && callerRole !== 'super_admin') throw new HttpsError('permission-denied', 'Only a super admin can create an admin account');
+  if (!['coach', 'admin', 'super_admin'].includes(role)) throw new HttpsError('invalid-argument', 'Role must be coach, admin, or super admin');
+  if ((role === 'admin' || role === 'super_admin') && callerRole !== 'super_admin') throw new HttpsError('permission-denied', 'Only a super admin can create an admin or super admin account');
 
   const existing = await getAuth().getUserByEmail(email).catch(() => null);
   if (existing) throw new HttpsError('already-exists', 'An account with that email already exists - use the role control below instead of creating a new one');
@@ -455,6 +456,36 @@ export const createStaffAccount = onCall({ region }, async request => {
   await db.doc(`users/${created.uid}`).set({ userId: created.uid, email, fullName: name || null, role, permissions: perms ?? FieldValue.delete(), status: 'active', createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   await db.collection('auditLogs').add({ actorId: auth.uid, actorRole: callerRole, action: 'create_staff_account', entityType: 'user', entityId: created.uid, metadata: { email, role }, createdAt: FieldValue.serverTimestamp() });
   return { uid: created.uid, email, role, tempPassword };
+});
+
+// One-time bootstrap for the very first super_admin. Every other path to
+// super_admin (setUserRole, createStaffAccount) requires being called BY an
+// existing super_admin - a deliberate chicken-and-egg gap before this project
+// had one. This callable is the sole, narrow exception: it only ever
+// promotes one hardcoded, pre-agreed account, and it permanently disables
+// itself (via the system/superAdminBootstrap marker doc, written in the same
+// transaction as the check) the first time it succeeds, so it can't be
+// replayed to mint a second super_admin later.
+const BOOTSTRAP_SUPER_ADMIN_EMAIL = 'priyanshu@nirogbhumi.com';
+
+export const bootstrapSuperAdmin = onCall({ region }, async request => {
+  const auth = requireUser(request);
+  const email = String(auth.token.email ?? '').toLowerCase();
+  if (email !== BOOTSTRAP_SUPER_ADMIN_EMAIL) {
+    throw new HttpsError('permission-denied', 'This account is not eligible for the one-time super admin bootstrap');
+  }
+
+  const markerRef = db.doc('system/superAdminBootstrap');
+  await db.runTransaction(async tx => {
+    const marker = await tx.get(markerRef);
+    if (marker.exists) throw new HttpsError('failed-precondition', 'Super admin has already been bootstrapped');
+    tx.set(markerRef, { usedBy: auth.uid, usedByEmail: email, usedAt: FieldValue.serverTimestamp() });
+  });
+
+  await getAuth().setCustomUserClaims(auth.uid, { role: 'super_admin' });
+  await db.doc(`users/${auth.uid}`).set({ role: 'super_admin', updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  await db.collection('auditLogs').add({ actorId: auth.uid, actorRole: 'super_admin', action: 'bootstrap_super_admin', entityType: 'user', entityId: auth.uid, metadata: { email }, createdAt: FieldValue.serverTimestamp() });
+  return { updated: true };
 });
 
 // Console's "message all quiet members" bulk action. A direct client write to
