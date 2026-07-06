@@ -68,21 +68,17 @@ class MainActivity : ComponentActivity() {
         val snackbarHostState = remember { SnackbarHostState() }
 
         // Every cloud read/write failure across the app (chat send, reactions,
-        // photo/voice upload, profile edits, ...) sets state.cloudMessage - but
-        // until now nothing ever displayed it, so every one of those failures
-        // was completely silent to the user (no toast, no error, nothing).
-        // This is the single global place that surfaces it.
+        // photo/voice upload, profile edits, ...) sets state.cloudMessage - this
+        // is the single global place that surfaces it as a Snackbar. Error
+        // reporting to the admin console happens at the repository layer now
+        // (every CloudResult.Failure reports itself at its own source, tagged
+        // with the exact operation that failed) rather than here, since this
+        // choke point also fires for non-error status messages (e.g. "Synced
+        // securely") that would otherwise get logged as if they were failures.
         LaunchedEffect(state.cloudMessage) {
           if (state.cloudMessage.isNotBlank()) {
             val message = state.cloudMessage
-            val screen = state.currentScreen
             state.cloudMessage = ""
-            // Same single choke point also reports the failure for the admin
-            // console's error dashboard - real device failures (a stale auth
-            // token race, a permission gap that only shows up for one role)
-            // are otherwise invisible without this, since reproducing them
-            // blind isn't always possible.
-            state.repository.reportError(screen, message)
             snackbarHostState.showSnackbar(message)
           }
         }

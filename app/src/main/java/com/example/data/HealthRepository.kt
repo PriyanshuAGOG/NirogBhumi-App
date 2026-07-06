@@ -141,7 +141,25 @@ class FirebaseHealthRepository : HealthRepository {
     override val isCloudConfigured get() = app != null
     override val userId get() = auth?.currentUser?.uid
 
+    // Every repository method wraps its own `done`/`update` callback in this at
+    // entry, so any CloudResult.Failure it ever produces - however deep inside
+    // a Task chain, from a fallback branch, wherever - is reported to the
+    // admin console's Error Reports page automatically, tagged with exactly
+    // which operation failed. This is "extreme error handling": no failure
+    // can reach the UI without leaving a matching record, without every call
+    // site needing to remember to forward it by hand.
+    private fun <T> reporting(operation: String, done: (CloudResult<T>) -> Unit): (CloudResult<T>) -> Unit = { result ->
+        if (result is CloudResult.Failure) {
+            val code = (result.cause as? com.google.firebase.functions.FirebaseFunctionsException)?.code?.name?.lowercase()
+                ?: (result.cause as? com.google.firebase.firestore.FirebaseFirestoreException)?.code?.name?.lowercase()
+                ?: (result.cause as? com.google.firebase.storage.StorageException)?.let { "storage_${it.errorCode}" }
+            reportError(operation, result.message, code)
+        }
+        done(result)
+    }
+
     override fun saveProfile(values: Map<String, Any?>, done: (CloudResult<Unit>) -> Unit) {
+        val done = reporting("saveProfile", done)
         val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
         val payload = values + mapOf("userId" to uid, "updatedAt" to FieldValue.serverTimestamp())
         db?.collection("users")?.document(uid)?.set(payload, SetOptions.merge())
@@ -151,6 +169,7 @@ class FirebaseHealthRepository : HealthRepository {
     }
 
     override fun addHealthLog(collection: String, values: Map<String, Any?>, done: (CloudResult<String>) -> Unit) {
+        val done = reporting("addHealthLog:$collection", done)
         val allowed = setOf(
             "profiles", "glucoseReadings", "bpReadings", "sleepLogs", "walkLogs", "weightLogs",
             "labReports", "consultations", "orders", "checklistLogs", "supportRequests", "notifications",
@@ -169,17 +188,21 @@ class FirebaseHealthRepository : HealthRepository {
     }
 
     override fun uploadPrivateFile(folder: String, uri: Uri, done: (CloudResult<String>) -> Unit) {
+        val done = reporting("uploadPrivateFile:$folder", done)
         val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
         val path = "users/$uid/$folder/${UUID.randomUUID()}"
         val ref = storage?.reference?.child(path) ?: return done(CloudResult.Failure("Firebase is not configured"))
-        ref.putFile(uri).continueWithTask { task ->
-            if (!task.isSuccessful) throw task.exception ?: IllegalStateException("Upload failed")
-            ref.downloadUrl
-        }.addOnSuccessListener { done(CloudResult.Success(it.toString())) }
-            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Upload failed", it)) }
+        runCatching {
+            ref.putFile(uri).continueWithTask { task ->
+                if (!task.isSuccessful) throw task.exception ?: IllegalStateException("Upload failed")
+                ref.downloadUrl
+            }.addOnSuccessListener { done(CloudResult.Success(it.toString())) }
+                .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Upload failed", it)) }
+        }.onFailure { done(CloudResult.Failure(it.message ?: "Upload failed", it)) }
     }
 
     override fun listenUserCollection(collection: String, limit: Long, orderByField: String?, descending: Boolean, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription {
+        val update = reporting("listenUserCollection:$collection", update)
         val uid = userId ?: run { update(CloudResult.Failure("Sign in is required")); return CloudSubscription {} }
         val allowed = setOf("profiles", "glucoseReadings", "bpReadings", "sleepLogs", "walkLogs", "weightLogs", "labReports", "dailyActions", "weeklyReports", "sugarStories", "consultations", "userPrograms", "programPlans", "checklistLogs", "expertNotes", "notifications", "deviceConnections", "orders", "supportRequests", "dataExportRequests", "deletionRequests", "medicationLogs")
         if (collection !in allowed) { update(CloudResult.Failure("Unsupported collection")); return CloudSubscription {} }
@@ -196,6 +219,7 @@ class FirebaseHealthRepository : HealthRepository {
     }
 
     override fun listenPublicCollection(collection: String, limit: Long, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription {
+        val update = reporting("listenPublicCollection:$collection", update)
         if (collection !in setOf("contentItems", "products", "programs", "consultationSlots")) { update(CloudResult.Failure("Unsupported public collection")); return CloudSubscription {} }
         val base = db?.collection(collection)
             ?: run { update(CloudResult.Failure("Firebase is not configured")); return CloudSubscription {} }
@@ -212,10 +236,11 @@ class FirebaseHealthRepository : HealthRepository {
         return CloudSubscription { registration.remove() }
     }
 
-    override fun requestDataExport(done: (CloudResult<Unit>) -> Unit) = createRequest("dataExportRequests", done)
-    override fun requestAccountDeletion(done: (CloudResult<Unit>) -> Unit) = createRequest("deletionRequests", done)
+    override fun requestDataExport(done: (CloudResult<Unit>) -> Unit) = createRequest("dataExportRequests", reporting("requestDataExport", done))
+    override fun requestAccountDeletion(done: (CloudResult<Unit>) -> Unit) = createRequest("deletionRequests", reporting("requestAccountDeletion", done))
 
     override fun getPrivateDownloadUrl(storagePath: String, done: (CloudResult<String>) -> Unit) {
+        val done = reporting("getPrivateDownloadUrl", done)
         val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
         if (!storagePath.startsWith("users/$uid/")) return done(CloudResult.Failure("Invalid private file path"))
         storage?.reference?.child(storagePath)?.downloadUrl
@@ -232,6 +257,7 @@ class FirebaseHealthRepository : HealthRepository {
     // roster entry with forged consistency stats). The function validates
     // the code and performs both writes itself under the Admin SDK.
     override fun redeemProgramCode(code: String, done: (CloudResult<Map<String, Any?>>) -> Unit) {
+        val done = reporting("redeemProgramCode", done)
         val user = auth?.currentUser ?: return done(CloudResult.Failure("Sign in is required"))
         // A brand-new account's ID token can still be mid-refresh by the time
         // onboarding reaches this screen - unlike Firestore's writes (which
@@ -284,6 +310,7 @@ class FirebaseHealthRepository : HealthRepository {
     }
 
     override fun listenAnnouncements(programId: String, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription {
+        val update = reporting("listenAnnouncements", update)
         val database = db ?: run { update(CloudResult.Failure("Firebase is not configured")); return CloudSubscription {} }
         // Scoped to the caller's own program - without this filter, members of
         // different programs would see each other's announcements mixed together.
@@ -299,6 +326,7 @@ class FirebaseHealthRepository : HealthRepository {
     }
 
     override fun postAnnouncement(programId: String, title: String, body: String, done: (CloudResult<Unit>) -> Unit) {
+        val done = reporting("postAnnouncement", done)
         val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
         val database = db ?: return done(CloudResult.Failure("Firebase is not configured"))
         database.collection("announcements").add(
@@ -316,6 +344,7 @@ class FirebaseHealthRepository : HealthRepository {
     }
 
     override fun listenProgramChat(programId: String, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription {
+        val update = reporting("listenProgramChat", update)
         val database = db ?: run { update(CloudResult.Failure("Firebase is not configured")); return CloudSubscription {} }
         val registration = database.collection("programChatMessages")
             .whereEqualTo("programId", programId)
@@ -340,57 +369,74 @@ class FirebaseHealthRepository : HealthRepository {
         audioDurationSec: Int?,
         done: (CloudResult<Unit>) -> Unit,
     ) {
+        val done = reporting("sendProgramChatMessage", done)
         val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
         val database = db ?: return done(CloudResult.Failure("Firebase is not configured"))
-        val replyTo = if (replyToId != null) mapOf(
-            "id" to replyToId,
-            "sender" to replyToSender,
-            // Quoted preview only - trimmed so a reply can't smuggle an
-            // unbounded copy of an old message into every new one.
-            "text" to replyToText?.take(160),
-        ) else null
-        database.collection("programChatMessages").add(
-            mapOf(
-                "programId" to programId,
-                "userId" to uid,
-                "senderName" to senderName,
-                "text" to text,
-                "photoUrl" to photoUrl,
-                "audioUrl" to audioUrl,
-                "audioDurationSec" to audioDurationSec,
-                "replyTo" to replyTo,
-                "createdAt" to FieldValue.serverTimestamp()
-            )
-        ).addOnSuccessListener {
-            AnalyticsLogger.log("chat_message_sent", mapOf("program_id" to programId, "is_reply" to (replyToId != null), "has_photo" to (photoUrl != null), "has_audio" to (audioUrl != null)))
-            done(CloudResult.Success(Unit))
-        }.addOnFailureListener { done(CloudResult.Failure(it.message ?: "Message could not be sent", it)) }
+        runCatching {
+            val replyTo = if (replyToId != null) mapOf(
+                "id" to replyToId,
+                "sender" to replyToSender,
+                // Quoted preview only - trimmed so a reply can't smuggle an
+                // unbounded copy of an old message into every new one.
+                "text" to replyToText?.take(160),
+            ) else null
+            database.collection("programChatMessages").add(
+                mapOf(
+                    "programId" to programId,
+                    "userId" to uid,
+                    "senderName" to senderName,
+                    "text" to text,
+                    "photoUrl" to photoUrl,
+                    "audioUrl" to audioUrl,
+                    "audioDurationSec" to audioDurationSec,
+                    "replyTo" to replyTo,
+                    "createdAt" to FieldValue.serverTimestamp()
+                )
+            ).addOnSuccessListener {
+                AnalyticsLogger.log("chat_message_sent", mapOf("program_id" to programId, "is_reply" to (replyToId != null), "has_photo" to (photoUrl != null), "has_audio" to (audioUrl != null)))
+                done(CloudResult.Success(Unit))
+            }.addOnFailureListener { done(CloudResult.Failure(it.message ?: "Message could not be sent", it)) }
+        }.onFailure { done(CloudResult.Failure(it.message ?: "Message could not be sent", it)) }
     }
 
     override fun uploadProgramChatPhoto(programId: String, uri: Uri, done: (CloudResult<String>) -> Unit) {
+        val done = reporting("uploadProgramChatPhoto", done)
         val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
         val path = "program-chat-photos/$programId/$uid/${UUID.randomUUID()}"
         val ref = storage?.reference?.child(path) ?: return done(CloudResult.Failure("Firebase is not configured"))
-        ref.putFile(uri).continueWithTask { task ->
-            if (!task.isSuccessful) throw task.exception ?: IllegalStateException("Upload failed")
-            ref.downloadUrl
-        }.addOnSuccessListener { done(CloudResult.Success(it.toString())) }
-            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Photo could not be uploaded", it)) }
+        // A synchronous exception here (e.g. a SecurityException if the picked
+        // Uri's read grant has somehow already lapsed) previously had no
+        // handler at all - it would propagate out of this function entirely,
+        // silently killing the coroutine that called it with no failure ever
+        // reaching the UI or the error-reporting pipeline. Caught explicitly
+        // so every failure mode - sync or async - ends up as a reported
+        // CloudResult.Failure instead of a permanently stuck "uploading" spinner.
+        runCatching {
+            ref.putFile(uri).continueWithTask { task ->
+                if (!task.isSuccessful) throw task.exception ?: IllegalStateException("Upload failed")
+                ref.downloadUrl
+            }.addOnSuccessListener { done(CloudResult.Success(it.toString())) }
+                .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Photo could not be uploaded", it)) }
+        }.onFailure { done(CloudResult.Failure(it.message ?: "Photo could not be uploaded", it)) }
     }
 
     override fun uploadProgramChatAudio(programId: String, uri: Uri, done: (CloudResult<String>) -> Unit) {
+        val done = reporting("uploadProgramChatAudio", done)
         val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
         val path = "program-chat-audio/$programId/$uid/${UUID.randomUUID()}.m4a"
         val ref = storage?.reference?.child(path) ?: return done(CloudResult.Failure("Firebase is not configured"))
-        val metadata = com.google.firebase.storage.StorageMetadata.Builder().setContentType("audio/mp4").build()
-        ref.putFile(uri, metadata).continueWithTask { task ->
-            if (!task.isSuccessful) throw task.exception ?: IllegalStateException("Upload failed")
-            ref.downloadUrl
-        }.addOnSuccessListener { done(CloudResult.Success(it.toString())) }
-            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Voice note could not be uploaded", it)) }
+        runCatching {
+            val metadata = com.google.firebase.storage.StorageMetadata.Builder().setContentType("audio/mp4").build()
+            ref.putFile(uri, metadata).continueWithTask { task ->
+                if (!task.isSuccessful) throw task.exception ?: IllegalStateException("Upload failed")
+                ref.downloadUrl
+            }.addOnSuccessListener { done(CloudResult.Success(it.toString())) }
+                .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Voice note could not be uploaded", it)) }
+        }.onFailure { done(CloudResult.Failure(it.message ?: "Voice note could not be uploaded", it)) }
     }
 
     override fun toggleChatReaction(messageId: String, emoji: String, add: Boolean, done: (CloudResult<Unit>) -> Unit) {
+        val done = reporting("toggleChatReaction", done)
         val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
         val database = db ?: return done(CloudResult.Failure("Firebase is not configured"))
         val change = if (add) FieldValue.arrayUnion(uid) else FieldValue.arrayRemove(uid)
@@ -401,6 +447,7 @@ class FirebaseHealthRepository : HealthRepository {
     }
 
     override fun togglePinMessage(messageId: String, programId: String, pinned: Boolean, done: (CloudResult<Unit>) -> Unit) {
+        val done = reporting("togglePinMessage", done)
         val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
         val database = db ?: return done(CloudResult.Failure("Firebase is not configured"))
         val values = if (pinned) {
@@ -414,6 +461,7 @@ class FirebaseHealthRepository : HealthRepository {
     }
 
     override fun reportChatMessage(messageId: String, programId: String, reportedText: String, reportedUserId: String, done: (CloudResult<Unit>) -> Unit) {
+        val done = reporting("reportChatMessage", done)
         val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
         val database = db ?: return done(CloudResult.Failure("Firebase is not configured"))
         database.collection("reportedMessages").add(
@@ -431,6 +479,7 @@ class FirebaseHealthRepository : HealthRepository {
     }
 
     override fun setTypingStatus(programId: String, senderName: String, isTyping: Boolean, done: (CloudResult<Unit>) -> Unit) {
+        val done = reporting("setTypingStatus", done)
         val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
         val database = db ?: return done(CloudResult.Failure("Firebase is not configured"))
         val ref = database.collection("programTypingStatus").document("${programId}_$uid")
@@ -444,6 +493,7 @@ class FirebaseHealthRepository : HealthRepository {
     }
 
     override fun listenTypingStatus(programId: String, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription {
+        val update = reporting("listenTypingStatus", update)
         val database = db ?: run { update(CloudResult.Failure("Firebase is not configured")); return CloudSubscription {} }
         val registration = database.collection("programTypingStatus")
             .whereEqualTo("programId", programId)
@@ -455,6 +505,7 @@ class FirebaseHealthRepository : HealthRepository {
     }
 
     override fun listenBatchPulse(programId: String, update: (CloudResult<CloudDocument?>) -> Unit): CloudSubscription {
+        val update = reporting("listenBatchPulse", update)
         val database = db ?: run { update(CloudResult.Failure("Firebase is not configured")); return CloudSubscription {} }
         // Doc id must match the Cloud Functions' Asia/Kolkata day bucket exactly,
         // since that's what recordBatchCheckin() and the daily aggregation write to.
@@ -470,6 +521,7 @@ class FirebaseHealthRepository : HealthRepository {
     }
 
     override fun listenProgramEvents(programId: String, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription {
+        val update = reporting("listenProgramEvents", update)
         val database = db ?: run { update(CloudResult.Failure("Firebase is not configured")); return CloudSubscription {} }
         val registration = database.collection("programEvents")
             .whereEqualTo("programId", programId)
@@ -486,6 +538,7 @@ class FirebaseHealthRepository : HealthRepository {
     }
 
     override fun peekLatestActivity(programId: String, collection: String, done: (CloudResult<Long?>) -> Unit) {
+        val done = reporting("peekLatestActivity:$collection", done)
         val database = db ?: return done(CloudResult.Failure("Firebase is not configured"))
         if (collection !in setOf("programChatMessages", "announcements")) return done(CloudResult.Failure("Unsupported"))
         database.collection(collection)
@@ -501,6 +554,7 @@ class FirebaseHealthRepository : HealthRepository {
     }
 
     override fun peekMembership(programId: String, done: (CloudResult<CloudDocument?>) -> Unit) {
+        val done = reporting("peekMembership", done)
         val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
         val database = db ?: return done(CloudResult.Failure("Firebase is not configured"))
         database.collection("programMembers").document("${programId}_$uid").get()
@@ -509,6 +563,7 @@ class FirebaseHealthRepository : HealthRepository {
     }
 
     override fun markProgramRead(programId: String, field: String, done: (CloudResult<Unit>) -> Unit) {
+        val done = reporting("markProgramRead", done)
         val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
         val database = db ?: return done(CloudResult.Failure("Firebase is not configured"))
         if (field !in setOf("lastReadGeneralAt", "lastReadAnnouncementsAt")) return done(CloudResult.Failure("Unsupported"))
@@ -519,6 +574,7 @@ class FirebaseHealthRepository : HealthRepository {
     }
 
     override fun recordCheckinCompletion(hourOfDay: Int, done: (CloudResult<Int>) -> Unit) {
+        val done = reporting("recordCheckinCompletion", done)
         val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
         val database = db ?: return done(CloudResult.Failure("Firebase is not configured"))
         val hour = hourOfDay.coerceIn(0, 23)
@@ -563,6 +619,7 @@ class FirebaseHealthRepository : HealthRepository {
     }
 
     override fun peekCheckinHourHint(done: (CloudResult<Int?>) -> Unit) {
+        val done = reporting("peekCheckinHourHint", done)
         val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
         val database = db ?: return done(CloudResult.Failure("Firebase is not configured"))
         database.collection("users").document(uid).get()
@@ -571,6 +628,7 @@ class FirebaseHealthRepository : HealthRepository {
     }
 
     override fun peekCheckinStreak(done: (CloudResult<Int>) -> Unit) {
+        val done = reporting("peekCheckinStreak", done)
         val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
         val database = db ?: return done(CloudResult.Failure("Firebase is not configured"))
         database.collection("users").document(uid).get()
@@ -579,6 +637,7 @@ class FirebaseHealthRepository : HealthRepository {
     }
 
     override fun getHealthFileShareLink(storagePath: String, done: (CloudResult<String>) -> Unit) {
+        val done = reporting("getHealthFileShareLink", done)
         val callable = functions?.getHttpsCallable("getHealthFileShareLink")
             ?: return done(CloudResult.Failure("Firebase is not configured"))
         callable.call(mapOf("storagePath" to storagePath))
@@ -592,6 +651,7 @@ class FirebaseHealthRepository : HealthRepository {
     }
 
     override fun peekWalkLogCount(done: (CloudResult<Long>) -> Unit) {
+        val done = reporting("peekWalkLogCount", done)
         val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
         val database = db ?: return done(CloudResult.Failure("Firebase is not configured"))
         database.collection("walkLogs").whereEqualTo("userId", uid).count()
@@ -603,9 +663,12 @@ class FirebaseHealthRepository : HealthRepository {
     override fun reportError(screen: String, message: String, code: String?) {
         val uid = userId ?: return
         val database = db ?: return
-        // Best-effort only: swallow every possible failure here silently -
-        // an error report that itself errors must never surface anything to
-        // the user or recurse into reporting itself.
+        // Best-effort only: never surface anything to the user or recurse into
+        // reporting itself if this itself fails. A failure listener here isn't
+        // for user-facing recovery - there's nowhere for it to go - it's so
+        // there's at least a Logcat breadcrumb ("why is Error Reports empty
+        // even though real failures are happening") instead of a silent,
+        // unobserved Task whose outcome nobody ever looks at.
         runCatching {
             database.collection("errorReports").add(
                 mapOf(
@@ -616,11 +679,16 @@ class FirebaseHealthRepository : HealthRepository {
                     "resolved" to false,
                     "createdAt" to FieldValue.serverTimestamp(),
                 )
-            )
+            ).addOnFailureListener {
+                android.util.Log.e("HealthRepository", "errorReports write failed for screen=$screen: ${it.message}", it)
+            }
+        }.onFailure {
+            android.util.Log.e("HealthRepository", "errorReports write threw for screen=$screen: ${it.message}", it)
         }
     }
 
     override fun upsertUserRecord(collection: String, documentId: String, values: Map<String, Any?>, done: (CloudResult<Unit>) -> Unit) {
+        val done = reporting("upsertUserRecord:$collection", done)
         val allowed = setOf("glucoseReadings", "bpReadings", "sleepLogs", "walkLogs", "weightLogs", "deviceConnections", "checklistLogs")
         if (collection !in allowed) return done(CloudResult.Failure("Unsupported synced record"))
         val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
@@ -638,6 +706,7 @@ class FirebaseHealthRepository : HealthRepository {
     }
 
     override fun deleteUserRecord(collection: String, documentId: String, done: (CloudResult<Unit>) -> Unit) {
+        val done = reporting("deleteUserRecord:$collection", done)
         val allowed = setOf("profiles", "labReports", "walkLogs")
         if (collection !in allowed) return done(CloudResult.Failure("Unsupported record"))
         if (userId == null) return done(CloudResult.Failure("Sign in is required"))
