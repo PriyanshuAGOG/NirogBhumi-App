@@ -246,6 +246,13 @@ slice that introduces it.
    already set) documented in `docs/deploy-wif-setup.md` — **owner action
    required**, cannot be done from this environment (no gcloud credentials
    against the live project).
+6. **Confirmed 2026-07-06, root cause identified**: the actual blocker behind
+   #5 is a Domain Restricted Sharing org policy (`iam.allowedPolicyMemberDomains`)
+   that rejects `allUsers` as a Cloud Run invoker outright, plus the deploying
+   account lacking `roles/orgpolicy.policyAdmin` to override it at the
+   project level. Needs whoever administers the org (a different person than
+   the one running deploys, confirmed) to either grant that role or run the
+   override directly - exact commands in `docs/deploy-wif-setup.md`.
 
 ---
 
@@ -553,3 +560,42 @@ by the user. Work sequentially, CI-verified per slice, small commits.
       downstream Care+ feature is rules-gated shut for that account
       regardless of whether its own code is correct - consistent with
       everything else in this item auditing clean on inspection.
+22. [x] **Super admin bootstrap, admin-side manual/pre-enrollment, and the
+    confirmed IAM/org-policy deploy blocker** — closes the loop on the
+    session-long "unauthenticated" enrollment saga with a real fix path,
+    plus two new staff-side onboarding tools that don't depend on it:
+    - `bootstrapSuperAdmin` (one-time, self-disabling via a Firestore
+      marker doc) resolves the chicken-and-egg problem where no path to
+      `super_admin` existed before the very first one; `setUserRole`/
+      `createStaffAccount` now allow granting `super_admin` too, gated so
+      only an existing `super_admin` can.
+    - `adminEnrollUser`: staff can manually enroll or move any existing
+      user into a program from the Users & Roles page (which now shows
+      every user's program status inline) - a working fallback for the
+      exact case a user's own `redeemProgramCode` call is stuck.
+    - `inviteToProgram`/`revokeInvite` + `onUserCreate`'s
+      `consumeMatchingInvite`: staff can pre-enroll someone by phone number
+      or email *before* they've ever signed up (Programs page, "Onboard by
+      phone or email") - the moment an account with that exact contact is
+      created, `onUserCreate` auto-enrolls them, no code needed at all.
+      `onUserCheckinMirror` extended to also mirror `fullName` into the
+      roster once the member sets it, since auto-enrollment happens before
+      a profile exists.
+    - `deploy-firebase.yml` was `workflow_dispatch`-only (same class of bug
+      as the APK build workflow) - real fixes sat committed but undeployed
+      for hours. Fixed to auto-deploy on push.
+    - Root-caused *why* fixes weren't taking effect even once deployed: the
+      very first deploy of any brand-new `onCall` function fails to get its
+      public-invoker IAM binding set, confirmed live across 5 different
+      functions this session. Traced to its actual root cause with the
+      owner's help: a Domain Restricted Sharing org policy blocks `allUsers`
+      outright, and the deploying account lacks Organization Policy
+      Administrator to override it - a people/access problem, not
+      something fixable from code or CI. Exact remediation documented in
+      `docs/deploy-wif-setup.md`, **pending action from whoever administers
+      the org**.
+    - Also fixed: the console's program editor only ever wrote
+      `durationWeeks`, but every enrollment path read a `durationDays`
+      field nothing had ever written, so `programDurationDays` silently
+      came out 0 for every member (shows as "Day N" with no total instead
+      of "Day N of 42"). Both paths now derive it from `durationWeeks`.

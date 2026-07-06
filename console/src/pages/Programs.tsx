@@ -4,13 +4,16 @@ import {
   collection,
   doc,
   onSnapshot,
+  orderBy,
   query,
   serverTimestamp,
   setDoc,
   Timestamp,
   updateDoc,
 } from 'firebase/firestore'
-import { db } from '../lib/firebase'
+import { httpsCallable } from 'firebase/functions'
+import { FirebaseError } from 'firebase/app'
+import { db, functions } from '../lib/firebase'
 import { usePrograms, type Program } from '../lib/usePrograms'
 import { errText } from '../lib/errors'
 import { formatDate, toDate, toInputDateTime, fromInputDateTime } from '../lib/time'
@@ -25,6 +28,23 @@ interface ProgramCode {
   uses?: number
   expiresAt?: unknown
 }
+
+interface ProgramInvite {
+  id: string
+  contact?: string
+  contactType?: 'email' | 'phone'
+  programId?: string
+  programName?: string
+  createdAt?: unknown
+  consumedAt?: unknown
+}
+
+interface InviteDraft {
+  contact: string
+  programId: string
+}
+
+const NOT_DEPLOYED = new Set(['functions/not-found', 'functions/unavailable', 'functions/internal'])
 
 interface ProgramDraft {
   id: string | null
@@ -80,6 +100,26 @@ export default function Programs() {
   const [cSaving, setCSaving] = useState(false)
   const [cError, setCError] = useState<string | null>(null)
   const [busyCode, setBusyCode] = useState<string | null>(null)
+
+  // Invites - pre-enroll by phone/email, consumed automatically at signup
+  const [invites, setInvites] = useState<ProgramInvite[]>([])
+  const [invitesError, setInvitesError] = useState<string | null>(null)
+  const [iDraft, setIDraft] = useState<InviteDraft | null>(null)
+  const [iSaving, setISaving] = useState(false)
+  const [iError, setIError] = useState<string | null>(null)
+  const [busyInvite, setBusyInvite] = useState<string | null>(null)
+
+  useEffect(() => {
+    const unsub = onSnapshot(
+      query(collection(db, 'programInvites'), orderBy('createdAt', 'desc')),
+      (snap) => {
+        setInvites(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<ProgramInvite, 'id'>) })))
+        setInvitesError(null)
+      },
+      (err) => setInvitesError(errText(err, 'Could not load invites')),
+    )
+    return unsub
+  }, [])
 
   useEffect(() => {
     const unsub = onSnapshot(
@@ -169,11 +209,49 @@ export default function Programs() {
     }
   }
 
+  async function saveInvite() {
+    if (!iDraft || !iDraft.contact.trim() || !iDraft.programId) {
+      setIError('A phone number or email and a target program are required.')
+      return
+    }
+    setISaving(true)
+    setIError(null)
+    try {
+      const inviteToProgram = httpsCallable<{ contact: string; programId: string }, { contact: string }>(
+        functions,
+        'inviteToProgram',
+      )
+      await inviteToProgram({ contact: iDraft.contact.trim(), programId: iDraft.programId })
+      setIDraft(null)
+    } catch (err) {
+      const notDeployed = err instanceof FirebaseError && NOT_DEPLOYED.has(err.code)
+      setIError(notDeployed ? 'Invite service not deployed yet.' : errText(err, 'Could not create invite'))
+    } finally {
+      setISaving(false)
+    }
+  }
+
+  async function removeInvite(inv: ProgramInvite) {
+    setBusyInvite(inv.id)
+    setInvitesError(null)
+    try {
+      const revokeInvite = httpsCallable<{ id: string }, unknown>(functions, 'revokeInvite')
+      await revokeInvite({ id: inv.id })
+    } catch (err) {
+      setInvitesError(errText(err, 'Could not revoke the invite'))
+    } finally {
+      setBusyInvite(null)
+    }
+  }
+
   function setP<K extends keyof ProgramDraft>(key: K, value: ProgramDraft[K]) {
     setPDraft((prev) => (prev ? { ...prev, [key]: value } : prev))
   }
   function setC<K extends keyof CodeDraft>(key: K, value: CodeDraft[K]) {
     setCDraft((prev) => (prev ? { ...prev, [key]: value } : prev))
+  }
+  function setI<K extends keyof InviteDraft>(key: K, value: InviteDraft[K]) {
+    setIDraft((prev) => (prev ? { ...prev, [key]: value } : prev))
   }
 
   return (
@@ -319,6 +397,112 @@ export default function Programs() {
               </div>
             )
           })}
+        </div>
+      )}
+
+      {/* Invites - pre-enroll by phone/email */}
+      <div className="toolbar">
+        <h2 className="section-h">Onboard by phone or email</h2>
+        <div className="toolbar-spacer" />
+        <button
+          className="btn btn-forest"
+          disabled={programs.length === 0}
+          onClick={() => {
+            setIDraft({ contact: '', programId: programs[0]?.id ?? '' })
+            setIError(null)
+          }}
+        >
+          + New invite
+        </button>
+      </div>
+      <p className="page-lede">
+        Add someone's phone number or email here before they've signed up - the moment they create
+        an account with that exact contact, they're enrolled automatically. No code to hand out.
+      </p>
+
+      {invitesError && (
+        <div className="banner banner-error" role="alert">
+          {invitesError}
+        </div>
+      )}
+
+      {invites.length === 0 ? (
+        <div className="card empty">
+          <div className="empty-mark" aria-hidden>📇</div>
+          <p className="empty-title">No invites yet</p>
+          <p className="empty-sub">Add a phone number or email to pre-enroll someone.</p>
+        </div>
+      ) : (
+        <div className="code-list">
+          {invites.map((inv) => (
+            <div key={inv.id} className="card code-row">
+              <div className="code-main">
+                <span className="code-text">{inv.contact ?? inv.id}</span>
+                <span className="code-sub">
+                  {programName(inv.programId)}
+                  {inv.contactType ? ` · ${inv.contactType}` : ''}
+                </span>
+              </div>
+              <div className="code-meta">
+                {inv.consumedAt ? (
+                  <span className="tag tag-good">Joined</span>
+                ) : (
+                  <span className="tag tag-warn">Pending</span>
+                )}
+                {!inv.consumedAt && (
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    disabled={busyInvite === inv.id}
+                    onClick={() => void removeInvite(inv)}
+                  >
+                    Revoke
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Invite modal */}
+      {iDraft && (
+        <div className="modal-scrim" role="dialog" aria-modal onClick={() => setIDraft(null)}>
+          <div className="modal card" onClick={(e) => e.stopPropagation()}>
+            <span className="overline">New invite</span>
+            <h2 className="modal-title">Onboard by phone or email</h2>
+            {iError && (
+              <div className="banner banner-error" role="alert">
+                {iError}
+              </div>
+            )}
+            <div className="field">
+              <span className="field-label">Phone (with country code) or email</span>
+              <input
+                className="input"
+                value={iDraft.contact}
+                onChange={(e) => setI('contact', e.target.value)}
+                placeholder="+919876543210 or name@example.com"
+              />
+            </div>
+            <div className="field">
+              <span className="field-label">Program</span>
+              <select className="select" value={iDraft.programId} onChange={(e) => setI('programId', e.target.value)}>
+                {programs.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name ?? p.id}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="modal-actions">
+              <button className="btn btn-ghost" onClick={() => setIDraft(null)}>
+                Cancel
+              </button>
+              <button className="btn btn-forest" disabled={iSaving} onClick={() => void saveInvite()}>
+                {iSaving ? 'Saving…' : 'Create invite'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
