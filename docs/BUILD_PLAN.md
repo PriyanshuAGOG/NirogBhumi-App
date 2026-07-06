@@ -224,6 +224,23 @@ slice that introduces it.
    build per slice; keep slices small and green.
 3. **Fonts/App Distribution** and **App Check debug** caveats from earlier
    still apply (debug keystore must not be trusted against the live project).
+4. **Fixed 2026-07-06**: `deploy-firebase.yml` was also `workflow_dispatch`
+   only (same class of bug as #1 above) - backend changes (functions/rules)
+   sat committed but undeployed for hours at a time. Now triggers
+   automatically on push to `main`/`claude/**` when `firebase/**` changes.
+5. **Open, owner-blocked**: confirmed live in production (deploy runs
+   `28781548024`, `28782811791`) - the very first deploy of any brand-new
+   `onCall` function fails to get its public-invoker IAM binding set
+   (`createStaffAccount`, `ensureProgramMembership`, `bootstrapSuperAdmin` all
+   hit this). The function's code deploys fine, but every client call to it
+   gets a platform-level 403 before our own auth check ever runs - visible to
+   users as a generic `unauthenticated`/`permission-denied`, indistinguishable
+   from an app-level bug. This is almost certainly why the Care+ chat
+   self-heal (`ensureProgramMembership`) never actually took effect for real
+   accounts. Exact one-time `gcloud` fix (grant `roles/run.invoker` to
+   `allUsers` on each stuck Cloud Run service) documented in
+   `docs/deploy-wif-setup.md` — **owner action required**, cannot be done
+   from this environment (no gcloud credentials against the live project).
 
 ---
 

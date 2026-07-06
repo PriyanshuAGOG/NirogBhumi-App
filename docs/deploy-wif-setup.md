@@ -89,6 +89,56 @@ exact missing role in the error (the same way the very first Cloud Functions
 deploy this project ever did needed `roles/cloudbuild.builds.builder` added
 on the fly) — grant that specific role the same way and re-run.
 
+## Known issue: new (never-before-deployed) callable functions fail to get
+their public invoker set
+
+Confirmed in production (deploy runs `28781548024`, `28782811791` on
+2026-07-06): every function that already existed deploys and updates fine,
+but the **first-ever** deploy of a brand-new `onCall` function fails with:
+
+```
+Failed to set the IAM Policy on the Service projects/nirog-bhumi-app/locations/asia-south1/services/<name>
+Unable to set the invoker for the IAM policy on the following functions: <name>
+```
+
+This happened for `createStaffAccount`, `ensureProgramMembership`, and
+`bootstrapSuperAdmin` - three functions this session added. The function's
+*code* still deploys successfully (the underlying Cloud Run service gets
+created), but without a public-invoker IAM binding, every client call to it
+hits a platform-level 403 before Firebase's own `context.auth` check ever
+runs - the client SDK typically surfaces this as `unauthenticated` or
+`permission-denied`, indistinguishable from a real app-level auth bug. This
+is almost certainly why `ensureProgramMembership` (the Care+ chat self-heal
+fix) never actually took effect for real accounts even after being deployed.
+
+`roles/run.admin` (granted above) normally includes
+`run.services.setIamPolicy`, so this points at either an incomplete role
+grant or an org policy (e.g. Domain Restricted Sharing / Public Access
+Prevention) that blocks granting `allUsers` as a Cloud Run invoker
+regardless of the grantee's role. **Owner action required** - from Cloud
+Shell (using your own elevated login, the same one the original manual
+deploys before WIF existed already used successfully):
+
+```sh
+PROJECT_ID="nirog-bhumi-app"
+REGION="asia-south1"
+
+for SERVICE in createstaffaccount ensureprogrammembership bootstrapsuperadmin; do
+  gcloud run services add-iam-policy-binding "$SERVICE" \
+    --project="$PROJECT_ID" --region="$REGION" \
+    --member="allUsers" --role="roles/run.invoker"
+done
+```
+
+If this command itself fails with an organization policy error (rather than
+a permission error), the constraint name in that error is the actual
+blocker - it needs an exception added for this project, or an
+`allAuthenticatedUsers`/service-account-scoped invoker binding used instead
+(which would require a matching change in each function's code to restrict
+`invoker` accordingly, since `onCall` defaults to public). Re-run this same
+command for any future function the first time it's deployed, until the
+underlying WIF service account's grant is confirmed sufficient end to end.
+
 ## 4. Add the two GitHub repo secrets
 
 Get the provider's full resource name:
