@@ -40,7 +40,13 @@ enum class UpdateChannelOption(val id: String, val label: String) {
     DEVELOPMENT("development", "Development");
 
     companion object {
-        fun fromId(id: String?): UpdateChannelOption = entries.firstOrNull { it.id == id } ?: PRODUCTION
+        // build-firebase-debug-apk.yml - the only pipeline that has ever published
+        // release metadata - publishes exclusively to appUpdates/development.
+        // Defaulting new installs to PRODUCTION (a channel nothing has ever
+        // published to) meant self-update silently could never find a newer
+        // version on any device that hadn't manually switched channels in
+        // Developer Settings - not a rare edge case, the default case.
+        fun fromId(id: String?): UpdateChannelOption = entries.firstOrNull { it.id == id } ?: DEVELOPMENT
     }
 }
 
