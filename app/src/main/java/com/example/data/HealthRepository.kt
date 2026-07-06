@@ -45,6 +45,13 @@ interface HealthRepository {
     fun deleteUserRecord(collection: String, documentId: String, done: (CloudResult<Unit>) -> Unit)
     fun getPrivateDownloadUrl(storagePath: String, done: (CloudResult<String>) -> Unit)
     fun redeemProgramCode(code: String, done: (CloudResult<Map<String, Any?>>) -> Unit)
+    // Backfills a missing programMembers roster doc for an account Firestore
+    // already considers an active program member (e.g. one enrolled under an
+    // older, pre-hardening version of redeemProgramCode) - called once when
+    // the profile loads with an active program, since chat/typing/photo/audio
+    // all depend on that roster doc or the users/{uid} fields it mirrors.
+    // Never grants a new enrollment; only repairs an already-active one.
+    fun ensureProgramMembership(done: (CloudResult<Boolean>) -> Unit = {})
 
     // Care+ (program members only): one shared announcement feed, plus one chat room
     // per program so members only see conversation relevant to the program they joined.
@@ -307,6 +314,19 @@ class FirebaseHealthRepository : HealthRepository {
         val base = error.message ?: "That program code wasn't recognized"
         val message = if (functionsError != null) "$base (code: ${functionsError.code.name.lowercase()})" else base
         return CloudResult.Failure(message, error)
+    }
+
+    override fun ensureProgramMembership(done: (CloudResult<Boolean>) -> Unit) {
+        val done = reporting("ensureProgramMembership", done)
+        val callable = functions?.getHttpsCallable("ensureProgramMembership")
+            ?: return done(CloudResult.Failure("Firebase is not configured"))
+        callable.call()
+            .addOnSuccessListener { result ->
+                @Suppress("UNCHECKED_CAST")
+                val value = result.data as? Map<String, Any?>
+                done(CloudResult.Success(value?.get("repaired") == true))
+            }
+            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Could not verify program membership", it)) }
     }
 
     override fun listenAnnouncements(programId: String, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription {

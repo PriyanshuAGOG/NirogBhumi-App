@@ -7,6 +7,7 @@ import { db, functions } from '../lib/firebase'
 import { useAuth } from '../auth/AuthProvider'
 import { errText } from '../lib/errors'
 import { PERMISSION_KEYS, type Permission } from '../auth/AuthProvider'
+import { usePrograms } from '../lib/usePrograms'
 import './Users.css'
 
 interface UserRow {
@@ -18,11 +19,12 @@ interface UserRow {
   role?: string
   status?: string
   programActive?: boolean
+  activeProgramName?: string
   permissions?: Permission[]
 }
 
-type AssignableRole = 'user' | 'coach' | 'admin'
-const ROLE_OPTIONS: AssignableRole[] = ['user', 'coach', 'admin']
+type AssignableRole = 'user' | 'coach' | 'admin' | 'super_admin'
+const ROLE_OPTIONS: AssignableRole[] = ['user', 'coach', 'admin', 'super_admin']
 
 const PERMISSION_LABELS: Record<Permission, string> = {
   moderation: 'Moderation',
@@ -56,11 +58,21 @@ function roleTagClass(role: string | undefined): string {
   }
 }
 
-type NewStaffRole = 'coach' | 'admin'
+type NewStaffRole = 'coach' | 'admin' | 'super_admin'
+
+const BOOTSTRAP_SUPER_ADMIN_EMAIL = 'priyanshu@nirogbhumi.com'
 
 export default function Users() {
-  const { role: viewerRole } = useAuth()
+  const { user, role: viewerRole, hasPermission } = useAuth()
   const isSuperAdmin = viewerRole === 'super_admin'
+  const canManagePrograms = isSuperAdmin || viewerRole === 'admin' || hasPermission('programs')
+  const { programs } = usePrograms()
+  const [enrollingFor, setEnrollingFor] = useState<string | null>(null)
+  const [enrollProgramId, setEnrollProgramId] = useState('')
+  const [enrolling, setEnrolling] = useState(false)
+  const canBootstrap = !isSuperAdmin && user?.email?.toLowerCase() === BOOTSTRAP_SUPER_ADMIN_EMAIL
+  const [bootstrapping, setBootstrapping] = useState(false)
+  const [bootstrapError, setBootstrapError] = useState<string | null>(null)
   // Only a super admin may grant the admin role or change an existing
   // admin's role - the setUserRole function enforces this server-side too;
   // this just keeps a plain admin from attempting (and being rejected on) a
@@ -147,6 +159,57 @@ export default function Users() {
     }
   }
 
+  async function enrollUser(u: UserRow) {
+    if (!enrollProgramId) return
+    setEnrolling(true)
+    setRowState((prev) => ({ ...prev, [u.id]: { saving: false, message: null, error: null } }))
+    try {
+      const adminEnrollUser = httpsCallable<
+        { uid: string; programId: string },
+        { activeProgramName: string }
+      >(functions, 'adminEnrollUser')
+      const res = await adminEnrollUser({ uid: u.userId ?? u.id, programId: enrollProgramId })
+      setRowState((prev) => ({
+        ...prev,
+        [u.id]: { saving: false, message: `Enrolled in ${res.data.activeProgramName}.`, error: null },
+      }))
+      setEnrollingFor(null)
+      setEnrollProgramId('')
+    } catch (err) {
+      const notDeployed = err instanceof FirebaseError && NOT_DEPLOYED.has(err.code)
+      setRowState((prev) => ({
+        ...prev,
+        [u.id]: {
+          saving: false,
+          message: null,
+          error: notDeployed ? 'Enrollment service not deployed yet.' : errText(err, 'Could not enroll'),
+        },
+      }))
+    } finally {
+      setEnrolling(false)
+    }
+  }
+
+  async function claimSuperAdmin() {
+    if (!user) return
+    setBootstrapping(true)
+    setBootstrapError(null)
+    try {
+      const bootstrapSuperAdmin = httpsCallable(functions, 'bootstrapSuperAdmin')
+      await bootstrapSuperAdmin()
+      // Only a full reload reliably re-syncs every claim-gated bit of state
+      // across the app (nav, permission checks, this very page) after a
+      // one-time role change like this - simpler and safer than threading a
+      // manual refresh through everywhere that reads `role` from useAuth().
+      await user.getIdTokenResult(true)
+      window.location.reload()
+    } catch (err) {
+      const notDeployed = err instanceof FirebaseError && NOT_DEPLOYED.has(err.code)
+      setBootstrapError(notDeployed ? 'Bootstrap service not deployed yet.' : errText(err, 'Could not claim super admin'))
+      setBootstrapping(false)
+    }
+  }
+
   async function createStaff() {
     const email = newEmail.trim()
     if (!email) return
@@ -181,6 +244,19 @@ export default function Users() {
           function that updates their access.
         </p>
       </header>
+
+      {canBootstrap && (
+        <div className="banner banner-info" role="status">
+          <strong>This account is eligible for the one-time super admin bootstrap.</strong>{' '}
+          Claiming it lets you promote other accounts to admin or super admin.
+          {bootstrapError && <p className="user-err">{bootstrapError}</p>}
+          <div className="composer-actions">
+            <button className="btn btn-forest" disabled={bootstrapping} onClick={() => void claimSuperAdmin()}>
+              {bootstrapping ? 'Claiming…' : 'Claim super admin'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {created && (
         <div className="banner banner-success" role="status">
@@ -243,6 +319,7 @@ export default function Users() {
             <select className="select" value={newRole} onChange={(e) => setNewRole(e.target.value as NewStaffRole)}>
               <option value="coach">Coach</option>
               {isSuperAdmin && <option value="admin">Admin</option>}
+              {isSuperAdmin && <option value="super_admin">Super Admin</option>}
             </select>
           </div>
           <div className="composer-actions">
@@ -287,10 +364,12 @@ export default function Users() {
             const canEdit = isSuperAdmin || !isTargetElevated
             const current = targetRole as AssignableRole
             const selected = pending[u.id] ?? current
-            // super_admin isn't an assignable option (setUserRole never grants
-            // it), but it needs to appear so the select shows the real current
-            // role instead of silently falling back to "user".
-            const displayOptions = targetRole === 'super_admin' ? ['super_admin' as const, ...roleOptions] : roleOptions
+            // A plain admin's roleOptions omits super_admin entirely, but the
+            // select still needs to show it as the current value for an
+            // already-super_admin row instead of silently falling back to "user".
+            const displayOptions = targetRole === 'super_admin' && !roleOptions.includes('super_admin')
+              ? ['super_admin' as const, ...roleOptions]
+              : roleOptions
             const state = rowState[u.id]
             const currentPerms = u.permissions ?? PERMISSION_KEYS
             const selectedPerms = pendingPerms[u.id] ?? currentPerms
@@ -317,6 +396,26 @@ export default function Users() {
                       </Link>
                     )}
                     <span className={`tag ${roleTagClass(u.role)}`}>{u.role ?? 'user'}</span>
+                    {u.programActive ? (
+                      <span className="tag tag-good">{u.activeProgramName ?? 'In program'}</span>
+                    ) : (
+                      <span className="tag tag-neutral">Not enrolled</span>
+                    )}
+                    {canManagePrograms && (
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => {
+                          if (enrollingFor === u.id) {
+                            setEnrollingFor(null)
+                          } else {
+                            setEnrollingFor(u.id)
+                            setEnrollProgramId(programs[0]?.id ?? '')
+                          }
+                        }}
+                      >
+                        {u.programActive ? 'Move program' : 'Enroll'}
+                      </button>
+                    )}
                     {canEdit ? (
                       <>
                         <select
@@ -327,7 +426,7 @@ export default function Users() {
                           }
                         >
                           {displayOptions.map((r) => (
-                            <option key={r} value={r} disabled={r === 'super_admin'}>
+                            <option key={r} value={r} disabled={r === 'super_admin' && !isSuperAdmin}>
                               {r}
                             </option>
                           ))}
@@ -365,6 +464,36 @@ export default function Users() {
                           {PERMISSION_LABELS[p]}
                         </label>
                       ))}
+                    </div>
+                  </div>
+                )}
+                {enrollingFor === u.id && (
+                  <div className="perm-grid">
+                    <span className="perm-label">
+                      {u.programActive ? 'Move to a different program' : 'Enroll in a program'}
+                    </span>
+                    <div className="composer-actions" style={{ justifyContent: 'flex-start', gap: 8 }}>
+                      <select
+                        className="select"
+                        value={enrollProgramId}
+                        onChange={(e) => setEnrollProgramId(e.target.value)}
+                      >
+                        {programs.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name ?? p.id}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        className="btn btn-forest btn-sm"
+                        disabled={enrolling || !enrollProgramId}
+                        onClick={() => void enrollUser(u)}
+                      >
+                        {enrolling ? 'Enrolling…' : 'Confirm'}
+                      </button>
+                      <button className="btn btn-ghost btn-sm" onClick={() => setEnrollingFor(null)}>
+                        Cancel
+                      </button>
                     </div>
                   </div>
                 )}

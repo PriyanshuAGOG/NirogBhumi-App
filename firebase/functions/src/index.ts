@@ -234,6 +234,19 @@ export const sendPendingNotifications = onSchedule({ schedule: 'every 15 minutes
 
 function requireUser(request: { auth?: { uid: string; token: Record<string, unknown> } }) { if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in required'); return request.auth; }
 
+// The console's program editor (Programs.tsx) only ever sets durationWeeks -
+// durationDays has never actually been written by anything, so reading it
+// directly always silently resolved to 0 and every enrolled member's
+// programDurationDays came out 0 (shows as "Day N" with no total instead of
+// "Day N of 42" in the app). Prefer a legacy durationDays if one's ever set
+// by something else, otherwise derive it from the field that's actually populated.
+function programDurationDays(programDoc: FirebaseFirestore.DocumentSnapshot): number {
+  const rawDays = programDoc.get('durationDays');
+  if (rawDays != null) return Math.round(Number(rawDays)) || 0;
+  const weeks = Number(programDoc.get('durationWeeks') ?? 0);
+  return Math.round(weeks * 7) || 0;
+}
+
 // Redeems a Care+ program invite code. This used to be a client-side
 // Firestore query + self-scoped write (programs.code was publicly readable,
 // and users/{uid}.programActive/activeProgramId were owner-writable) - that
@@ -253,7 +266,7 @@ export const redeemProgramCode = onCall({ region }, async request => {
 
   const programId = programDoc.id;
   const programName = String(programDoc.get('name') ?? 'Nirog Bhumi Program');
-  const durationDays = Math.round(Number(programDoc.get('durationDays') ?? 0)) || 0;
+  const durationDays = programDurationDays(programDoc);
 
   const userDoc = await db.doc(`users/${auth.uid}`).get();
   const memberName = String(userDoc.get('fullName') ?? '').trim() || 'Member';
@@ -275,6 +288,75 @@ export const redeemProgramCode = onCall({ region }, async request => {
   await batch.commit();
 
   return { activeProgramId: programId, activeProgramName: programName, programDurationDays: durationDays, programActive: true };
+});
+
+// Self-heals a missing programMembers roster doc for an account that Firestore
+// itself already considers an active program member (users/{uid}.programActive
+// == true) but whose roster entry is somehow absent - e.g. an account enrolled
+// under an older, pre-hardening version of redeemProgramCode that wrote these
+// as two separate non-atomic writes, where the first could succeed and the
+// second silently never run. Deliberately does NOT accept a programId from the
+// client and only ever acts on the caller's own already-authoritative
+// programActive/activeProgramId - it repairs an existing enrollment, it can
+// never grant a new one (that's still exclusively redeemProgramCode's job).
+export const ensureProgramMembership = onCall({ region }, async request => {
+  const auth = requireUser(request);
+  const userDoc = await db.doc(`users/${auth.uid}`).get();
+  if (userDoc.get('programActive') !== true) throw new HttpsError('failed-precondition', 'No active program on this account');
+  const programId = String(userDoc.get('activeProgramId') ?? '');
+  if (!programId) throw new HttpsError('failed-precondition', 'No active program on this account');
+  const memberRef = db.doc(`programMembers/${programId}_${auth.uid}`);
+  if ((await memberRef.get()).exists) return { repaired: false, programId };
+  const memberName = String(userDoc.get('fullName') ?? '').trim() || 'Member';
+  await memberRef.set({ programId, uid: auth.uid, name: memberName, status: 'active', joinedAt: FieldValue.serverTimestamp() }, { merge: true });
+  return { repaired: true, programId };
+});
+
+// Console-side manual enrollment - the same underlying write redeemProgramCode
+// does, but triggered by staff picking an existing user + program from the
+// Users & Roles page, for the case a member can't redeem their own code
+// (the "unauthenticated" enrollment bug some accounts have hit, or simply
+// someone who never got a code). Same staff/own-program authorization
+// boundary as sendBulkNotification: admin/super_admin can enroll into any
+// program, a coach only into a program they're assigned to.
+export const adminEnrollUser = onCall({ region }, async request => {
+  const auth = requireUser(request);
+  const role = auth.token.role;
+  const uid = String(request.data?.uid ?? '');
+  const programId = String(request.data?.programId ?? '');
+  if (!uid || !programId) throw new HttpsError('invalid-argument', 'A uid and programId are required');
+
+  const programDoc = await db.doc(`programs/${programId}`).get();
+  if (!programDoc.exists) throw new HttpsError('not-found', "That program wasn't found");
+
+  if (role !== 'admin' && role !== 'super_admin') {
+    if (role !== 'coach') throw new HttpsError('permission-denied', 'Staff only');
+    if (programDoc.get('coachId') !== auth.uid) throw new HttpsError('permission-denied', 'Not your program');
+  }
+
+  const targetUser = await db.doc(`users/${uid}`).get();
+  if (!targetUser.exists) throw new HttpsError('not-found', "That user wasn't found");
+
+  const programName = String(programDoc.get('name') ?? 'Nirog Bhumi Program');
+  const durationDays = programDurationDays(programDoc);
+  const memberName = String(targetUser.get('fullName') ?? '').trim() || 'Member';
+
+  const batch = db.batch();
+  batch.set(db.doc(`users/${uid}`), {
+    programActive: true,
+    activeProgramId: programId,
+    activeProgramName: programName,
+    programDurationDays: durationDays,
+    programStartedAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+  }, { merge: true });
+  batch.set(db.doc(`programMembers/${programId}_${uid}`), {
+    programId, uid, name: memberName, status: 'active', joinedAt: FieldValue.serverTimestamp(),
+  }, { merge: true });
+  await batch.commit();
+
+  await db.collection('auditLogs').add({ actorId: auth.uid, actorRole: role ?? 'admin', action: 'admin_enroll_user', entityType: 'user', entityId: uid, metadata: { programId, programName }, createdAt: FieldValue.serverTimestamp() });
+  return { activeProgramId: programId, activeProgramName: programName, programDurationDays: durationDays };
 });
 
 export const requestDataExport = onCall({ region }, async request => {
@@ -370,15 +452,16 @@ export const setUserRole = onCall({ region }, async request => {
   if (callerRole !== 'admin' && callerRole !== 'super_admin') throw new HttpsError('permission-denied', 'Admin only');
   const uid = String(request.data?.uid ?? '');
   const role = String(request.data?.role ?? '');
-  if (!uid || !['user', 'coach', 'admin'].includes(role)) throw new HttpsError('invalid-argument', 'A uid and a valid role (user|coach|admin) are required');
-  if (uid === auth.uid && role !== 'admin') throw new HttpsError('failed-precondition', 'You cannot remove your own admin role');
+  if (!uid || !['user', 'coach', 'admin', 'super_admin'].includes(role)) throw new HttpsError('invalid-argument', 'A uid and a valid role (user|coach|admin|super_admin) are required');
+  if (uid === auth.uid && role !== 'admin' && role !== 'super_admin') throw new HttpsError('failed-precondition', 'You cannot remove your own admin role');
 
   // A plain admin and super_admin were previously equal in enforcement here,
   // meaning any one admin account (compromised or malicious) could mint or
   // demote unlimited other admins. Only super_admin may now grant the admin
-  // role, or change the role of an account that's already admin/super_admin.
+  // or super_admin role, or change the role of an account that's already
+  // admin/super_admin.
   if (callerRole !== 'super_admin') {
-    if (role === 'admin') throw new HttpsError('permission-denied', 'Only a super admin can grant the admin role');
+    if (role === 'admin' || role === 'super_admin') throw new HttpsError('permission-denied', 'Only a super admin can grant the admin or super admin role');
     const target = await getAuth().getUser(uid).catch(() => null);
     const targetRole = target?.customClaims?.role;
     if (targetRole === 'admin' || targetRole === 'super_admin') {
@@ -417,8 +500,8 @@ export const createStaffAccount = onCall({ region }, async request => {
   const role = String(request.data?.role ?? '');
   const name = String(request.data?.name ?? '').trim();
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new HttpsError('invalid-argument', 'A valid email is required');
-  if (!['coach', 'admin'].includes(role)) throw new HttpsError('invalid-argument', 'Role must be coach or admin');
-  if (role === 'admin' && callerRole !== 'super_admin') throw new HttpsError('permission-denied', 'Only a super admin can create an admin account');
+  if (!['coach', 'admin', 'super_admin'].includes(role)) throw new HttpsError('invalid-argument', 'Role must be coach, admin, or super admin');
+  if ((role === 'admin' || role === 'super_admin') && callerRole !== 'super_admin') throw new HttpsError('permission-denied', 'Only a super admin can create an admin or super admin account');
 
   const existing = await getAuth().getUserByEmail(email).catch(() => null);
   if (existing) throw new HttpsError('already-exists', 'An account with that email already exists - use the role control below instead of creating a new one');
@@ -433,6 +516,36 @@ export const createStaffAccount = onCall({ region }, async request => {
   await db.doc(`users/${created.uid}`).set({ userId: created.uid, email, fullName: name || null, role, permissions: perms ?? FieldValue.delete(), status: 'active', createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   await db.collection('auditLogs').add({ actorId: auth.uid, actorRole: callerRole, action: 'create_staff_account', entityType: 'user', entityId: created.uid, metadata: { email, role }, createdAt: FieldValue.serverTimestamp() });
   return { uid: created.uid, email, role, tempPassword };
+});
+
+// One-time bootstrap for the very first super_admin. Every other path to
+// super_admin (setUserRole, createStaffAccount) requires being called BY an
+// existing super_admin - a deliberate chicken-and-egg gap before this project
+// had one. This callable is the sole, narrow exception: it only ever
+// promotes one hardcoded, pre-agreed account, and it permanently disables
+// itself (via the system/superAdminBootstrap marker doc, written in the same
+// transaction as the check) the first time it succeeds, so it can't be
+// replayed to mint a second super_admin later.
+const BOOTSTRAP_SUPER_ADMIN_EMAIL = 'priyanshu@nirogbhumi.com';
+
+export const bootstrapSuperAdmin = onCall({ region }, async request => {
+  const auth = requireUser(request);
+  const email = String(auth.token.email ?? '').toLowerCase();
+  if (email !== BOOTSTRAP_SUPER_ADMIN_EMAIL) {
+    throw new HttpsError('permission-denied', 'This account is not eligible for the one-time super admin bootstrap');
+  }
+
+  const markerRef = db.doc('system/superAdminBootstrap');
+  await db.runTransaction(async tx => {
+    const marker = await tx.get(markerRef);
+    if (marker.exists) throw new HttpsError('failed-precondition', 'Super admin has already been bootstrapped');
+    tx.set(markerRef, { usedBy: auth.uid, usedByEmail: email, usedAt: FieldValue.serverTimestamp() });
+  });
+
+  await getAuth().setCustomUserClaims(auth.uid, { role: 'super_admin' });
+  await db.doc(`users/${auth.uid}`).set({ role: 'super_admin', updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  await db.collection('auditLogs').add({ actorId: auth.uid, actorRole: 'super_admin', action: 'bootstrap_super_admin', entityType: 'user', entityId: auth.uid, metadata: { email }, createdAt: FieldValue.serverTimestamp() });
+  return { updated: true };
 });
 
 // Console's "message all quiet members" bulk action. A direct client write to

@@ -79,6 +79,14 @@ private fun applyProfileDocument(state: NirogState, document: com.google.firebas
     (document.get("programDurationDays") as? Number)?.let { state.programDurationDays = it.toLong() }
     (document.get("programStartedAt") as? com.google.firebase.Timestamp)?.let { state.programStartedAtMillis = it.toDate().time }
     runCatching { FirebaseAuth.getInstance().currentUser?.email }.getOrNull()?.let { state.userEmail = it }
+    // Self-heals accounts whose programMembers roster doc never got created
+    // (e.g. enrolled under an older, pre-hardening version of
+    // redeemProgramCode) - fire-and-forget, since it's a no-op for anyone
+    // whose roster doc already exists and this repository call already
+    // reports failures to the admin console on its own.
+    if (document.getBoolean("programActive") == true) {
+        state.repository.ensureProgramMembership {}
+    }
 }
 
 // Care+ admin capability (posting announcements, pinning messages) is granted
