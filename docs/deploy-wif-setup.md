@@ -142,7 +142,8 @@ REGION="asia-south1"
 for SERVICE in \
   redeemprogramcode ensureprogrammembership requestdataexport \
   requestaccountdeletion gethealthfilesharelink createauditlog \
-  setuserrole createstaffaccount bootstrapsuperadmin sendbulknotification; do
+  setuserrole createstaffaccount bootstrapsuperadmin sendbulknotification \
+  adminenrolluser; do
   gcloud run services add-iam-policy-binding "$SERVICE" \
     --project="$PROJECT_ID" --region="$REGION" \
     --member="allUsers" --role="roles/run.invoker"
