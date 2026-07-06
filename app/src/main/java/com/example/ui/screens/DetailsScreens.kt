@@ -2999,9 +2999,14 @@ private fun ColumnScope.DaySchedulePanel(
     }
 }
 
-// Care+ admin announcement feed - read-only for regular program members, with a
-// compose action shown only when the signed-in account actually has the admin
-// custom claim (server-verified, not a client-trusted flag).
+// Care+ admin announcement feed, styled as a WhatsApp-Community-style
+// broadcast channel: one channel identity posts (never an individual
+// member), every post fans out to the whole batch, and there is no reply/
+// compose surface for regular members - read-only by design, not just by
+// omission. The compose action only shows when the signed-in account
+// actually has server-side authorization to post to *this* program
+// (canManageProgram - admin, or the assigned coach), never a client-trusted
+// flag.
 @Composable
 fun AnnouncementsScreen(state: NirogState) {
     var records by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>?>(null) }
@@ -3037,11 +3042,31 @@ fun AnnouncementsScreen(state: NirogState) {
                 }
             }
         )
-        Text(
-            "Updates from your coach · every member is notified",
-            style = NirogType.caption, color = NirogColor.inkMuted,
-            modifier = Modifier.padding(horizontal = NirogSpace.lg)
-        )
+        // Channel identity strip - a WhatsApp Community channel is a single
+        // broadcasting identity, not a thread of individual senders, so this
+        // renders once per screen rather than once per message.
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = NirogSpace.lg, vertical = NirogSpace.xs),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier.size(36.dp).clip(CircleShape).background(NirogColor.forest),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Filled.Campaign, contentDescription = null, tint = NirogColor.onAccent, modifier = Modifier.size(18.dp))
+            }
+            Spacer(Modifier.width(NirogSpace.sm))
+            Column {
+                Text(
+                    state.activeProgramName.ifBlank { "Your program" },
+                    style = NirogType.bodyStrong, color = NirogColor.inkPrimary,
+                )
+                Text(
+                    "Broadcast channel · only your coach posts here",
+                    style = NirogType.caption, color = NirogColor.inkMuted,
+                )
+            }
+        }
         Spacer(Modifier.height(NirogSpace.sm))
         Column(modifier = Modifier.fillMaxSize().weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = NirogSpace.lg)) {
             when {
@@ -3055,8 +3080,17 @@ fun AnnouncementsScreen(state: NirogState) {
                     records!!.forEach { record ->
                         val timestamp = (record.values["createdAt"] as? com.google.firebase.Timestamp)?.toDate()
                         NirogCard {
-                            Text(record.values["title"]?.toString() ?: "Announcement", style = NirogType.bodyStrong, color = NirogColor.inkPrimary)
-                            Spacer(modifier = Modifier.height(NirogSpace.xs))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier.size(28.dp).clip(CircleShape).background(NirogColor.forestSoft.copy(alpha = 0.25f)),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(Icons.Filled.Campaign, contentDescription = null, tint = NirogColor.forest, modifier = Modifier.size(14.dp))
+                                }
+                                Spacer(modifier = Modifier.width(NirogSpace.sm))
+                                Text(record.values["title"]?.toString() ?: "Announcement", style = NirogType.bodyStrong, color = NirogColor.inkPrimary, modifier = Modifier.weight(1f))
+                            }
+                            Spacer(modifier = Modifier.height(NirogSpace.sm))
                             Text(record.values["body"]?.toString().orEmpty(), style = NirogType.body, color = NirogColor.inkSecondary)
                             if (timestamp != null) {
                                 Spacer(modifier = Modifier.height(NirogSpace.sm))
