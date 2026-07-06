@@ -2,6 +2,29 @@
   max-width: 340px;
 }
 
+.composer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.composer-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: var(--space-1);
+}
+.user-temp-pass {
+  font-size: 13.5px;
+  font-weight: 700;
+  background: var(--surface-sunken);
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+}
+.user-temp-note {
+  margin: var(--space-2) 0 0;
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
 .user-list {
   display: flex;
   flex-direction: column;

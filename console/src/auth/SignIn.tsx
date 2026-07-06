@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { signInWithEmailAndPassword } from 'firebase/auth'
+import { signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth'
 import { FirebaseError } from 'firebase/app'
 import { auth } from '../lib/firebase'
 import './SignIn.css'
@@ -24,11 +24,25 @@ function messageFor(err: unknown): string {
   return 'Could not sign in. Please try again.'
 }
 
+function resetMessageFor(err: unknown): string {
+  if (err instanceof FirebaseError && err.code === 'auth/invalid-email') {
+    return 'That email address does not look right.'
+  }
+  // Deliberately the same message on "no such account" as on success - a
+  // reset form that reveals which emails exist is a real enumeration leak,
+  // and a newly-created staff account should just be told to check email
+  // either way.
+  return 'If that email has a console account, a reset link is on its way.'
+}
+
 export default function SignIn() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [showReset, setShowReset] = useState(false)
+  const [resetBusy, setResetBusy] = useState(false)
+  const [resetMessage, setResetMessage] = useState<string | null>(null)
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
@@ -43,6 +57,20 @@ export default function SignIn() {
     }
   }
 
+  async function onReset(e: FormEvent) {
+    e.preventDefault()
+    setResetBusy(true)
+    setResetMessage(null)
+    try {
+      await sendPasswordResetEmail(auth, email.trim())
+      setResetMessage('If that email has a console account, a reset link is on its way.')
+    } catch (err) {
+      setResetMessage(resetMessageFor(err))
+    } finally {
+      setResetBusy(false)
+    }
+  }
+
   return (
     <div className="signin-screen">
       <div className="signin-card card">
@@ -50,40 +78,77 @@ export default function SignIn() {
           <span className="overline">Nirog Bhumi</span>
           <h1>Staff Console</h1>
           <p className="signin-sub">
-            Sign in with your coach or admin account to continue.
+            {showReset
+              ? "Enter your email and we'll send a reset link — useful right after a new account is created for you."
+              : 'Sign in with your coach or admin account to continue.'}
           </p>
         </div>
 
-        <form className="stack" onSubmit={onSubmit}>
-          <label className="field">
-            <span>Email</span>
-            <input
-              type="email"
-              autoComplete="username"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@nirogbhumi.app"
-              required
-            />
-          </label>
+        {showReset ? (
+          <form className="stack" onSubmit={onReset}>
+            <label className="field">
+              <span>Email</span>
+              <input
+                type="email"
+                autoComplete="username"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@nirogbhumi.app"
+                required
+              />
+            </label>
 
-          <label className="field">
-            <span>Password</span>
-            <input
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
-          </label>
+            {resetMessage && <p className="signin-error" role="status">{resetMessage}</p>}
 
-          {error && <p className="signin-error" role="alert">{error}</p>}
+            <button className="btn btn-forest" type="submit" disabled={resetBusy}>
+              {resetBusy ? 'Sending…' : 'Send reset link'}
+            </button>
+            <button
+              className="btn btn-ghost"
+              type="button"
+              onClick={() => {
+                setShowReset(false)
+                setResetMessage(null)
+              }}
+            >
+              Back to sign in
+            </button>
+          </form>
+        ) : (
+          <form className="stack" onSubmit={onSubmit}>
+            <label className="field">
+              <span>Email</span>
+              <input
+                type="email"
+                autoComplete="username"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@nirogbhumi.app"
+                required
+              />
+            </label>
 
-          <button className="btn btn-forest" type="submit" disabled={busy}>
-            {busy ? 'Signing in…' : 'Sign in'}
-          </button>
-        </form>
+            <label className="field">
+              <span>Password</span>
+              <input
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+              />
+            </label>
+
+            {error && <p className="signin-error" role="alert">{error}</p>}
+
+            <button className="btn btn-forest" type="submit" disabled={busy}>
+              {busy ? 'Signing in…' : 'Sign in'}
+            </button>
+            <button className="btn btn-ghost" type="button" onClick={() => setShowReset(true)}>
+              Forgot password?
+            </button>
+          </form>
+        )}
       </div>
     </div>
   )

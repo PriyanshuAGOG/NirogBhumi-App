@@ -56,6 +56,8 @@ function roleTagClass(role: string | undefined): string {
   }
 }
 
+type NewStaffRole = 'coach' | 'admin'
+
 export default function Users() {
   const { role: viewerRole } = useAuth()
   const isSuperAdmin = viewerRole === 'super_admin'
@@ -71,6 +73,14 @@ export default function Users() {
   const [pending, setPending] = useState<Record<string, AssignableRole>>({})
   const [pendingPerms, setPendingPerms] = useState<Record<string, Permission[]>>({})
   const [rowState, setRowState] = useState<Record<string, RowState>>({})
+
+  const [showAddStaff, setShowAddStaff] = useState(false)
+  const [newEmail, setNewEmail] = useState('')
+  const [newName, setNewName] = useState('')
+  const [newRole, setNewRole] = useState<NewStaffRole>('coach')
+  const [creating, setCreating] = useState(false)
+  const [createError, setCreateError] = useState<string | null>(null)
+  const [created, setCreated] = useState<{ email: string; tempPassword: string } | null>(null)
 
   useEffect(() => {
     // Bounded + ordered - an unfiltered listener on the whole `users`
@@ -137,6 +147,30 @@ export default function Users() {
     }
   }
 
+  async function createStaff() {
+    const email = newEmail.trim()
+    if (!email) return
+    setCreating(true)
+    setCreateError(null)
+    try {
+      const createStaffAccount = httpsCallable<
+        { email: string; role: NewStaffRole; name?: string },
+        { uid: string; email: string; role: string; tempPassword: string }
+      >(functions, 'createStaffAccount')
+      const res = await createStaffAccount({ email, role: newRole, name: newName.trim() || undefined })
+      setCreated({ email: res.data.email, tempPassword: res.data.tempPassword })
+      setNewEmail('')
+      setNewName('')
+      setNewRole('coach')
+      setShowAddStaff(false)
+    } catch (err) {
+      const notDeployed = err instanceof FirebaseError && NOT_DEPLOYED.has(err.code)
+      setCreateError(notDeployed ? 'Account creation service not deployed yet.' : errText(err, 'Could not create account'))
+    } finally {
+      setCreating(false)
+    }
+  }
+
   return (
     <section className="page">
       <header className="page-head">
@@ -148,6 +182,28 @@ export default function Users() {
         </p>
       </header>
 
+      {created && (
+        <div className="banner banner-success" role="status">
+          <strong>{created.email}</strong> was created. Temporary password (shown once —
+          copy it to them now): <code className="user-temp-pass">{created.tempPassword}</code>{' '}
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={() => {
+              void navigator.clipboard.writeText(created.tempPassword)
+            }}
+          >
+            Copy
+          </button>{' '}
+          <button className="btn btn-ghost btn-sm" onClick={() => setCreated(null)}>
+            Dismiss
+          </button>
+          <p className="user-temp-note">
+            They should sign in at this console with this password, then use "Forgot password"
+            on the sign-in screen to set their own.
+          </p>
+        </div>
+      )}
+
       <div className="toolbar">
         <input
           className="input user-search"
@@ -155,7 +211,51 @@ export default function Users() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
+        <button className="btn btn-forest" onClick={() => setShowAddStaff((v) => !v)}>
+          {showAddStaff ? 'Cancel' : 'Add admin/coach'}
+        </button>
       </div>
+
+      {showAddStaff && (
+        <div className="card composer">
+          <span className="overline">New staff account</span>
+          {createError && (
+            <div className="banner banner-error" role="alert">
+              {createError}
+            </div>
+          )}
+          <div className="field">
+            <span className="field-label">Email</span>
+            <input
+              className="input"
+              type="email"
+              value={newEmail}
+              onChange={(e) => setNewEmail(e.target.value)}
+              placeholder="name@nirogbhumi.app"
+            />
+          </div>
+          <div className="field">
+            <span className="field-label">Name (optional)</span>
+            <input className="input" value={newName} onChange={(e) => setNewName(e.target.value)} />
+          </div>
+          <div className="field">
+            <span className="field-label">Role</span>
+            <select className="select" value={newRole} onChange={(e) => setNewRole(e.target.value as NewStaffRole)}>
+              <option value="coach">Coach</option>
+              {isSuperAdmin && <option value="admin">Admin</option>}
+            </select>
+          </div>
+          <div className="composer-actions">
+            <button
+              className="btn btn-forest"
+              disabled={creating || !newEmail.trim()}
+              onClick={() => void createStaff()}
+            >
+              {creating ? 'Creating…' : 'Create account'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {error && (
         <div className="banner banner-error" role="alert">
