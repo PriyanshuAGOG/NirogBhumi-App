@@ -81,12 +81,30 @@ private fun applyProfileDocument(state: NirogState, document: com.google.firebas
     runCatching { FirebaseAuth.getInstance().currentUser?.email }.getOrNull()?.let { state.userEmail = it }
 }
 
-// Care+ admin capability (posting announcements) is granted server-side via a Firebase
-// custom claim, never trusted from anything the client itself could set - a forced
-// token refresh picks up a claim change without requiring the user to sign out first.
+// Care+ admin capability (posting announcements, pinning messages) is granted
+// server-side via a Firebase custom claim, never trusted from anything the
+// client itself could set - a forced token refresh picks up a claim change
+// without requiring the user to sign out first. A coach (the actual per-batch
+// program manager) is staff too, just scoped to the programs they're assigned
+// to - resolved via a query that only the assigned coach could ever read a
+// result from (see the `programs` collection's own read rule), so this never
+// needs its own separate trust decision.
 private fun refreshAdminClaim(state: NirogState) {
-    FirebaseAuth.getInstance().currentUser?.getIdToken(true)
-        ?.addOnSuccessListener { result -> state.isAdmin = result.claims["role"] == "admin" }
+    val auth = FirebaseAuth.getInstance()
+    auth.currentUser?.getIdToken(true)
+        ?.addOnSuccessListener { result ->
+            val role = result.claims["role"] as? String ?: ""
+            state.staffRole = role
+            state.isAdmin = role == "admin" || role == "super_admin"
+            if (role == "coach") {
+                FirebaseFirestore.getInstance().collection("programs")
+                    .whereEqualTo("coachId", auth.currentUser?.uid)
+                    .get()
+                    .addOnSuccessListener { snap -> state.coachProgramIds = snap.documents.map { it.id }.toSet() }
+            } else {
+                state.coachProgramIds = emptySet()
+            }
+        }
 }
 
 // Existing accounts signing back in (any method) must land on their dashboard,

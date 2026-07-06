@@ -95,8 +95,15 @@ class NirogState {
 
     // Care+ (Announcements/Chat) admin capability - resolved from the signed-in user's
     // Firebase custom claims, not a client-trusted flag, so it can only ever reflect
-    // what the server actually granted.
+    // what the server actually granted. True for admin and super_admin.
     var isAdmin by mutableStateOf(false)
+    // Raw role claim ("", "user", "coach", "admin", "super_admin").
+    var staffRole by mutableStateOf("")
+    // Program IDs this coach is the assigned coachId for (per the `programs`
+    // read rule: coach() && coachId == uid) - empty for non-coaches. Lets
+    // announcement/pin actions recognize the actual per-batch program
+    // manager, not just the platform-wide admin role.
+    var coachProgramIds by mutableStateOf(setOf<String>())
 
     // Active Tab under Dashboard
     var activeTab by mutableStateOf("Today") // "Today", "Track", "Insights", "Care", "Learn"
@@ -160,3 +167,7 @@ class NirogState {
     var updateCheckBusy by mutableStateOf(false)
     var updateCheckError by mutableStateOf("")
 }
+
+/** Mirrors the programStaff() Firestore rule (admin() || assignedCoach(programId)). */
+fun NirogState.canManageProgram(programId: String): Boolean =
+    isAdmin || (staffRole == "coach" && programId.isNotBlank() && coachProgramIds.contains(programId))

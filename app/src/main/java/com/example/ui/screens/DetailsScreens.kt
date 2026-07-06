@@ -49,6 +49,7 @@ import com.nirogbhumi.app.health.HealthConnectManager
 import com.nirogbhumi.app.health.HealthConnectStatus
 import com.nirogbhumi.app.health.computeSleepGlucoseInsight
 import com.nirogbhumi.app.ui.NirogState
+import com.nirogbhumi.app.ui.canManageProgram
 import com.nirogbhumi.app.ui.SugarLog
 import com.nirogbhumi.app.ui.components.NirogCard
 import com.nirogbhumi.app.ui.components.RowCard
@@ -3029,7 +3030,7 @@ fun AnnouncementsScreen(state: NirogState) {
             "Announcements",
             onBack = { state.currentScreen = "dashboard" },
             trailing = {
-                if (state.isAdmin) {
+                if (state.canManageProgram(state.activeProgramId)) {
                     IconButton(onClick = { showComposer = true }) {
                         Icon(Icons.Filled.Add, contentDescription = "New announcement", tint = NirogColor.forest)
                     }
@@ -3438,7 +3439,7 @@ fun ProgramChatScreen(state: NirogState) {
                         style = NirogType.caption, color = NirogColor.inkSecondary, maxLines = 2,
                     )
                 }
-                if (state.isAdmin) {
+                if (state.canManageProgram(state.activeProgramId)) {
                     IconButton(onClick = {
                         state.repository.togglePinMessage(pinned.id, state.activeProgramId, pinned = false) { result ->
                             if (result is com.nirogbhumi.app.data.CloudResult.Failure) state.cloudMessage = result.message
@@ -3792,7 +3793,7 @@ fun ProgramChatScreen(state: NirogState) {
                         },
                         onClick = { replyTarget = target; actionTarget = null },
                     )
-                    if (state.isAdmin) {
+                    if (state.canManageProgram(state.activeProgramId)) {
                         val isPinned = target.values["pinned"] == true
                         RowCard(
                             title = if (isPinned) "Unpin message" else "Pin message",
