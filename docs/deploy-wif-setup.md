@@ -143,7 +143,7 @@ for SERVICE in \
   redeemprogramcode ensureprogrammembership requestdataexport \
   requestaccountdeletion gethealthfilesharelink createauditlog \
   setuserrole createstaffaccount bootstrapsuperadmin sendbulknotification \
-  adminenrolluser; do
+  adminenrolluser invitetoprogram revokeinvite; do
   gcloud run services add-iam-policy-binding "$SERVICE" \
     --project="$PROJECT_ID" --region="$REGION" \
     --member="allUsers" --role="roles/run.invoker"
