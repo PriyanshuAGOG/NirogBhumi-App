@@ -393,6 +393,64 @@ describe('programInvites (staff-only via callable, never client-writable)', () =
   });
 });
 
+describe('announcements (staff-only source doc, never client-writable)', () => {
+  beforeEach(async () => {
+    await seed(async (db) => {
+      await setDoc(doc(db, 'announcements/ann1'), {
+        title: 'Test', body: 'Body', authorId: 'admin-uid',
+        audience: { scope: 'all_users', programIds: [], inactiveDays: 4 },
+        recipientUids: ['mem1'],
+      });
+    });
+  });
+
+  it('lets an admin read the source announcement', async () => {
+    await assertSucceeds(getDoc(doc(admin(), 'announcements/ann1')));
+  });
+
+  it('lets a coach read the source announcement', async () => {
+    await assertSucceeds(getDoc(doc(coach('coach-a'), 'announcements/ann1')));
+  });
+
+  it('denies a plain member reading the source announcement (only their own fan-out copy)', async () => {
+    await assertFails(getDoc(doc(member('mem1'), 'announcements/ann1')));
+  });
+
+  it('denies any client, including admin, writing an announcement directly (must go through createAnnouncement)', async () => {
+    await assertFails(setDoc(doc(admin(), 'announcements/ann2'), { title: 'x', body: 'y' }));
+  });
+
+  it('denies any client deleting an announcement directly (must go through deleteAnnouncement)', async () => {
+    await assertFails(deleteDoc(doc(admin(), 'announcements/ann1')));
+  });
+});
+
+describe('users/{uid}/announcements fan-out copy (own-only, never client-writable)', () => {
+  beforeEach(async () => {
+    await seed(async (db) => {
+      await setDoc(doc(db, 'users/mem1/announcements/ann1'), {
+        announcementId: 'ann1', title: 'Test', body: 'Body',
+      });
+    });
+  });
+
+  it('lets the recipient read their own fan-out copy', async () => {
+    await assertSucceeds(getDoc(doc(member('mem1'), 'users/mem1/announcements/ann1')));
+  });
+
+  it('denies a different member reading someone else\'s fan-out copy', async () => {
+    await assertFails(getDoc(doc(member('mem2'), 'users/mem1/announcements/ann1')));
+  });
+
+  it('denies the recipient writing their own fan-out copy directly', async () => {
+    await assertFails(setDoc(doc(member('mem1'), 'users/mem1/announcements/ann2'), { title: 'x' }));
+  });
+
+  it('denies an admin writing a fan-out copy directly (must go through createAnnouncement)', async () => {
+    await assertFails(setDoc(doc(admin(), 'users/mem1/announcements/ann2'), { title: 'x' }));
+  });
+});
+
 // Sanity check that the suite itself is wired up, independent of rules content.
 describe('test harness sanity', () => {
   it('ran at least one assertion', () => assert.ok(true));

@@ -49,6 +49,16 @@ service cloud.firestore {
         && request.resource.data.get('programDurationDays', null) == resource.data.get('programDurationDays', null));
       allow delete: if admin();
     }
+    // Fan-out copy of an announcement, one per recipient uid, written only by
+    // the createAnnouncement/deleteAnnouncement Cloud Functions (Admin SDK
+    // bypasses rules) - this is what AnnouncementsScreen actually reads, so a
+    // member only ever sees announcements addressed to them, whatever the
+    // audience (a single program, all enrolled, inactive, everyone) that
+    // reached them by.
+    match /users/{uid}/announcements/{id} {
+      allow read: if owner(uid);
+      allow write: if false;
+    }
     match /profiles/{id} {
       allow create: if validCreate();
       allow read: if ownsResource() || admin() || assigned(resource.data.userId);
@@ -115,9 +125,17 @@ service cloud.firestore {
       allow create, delete: if admin();
       allow update: if admin() || (coach() && resource.data.coachId == request.auth.uid && request.resource.data.coachId == resource.data.coachId);
     }
+    // Composed exclusively through the createAnnouncement Cloud Function now
+    // (targeting can cross program boundaries - all users, all enrolled,
+    // inactive, non-enrolled - which needs the Admin SDK to resolve, not a
+    // client write a rule could scope by a single programId). This doc is
+    // staff-only: the console's "past announcements" list. Every recipient's
+    // own copy lives under users/{uid}/announcements instead - that's what
+    // the Android app reads from, and it's what used to be readable here by
+    // any enrolled member of *any* program, not just staff.
     match /announcements/{id} {
-      allow read: if programMember() || programStaff(resource.data.programId);
-      allow create: if programStaff(request.resource.data.programId) && request.resource.data.authorId == request.auth.uid && request.resource.data.createdAt == request.time;
+      allow read: if staff();
+      allow write: if false;
     }
     match /programChatMessages/{id} {
       allow read: if programMember() && ownProgram(resource.data.programId);

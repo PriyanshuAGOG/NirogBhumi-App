@@ -33,7 +33,7 @@ private val legalSections = listOf(
 
 @Composable
 fun LegalCenterScreen(state: NirogState) {
-    var expanded by remember { mutableStateOf("Medical Disclaimer") }
+    var expanded by remember { mutableStateOf(state.legalInitialSection ?: "Medical Disclaimer") }
     Column(Modifier.fillMaxSize().background(Color(0xFFF8F6EF)).verticalScroll(rememberScrollState())) {
         Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = { state.currentScreen = state.legalReturnRoute }) { Icon(Icons.Outlined.ArrowBack, "Back") }

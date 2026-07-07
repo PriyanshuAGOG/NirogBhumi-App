@@ -41,6 +41,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -1279,7 +1280,7 @@ fun ProfileScreen(state: NirogState) {
         SettingsSection(title = "Notifications & Privacy") {
             SettingsRow(Icons.Filled.Notifications, "Notification settings") { state.currentScreen = "notification_settings" }
             SettingsRow(Icons.Filled.Shield, "Privacy & consent") { state.currentScreen = "privacy_consent" }
-            SettingsRow(Icons.Filled.DownloadForOffline, "Export or delete my data") { state.currentScreen = "data_controls" }
+            SettingsRow(Icons.Filled.DownloadForOffline, "Export or anonymize my data") { state.currentScreen = "data_controls" }
         }
 
         SettingsSection(title = "Support") {
@@ -2382,10 +2383,18 @@ fun relativeTimeLabel(date: java.util.Date): String {
     }
 }
 
-// Data export & account deletion - both real, backed by the same Cloud
+// Data export & anonymization - both real, backed by the same Cloud
 // Functions/Firestore request-queue path (requestDataExport/
 // requestAccountDeletion -> dataExportRequests/deletionRequests, processed by
 // existing scheduled Functions) rather than a generic form that goes nowhere.
+// This used to be a full erase-everything account deletion. It's now an
+// anonymization: identifying info (name, contact, profile, uploaded files,
+// consultations) is permanently removed, but health readings themselves
+// (sugar, BP, sleep, walks, weight, medications) are kept with every link
+// back to the person stripped out - see processApprovedDeletions in
+// firebase/functions/src/index.ts for exactly what happens to each
+// collection. The client-facing name/copy changed to "anonymize" to match;
+// the underlying request-queue collection name is unchanged.
 @Composable
 fun DataControlsScreen(state: NirogState) {
     var exporting by remember { mutableStateOf(false) }
@@ -2393,9 +2402,10 @@ fun DataControlsScreen(state: NirogState) {
     var confirmingDelete by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf(false) }
     var deletionRequested by remember { mutableStateOf(false) }
+    var showAnonymizeExplainer by remember { mutableStateOf(false) }
 
     Column(modifier = Modifier.fillMaxSize().background(Color(0xFFF8F6EF))) {
-        DetailScreenHeader("Export or delete my data", onBack = { state.currentScreen = "profile" })
+        DetailScreenHeader("Export or anonymize my data", onBack = { state.currentScreen = "profile" })
         Column(modifier = Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -2445,21 +2455,29 @@ fun DataControlsScreen(state: NirogState) {
                 Column(modifier = Modifier.padding(20.dp)) {
                     Icon(Icons.Filled.DeleteForever, contentDescription = null, tint = Color(0xFFB4472F))
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text("Delete my account", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF7B332E))
+                    Text("Anonymize my account", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF7B332E))
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        "Permanently removes your logs, reports, and program activity after identity verification. This can't be undone.",
+                        "Removes your name, contact details, and login access after identity verification. Your health readings stay on file with no link back to you - see what that means below. This can't be undone.",
                         fontSize = 13.sp, color = Color(0xFF7B332E), lineHeight = 18.sp
                     )
-                    Spacer(modifier = Modifier.height(14.dp))
+                    Spacer(modifier = Modifier.height(4.dp))
+                    TextButton(
+                        onClick = { showAnonymizeExplainer = true },
+                        contentPadding = PaddingValues(0.dp),
+                        modifier = Modifier.height(28.dp)
+                    ) {
+                        Text("What does anonymizing mean?", fontSize = 12.5.sp, fontWeight = FontWeight.Bold, color = Color(0xFF7B332E), textDecoration = TextDecoration.Underline)
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
                     if (deletionRequested) {
-                        Text("Deletion requested - pending approval and identity verification.", fontSize = 13.sp, color = Color(0xFF7B332E), fontWeight = FontWeight.SemiBold)
+                        Text("Anonymization requested - pending approval and identity verification.", fontSize = 13.sp, color = Color(0xFF7B332E), fontWeight = FontWeight.SemiBold)
                     } else {
                         OutlinedButton(
                             enabled = !deleting,
                             onClick = { confirmingDelete = true },
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFB4472F))
-                        ) { Text("Request account deletion") }
+                        ) { Text("Request anonymization") }
                     }
                 }
             }
@@ -2470,8 +2488,8 @@ fun DataControlsScreen(state: NirogState) {
     if (confirmingDelete) {
         AlertDialog(
             onDismissRequest = { confirmingDelete = false },
-            title = { Text("Delete your account?", fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221)) },
-            text = { Text("All your health logs and reports will be permanently deleted after verification. This can't be undone.", fontSize = 13.sp, color = Color(0xFF434842)) },
+            title = { Text("Anonymize your account?", fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221)) },
+            text = { Text("Your name, contact details, and login access will be permanently removed after verification. Your health readings stay on file with no link back to you. This can't be undone.", fontSize = 13.sp, color = Color(0xFF434842)) },
             confirmButton = {
                 Button(
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB4472F)),
@@ -2484,37 +2502,163 @@ fun DataControlsScreen(state: NirogState) {
                             else state.cloudMessage = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
                         }
                     }
-                ) { Text("Delete my account", color = Color.White) }
+                ) { Text("Anonymize my account", color = Color.White) }
             },
             dismissButton = { TextButton(onClick = { confirmingDelete = false }) { Text("Cancel", color = Color(0xFF737972)) } }
         )
     }
+
+    if (showAnonymizeExplainer) {
+        AlertDialog(
+            onDismissRequest = { showAnonymizeExplainer = false },
+            title = { Text("About anonymized health data", fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        "When you anonymize your account, we permanently delete anything that identifies you - your name, email, phone number, profile, uploaded reports, and consultation history.",
+                        fontSize = 13.sp, color = Color(0xFF434842), lineHeight = 18.sp
+                    )
+                    Text(
+                        "Your day-to-day health readings - blood sugar, blood pressure, sleep, walks, weight, medications - stay on file, but with every link back to you removed. No name, no contact info, nothing connecting a reading to a person.",
+                        fontSize = 13.sp, color = Color(0xFF434842), lineHeight = 18.sp
+                    )
+                    Text(
+                        "We use this anonymized data in aggregate - never about one specific person - to understand what habits and routines actually help people manage and reverse conditions like type-2 diabetes, and to keep improving the guidance Nirog Bhumi gives everyone.",
+                        fontSize = 13.sp, color = Color(0xFF434842), lineHeight = 18.sp
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showAnonymizeExplainer = false }) {
+                    Text("Got it", color = Color(0xFF314936), fontWeight = FontWeight.Bold)
+                }
+            }
+        )
+    }
 }
 
-// Read-only summary of onboarding consent - matches Legal Center's promise
-// that optional consent can be reviewed/withdrawn here. Required consent
-// (health data storage, medical disclaimer) can't be withdrawn without
-// deleting the account, since the app can't function without it.
+// Full privacy & consent center - what's agreed to, what's optional and
+// actually toggleable here (Expert review persists through the same
+// saveProfile("consent"...) shape the onboarding consent step writes),
+// what anonymization means (ties into the Data Controls "anonymize my
+// account" flow), and quick links straight into the relevant Legal Center
+// section instead of one generic "read the policy" link. Required consent
+// (health data storage, medical disclaimer) can't be withdrawn in place
+// since the app can't function without it - anonymizing the account is the
+// only way out, and that's said plainly here rather than left implied.
 @Composable
 fun PrivacyConsentScreen(state: NirogState) {
+    var togglingExpertReview by remember { mutableStateOf(false) }
+
     Column(modifier = Modifier.fillMaxSize().background(Color(0xFFF8F6EF))) {
         DetailScreenHeader("Privacy & consent", onBack = { state.currentScreen = "profile" })
-        Column(modifier = Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("What you've agreed to, and what's optional.", fontSize = 13.sp, color = Color(0xFF697169))
-            ConsentRow("Health data storage", "Required to track your readings and reports.", state.consentHealthData, required = true)
-            ConsentRow("Expert review", "Lets an assigned expert see your logs when you book care or join a program.", state.consentExpertReview, required = false)
-            ConsentRow("Medical disclaimer acknowledgement", "You understand this app doesn't replace medical advice.", state.consentMedicalDisclaimer, required = true)
-            Spacer(modifier = Modifier.height(4.dp))
-            TextButton(onClick = { state.legalReturnRoute = "privacy_consent"; state.currentScreen = "legal_center" }) {
-                Text("Read the full privacy policy", color = Color(0xFF314936), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+        Column(
+            modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    "Your health data, on your terms",
+                    fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, fontSize = 20.sp, color = Color(0xFF1B2219)
+                )
+                Text(
+                    "Exactly what you've agreed to, what's optional, and how we protect and use your data.",
+                    fontSize = 13.sp, color = Color(0xFF697169), lineHeight = 18.sp
+                )
             }
+
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                SectionLabel("Your consent")
+                ConsentRow(
+                    title = "Health data storage",
+                    description = "Required to track your readings and reports. Withdraw by anonymizing your account.",
+                    granted = state.consentHealthData,
+                    kind = ConsentKind.Required
+                )
+                ConsentRow(
+                    title = "Expert review",
+                    description = "Lets an assigned expert see your logs when you book care or join a program.",
+                    granted = state.consentExpertReview,
+                    kind = ConsentKind.Optional,
+                    busy = togglingExpertReview,
+                    onToggle = { next ->
+                        togglingExpertReview = true
+                        val previous = state.consentExpertReview
+                        state.consentExpertReview = next
+                        state.repository.saveProfile(mapOf("consent" to mapOf("expertReview" to next))) { result ->
+                            togglingExpertReview = false
+                            if (result is com.nirogbhumi.app.data.CloudResult.Failure) {
+                                state.consentExpertReview = previous
+                                state.cloudMessage = result.message
+                            }
+                        }
+                    }
+                )
+                ConsentRow(
+                    title = "Medical disclaimer acknowledgement",
+                    description = "You understand this app doesn't replace medical advice. Withdraw by anonymizing your account.",
+                    granted = state.consentMedicalDisclaimer,
+                    kind = ConsentKind.Required
+                )
+            }
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFEBF3EC)),
+                shape = RoundedCornerShape(18.dp)
+            ) {
+                Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Filled.Insights, contentDescription = null, tint = Color(0xFF3F7D58), modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Anonymized data & research", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFF1B2219))
+                    }
+                    Text(
+                        "If you ever anonymize your account, your name and contact details are permanently deleted - but health readings (sugar, BP, sleep, walks, weight, medications) stay on file with no link back to you. We use this in aggregate, never about one person, to understand what actually helps people manage and reverse conditions like type-2 diabetes.",
+                        fontSize = 12.5.sp, color = Color(0xFF3F4A41), lineHeight = 18.sp
+                    )
+                    TextButton(
+                        onClick = { state.currentScreen = "data_controls" },
+                        contentPadding = PaddingValues(0.dp),
+                        modifier = Modifier.height(28.dp)
+                    ) {
+                        Text("Manage my data", fontSize = 12.5.sp, fontWeight = FontWeight.Bold, color = Color(0xFF3F7D58), textDecoration = TextDecoration.Underline)
+                    }
+                }
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                SectionLabel("Legal documents")
+                LegalLinkRow("Privacy Policy", "What we collect and why") { state.legalInitialSection = "Privacy Policy"; state.legalReturnRoute = "privacy_consent"; state.currentScreen = "legal_center" }
+                LegalLinkRow("Terms of Use", "Your responsibilities using Nirog Bhumi") { state.legalInitialSection = "Terms of Use"; state.legalReturnRoute = "privacy_consent"; state.currentScreen = "legal_center" }
+                LegalLinkRow("Medical Disclaimer", "What this app is - and isn't") { state.legalInitialSection = "Medical Disclaimer"; state.legalReturnRoute = "privacy_consent"; state.currentScreen = "legal_center" }
+                LegalLinkRow("Data Deletion & Anonymization Policy", "What happens when you anonymize your account") { state.legalInitialSection = "Data Deletion Policy"; state.legalReturnRoute = "privacy_consent"; state.currentScreen = "legal_center" }
+                LegalLinkRow("Program Terms", "What a Care+ program does and doesn't promise") { state.legalInitialSection = "Program Terms"; state.legalReturnRoute = "privacy_consent"; state.currentScreen = "legal_center" }
+                TextButton(onClick = { state.legalInitialSection = null; state.legalReturnRoute = "privacy_consent"; state.currentScreen = "legal_center" }) {
+                    Text("See all legal documents", color = Color(0xFF314936), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                }
+            }
+            Spacer(modifier = Modifier.height(24.dp))
         }
-        Spacer(modifier = Modifier.height(32.dp))
     }
 }
 
 @Composable
-private fun ConsentRow(title: String, description: String, granted: Boolean, required: Boolean) {
+private fun SectionLabel(text: String) {
+    Text(text, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF697169), letterSpacing = 0.6.sp)
+}
+
+private enum class ConsentKind { Required, Optional }
+
+@Composable
+private fun ConsentRow(
+    title: String,
+    description: String,
+    granted: Boolean,
+    kind: ConsentKind,
+    busy: Boolean = false,
+    onToggle: ((Boolean) -> Unit)? = null,
+) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = Color.White),
@@ -2522,25 +2666,67 @@ private fun ConsentRow(title: String, description: String, granted: Boolean, req
         border = BorderStroke(0.5.dp, Color(0xFFD8D0C0))
     ) {
         Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-                if (granted) Icons.Filled.CheckCircle else Icons.Filled.RadioButtonUnchecked,
-                contentDescription = null,
-                tint = if (granted) Color(0xFF3F7D58) else Color(0xFF9CB79F),
-                modifier = Modifier.size(20.dp)
-            )
-            Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(title, fontWeight = FontWeight.Bold, fontSize = 13.5.sp, color = Color(0xFF1B2219))
-                    if (required) {
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Surface(color = Color(0xFFEBF7E8), shape = RoundedCornerShape(8.dp)) {
-                            Text("REQUIRED", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFF426820), modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
-                        }
+                    Text(
+                        title,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.5.sp,
+                        color = Color(0xFF1B2219),
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Surface(
+                        color = if (kind == ConsentKind.Required) Color(0xFFEBF7E8) else Color(0xFFF3EFE3),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text(
+                            if (kind == ConsentKind.Required) "REQUIRED" else "OPTIONAL",
+                            fontSize = 9.sp, fontWeight = FontWeight.Bold,
+                            color = if (kind == ConsentKind.Required) Color(0xFF426820) else Color(0xFF8A6D23),
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
                     }
                 }
+                Spacer(modifier = Modifier.height(2.dp))
                 Text(description, fontSize = 12.sp, color = Color(0xFF8B9285), lineHeight = 16.sp)
             }
+            Spacer(modifier = Modifier.width(12.dp))
+            if (kind == ConsentKind.Optional && onToggle != null) {
+                Switch(
+                    checked = granted,
+                    onCheckedChange = { onToggle(it) },
+                    enabled = !busy,
+                    colors = SwitchDefaults.colors(checkedTrackColor = Color(0xFF3F7D58))
+                )
+            } else {
+                Icon(
+                    if (granted) Icons.Filled.CheckCircle else Icons.Filled.RadioButtonUnchecked,
+                    contentDescription = null,
+                    tint = if (granted) Color(0xFF3F7D58) else Color(0xFF9CB79F),
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun LegalLinkRow(title: String, subtitle: String, onClick: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(0.5.dp, Color(0xFFD8D0C0))
+    ) {
+        Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.Description, contentDescription = null, tint = Color(0xFF697169), modifier = Modifier.size(18.dp))
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(title, fontWeight = FontWeight.SemiBold, fontSize = 13.5.sp, color = Color(0xFF1B2219))
+                Text(subtitle, fontSize = 11.5.sp, color = Color(0xFF8B9285))
+            }
+            Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Color(0xFFB7BDB2), modifier = Modifier.size(18.dp))
         }
     }
 }
@@ -3014,10 +3200,11 @@ fun AnnouncementsScreen(state: NirogState) {
     var composeTitle by remember { mutableStateOf("") }
     var composeBody by remember { mutableStateOf("") }
     var posting by remember { mutableStateOf(false) }
+    var deletingId by remember { mutableStateOf("") }
+    val canDelete = state.isAdmin || state.staffRole == "coach"
 
-    DisposableEffect(state.activeProgramId) {
-        if (state.activeProgramId.isBlank()) { records = emptyList(); return@DisposableEffect onDispose {} }
-        val subscription = state.repository.listenAnnouncements(state.activeProgramId) { result ->
+    DisposableEffect(Unit) {
+        val subscription = state.repository.listenAnnouncements { result ->
             records = when (result) {
                 is com.nirogbhumi.app.data.CloudResult.Success -> result.value
                 is com.nirogbhumi.app.data.CloudResult.Failure -> emptyList()
@@ -3026,7 +3213,7 @@ fun AnnouncementsScreen(state: NirogState) {
         // Best-effort: opening this screen is "read" for the unread badge on
         // Chat Hub, whether or not the member is enrolled (fails silently
         // for non-members - they have no roster doc to mark anyway).
-        state.repository.markProgramRead(state.activeProgramId, "lastReadAnnouncementsAt") {}
+        if (state.activeProgramId.isNotBlank()) state.repository.markProgramRead(state.activeProgramId, "lastReadAnnouncementsAt") {}
         onDispose { subscription.cancel() }
     }
 
@@ -3089,6 +3276,11 @@ fun AnnouncementsScreen(state: NirogState) {
                                 }
                                 Spacer(modifier = Modifier.width(NirogSpace.sm))
                                 Text(record.values["title"]?.toString() ?: "Announcement", style = NirogType.bodyStrong, color = NirogColor.inkPrimary, modifier = Modifier.weight(1f))
+                                if (canDelete) {
+                                    IconButton(onClick = { deletingId = record.id }, modifier = Modifier.size(28.dp)) {
+                                        Icon(Icons.Filled.DeleteOutline, contentDescription = "Delete announcement", tint = NirogColor.inkMuted, modifier = Modifier.size(16.dp))
+                                    }
+                                }
                             }
                             Spacer(modifier = Modifier.height(NirogSpace.sm))
                             Text(record.values["body"]?.toString().orEmpty(), style = NirogType.body, color = NirogColor.inkSecondary)
@@ -3131,6 +3323,27 @@ fun AnnouncementsScreen(state: NirogState) {
                 ) { Text(if (posting) "Posting..." else "Post", color = NirogColor.onAccent) }
             },
             dismissButton = { TextButton(onClick = { showComposer = false }, enabled = !posting) { Text("Cancel", color = NirogColor.inkSecondary) } }
+        )
+    }
+
+    if (deletingId.isNotBlank()) {
+        AlertDialog(
+            onDismissRequest = { deletingId = "" },
+            title = { Text("Delete this announcement?", style = NirogType.cardTitle, color = NirogColor.inkPrimary) },
+            text = { Text("It will be removed for everyone who received it.", style = NirogType.body, color = NirogColor.inkSecondary) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val id = deletingId
+                        state.repository.deleteAnnouncement(id) { result ->
+                            if (result is com.nirogbhumi.app.data.CloudResult.Failure) state.cloudMessage = result.message
+                        }
+                        deletingId = ""
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = NirogColor.statusCritical)
+                ) { Text("Delete", color = NirogColor.onAccent) }
+            },
+            dismissButton = { TextButton(onClick = { deletingId = "" }) { Text("Cancel", color = NirogColor.inkSecondary) } }
         )
     }
 }

@@ -37,6 +37,10 @@ class NirogState {
     var pendingConsultationId by mutableStateOf("")
     var pendingDeepLink by mutableStateOf("")
     var legalReturnRoute by mutableStateOf("profile")
+    // Which Legal Center accordion section to open with, e.g. jumping
+    // straight to "Privacy Policy" from a specific link instead of always
+    // landing on the default "Medical Disclaimer" section.
+    var legalInitialSection by mutableStateOf<String?>(null)
     var currentScreen by mutableStateOf("splash") // "splash", "welcome", "value_slides", "consent", "login_mobile", "login_otp", "email_auth", "password_reset", "setup_profile", "selection_caregiver", "health_profile_setup", "goal_selection", "program_code_optional", "onboarding_complete", "dashboard", "sugar_detail", "consult_stepper", "active_journey"
     var viewMode by mutableStateOf("mobile") // "mobile", "admin", "expert"
 

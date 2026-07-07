@@ -637,3 +637,102 @@ by the user. Work sequentially, CI-verified per slice, small commits.
       them out. Batches.tsx's existing per-batch roster already linked to
       this same full-history view per member, so no separate "batch member
       detail" page was needed - just the CSV bulk-add shortcut above.
+24. [x] **Account deletion → anonymization** — a deliberate product/policy
+    change: `processApprovedDeletions` (`firebase/functions/src/index.ts`)
+    used to erase every trace of a departing member. It now deletes only
+    identifying context - `profiles`, `dailyActions`, `weeklyReports`,
+    `sugarStories`, `consultations`, `userPrograms`, `programPlans`,
+    `expertNotes`, `notifications`, `deviceConnections`, the `programMembers`
+    roster row, and every raw uploaded file (lab scans, photos, PDFs - these
+    show a name on their face) - and *anonymizes in place* the actual
+    health-metric collections (`glucoseReadings`, `bpReadings`, `sleepLogs`,
+    `walkLogs`, `weightLogs`, `medicationLogs`, `checklistLogs`,
+    `dailyCheckins`, `labReports`): `userId`/`profileId` (and, for
+    `labReports`, the free-text `labName`/`notes`/`fileUrl`) are stripped
+    rather than the document being deleted. Firestore rules already gate
+    every read in those collections on `resource.data.userId ==
+    request.auth.uid`, so once that field is gone the record is unreadable
+    by any individual user's client - it exists from then on only for
+    internal, aggregate analysis (the stated goal: find out what actually
+    helps people manage/reverse conditions like type-2 diabetes, without
+    needing to know whose reading it was). The Auth account, `users/{uid}`
+    doc, and all personal collections are still deleted outright - this
+    isn't a "keep everything" softening, just a narrower definition of what
+    counts as identifying.
+    - Android: `DataControlsScreen` (`DetailsScreens.kt`) copy changed
+      throughout from "delete"/"deletion" to "anonymize"/"anonymization",
+      plus a new "What does anonymizing mean?" link that opens a plain-
+      language explainer dialog (what gets deleted, what gets kept and how,
+      and why - framed around the diabetes-reversal research goal). The
+      underlying `requestAccountDeletion` method/`deletionRequests`
+      collection name is unchanged - renaming was judged higher-risk than
+      the payoff for a purely cosmetic identifier match, so a doc comment
+      on the interface method carries the semantic change instead.
+25. [x] **Privacy & Consent screen redesign** — the old screen's
+    title+badge `Row` had no `weight`/wrap on the title `Text`, so a long
+    title plus the REQUIRED/OPTIONAL badge could overflow the card at
+    smaller widths (the reported "misaligned"); the outer content `Column`
+    also had no `verticalScroll`, so it clipped rather than scrolled once
+    content exceeded the viewport (the reported "irresponsive"). Both are
+    fixed (`Modifier.weight(1f, fill = false)` on the title, `verticalScroll
+    (rememberScrollState())` on the content column) as part of a full
+    rewrite of `PrivacyConsentScreen`/`ConsentRow` in `DetailsScreens.kt`:
+    "Expert review" consent is now a genuinely interactive `Switch`
+    (previously static display only) that persists through the same
+    `saveProfile("consent"...)` shape the onboarding consent step writes,
+    with optimistic update + rollback on failure; health-data-storage and
+    medical-disclaimer consent are shown as Required (non-togglable in
+    place, since the app can't function without them - anonymizing the
+    account via Data Controls is the stated way to withdraw them, said
+    plainly in the row copy rather than left implied); a new "Anonymized
+    data & research" card explains in plain language what anonymizing does
+    and links straight to Data Controls; a new "Legal documents" section
+    (`LegalLinkRow`) deep-links into specific `LegalCenterScreen` accordion
+    sections via a new `NirogState.legalInitialSection` field (defaults to
+    "Medical Disclaimer" when unset, preserving old behavior for any other
+    entry point into Legal Center) instead of dumping the member on one
+    generic "read the policy" link.
+26. [x] **Announcement deletion + 24h default expiry, and a full audience-
+    targeting rebuild** — replaces the old model (one `announcements` doc
+    per program, fanned out by a Firestore trigger keyed on a single
+    `programId`, with no delete/update rule at all - a genuine pre-existing
+    gap, and read-scoped so loosely any enrolled member of *any* program
+    could read *every* program's announcements). Composing now goes through
+    one `createAnnouncement` callable (`firebase/functions/src/index.ts`)
+    that resolves a five-way audience - a specific program/batch (or several
+    at once), all enrolled Care+ members, every app user, members inactive
+    N+ days (`lastCheckinAt`, missing counted as inactive too - a plain range
+    query would silently exclude anyone who's *never* checked in), or
+    everyone not currently enrolled - into a concrete recipient list
+    (`resolveAudienceUids`, capped at 5,000 per send), then fans out across
+    any combination of three channels: in-app (a denormalized copy written
+    to each recipient's own `users/{uid}/announcements/{id}` subcollection -
+    trivially rules-scoped to `owner(uid)`, and what `AnnouncementsScreen`
+    now reads from instead of a per-program query), push (the existing
+    `notifications`/`sendPendingNotifications` pipeline, `type:'announcement'`
+    bypassing quiet hours/caps same as before), and email (writes into a
+    `mail` collection in the shape the Firebase "Trigger Email" extension
+    expects - honestly partial: the extension isn't installed yet, an
+    owner-gated prerequisite documented in `docs/deploy-wif-setup.md` #6,
+    same pattern as the org-policy IAM fix). A coach may only target
+    program(s) they're the assigned coach of; every cross-program scope is
+    admin-only. Every announcement gets a 24-hour default expiry
+    (`expiresAt`, overridable per send) enforced two ways: immediately in
+    the UI (the console list and the app's `AnnouncementsScreen` both stop
+    showing it), and for real within 15 minutes by piggybacking the cleanup
+    onto the existing `sendPendingNotifications` schedule rather than adding
+    a 4th Cloud Scheduler job (`deleteAnnouncementDoc` removes the source
+    doc plus every recipient's fan-out copy, tracked via a `recipientUids`
+    array on the source doc rather than a collection-group query). A new
+    `deleteAnnouncement` callable does the same thing on demand - a coach
+    may only remove their own post, admin/super_admin may remove any. The
+    console's Announcements page gained a full targeting UI (audience
+    scope selector, multi-program checklist, inactive-days input, three
+    channel checkboxes, a live "Preview audience" recipient-count check via
+    `previewAnnouncementAudience` before sending, and a Delete button per
+    past announcement); mobile compose is unchanged in scope (still posts
+    to the member's own program only) but now goes through the same
+    `createAnnouncement` callable instead of a raw client write, and gained
+    its own delete button (staff-only, confirm dialog). New rules-tests
+    cover both the source doc (staff-read-only, zero client writes) and the
+    fan-out subcollection (owner-read-only, zero client writes).
