@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   addDoc,
   collection,
@@ -10,12 +10,14 @@ import {
   setDoc,
   Timestamp,
   where,
+  writeBatch,
 } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import { useAuth } from '../auth/AuthProvider'
 import { usePrograms } from '../lib/usePrograms'
 import { errText } from '../lib/errors'
 import { formatDate, formatTime, toDate, toInputDateTime, fromInputDateTime } from '../lib/time'
+import { parseCsvRecords, toCsv, downloadCsv } from '../lib/csv'
 import './Calendar.css'
 
 type EventType = 'live' | 'walk' | 'lab' | 'qa'
@@ -210,6 +212,87 @@ export default function Calendar() {
     }
   }
 
+  function downloadEventTemplate() {
+    const header = ['title', 'type', 'starts_at', 'ends_at', 'location', 'link', 'description', 'bring']
+    const example = [
+      'Saturday morning walk', 'walk', '2026-07-19T07:00', '2026-07-19T08:00',
+      'Lakeside park', '', 'A relaxed group walk to close out the week.', 'Water bottle, walking shoes',
+    ]
+    downloadCsv('program_events_template.csv', toCsv([header, example]))
+  }
+
+  const csvInputRef = useRef<HTMLInputElement>(null)
+  const [bulkBusy, setBulkBusy] = useState(false)
+  const [bulkError, setBulkError] = useState<string | null>(null)
+  const [bulkSummary, setBulkSummary] = useState<string | null>(null)
+
+  async function handleEventCsv(file: File) {
+    if (!programId) return
+    setBulkBusy(true)
+    setBulkError(null)
+    setBulkSummary(null)
+    try {
+      const text = await file.text()
+      const records = parseCsvRecords(text)
+      if (records.length === 0) {
+        setBulkError('That file has no data rows.')
+        return
+      }
+      if (records.length > 300) {
+        setBulkError('Too many rows in one file (max 300) - split it into smaller batches.')
+        return
+      }
+      const validTypes: EventType[] = ['live', 'walk', 'lab', 'qa']
+      const rowErrors: string[] = []
+      const valid: Record<string, unknown>[] = []
+      records.forEach((rec, idx) => {
+        const rowNum = idx + 2 // header is row 1
+        const title = (rec.title ?? '').trim()
+        const type = (rec.type ?? 'live').trim().toLowerCase() as EventType
+        const start = fromInputDateTime((rec.starts_at ?? '').trim())
+        if (!title) { rowErrors.push(`Row ${rowNum}: missing title`); return }
+        if (!validTypes.includes(type)) { rowErrors.push(`Row ${rowNum}: type must be one of live/walk/lab/qa`); return }
+        if (!start) { rowErrors.push(`Row ${rowNum}: starts_at is missing or unreadable (use YYYY-MM-DDTHH:mm)`); return }
+        const end = fromInputDateTime((rec.ends_at ?? '').trim())
+        const link = (rec.link ?? '').trim()
+        if (link && !safeHttpUrl(link)) { rowErrors.push(`Row ${rowNum}: link must be a valid http(s) URL`); return }
+        valid.push({
+          programId,
+          title,
+          type,
+          startsAt: Timestamp.fromDate(start),
+          endsAt: end ? Timestamp.fromDate(end) : null,
+          location: (rec.location ?? '').trim() || null,
+          link: link || null,
+          description: (rec.description ?? '').trim() || null,
+          bring: (rec.bring ?? '').trim() || null,
+          createdBy: user?.uid ?? null,
+          updatedAt: serverTimestamp(),
+        })
+      })
+      if (valid.length === 0) {
+        setBulkError(`No rows could be imported.\n${rowErrors.join('\n')}`)
+        return
+      }
+      // Chunked the same way the backend chunks batched deletes elsewhere in
+      // this codebase - a single writeBatch is capped at 500 operations.
+      for (let offset = 0; offset < valid.length; offset += 400) {
+        const batch = writeBatch(db)
+        valid.slice(offset, offset + 400).forEach((payload) => batch.set(doc(collection(db, 'programEvents')), payload))
+        await batch.commit()
+      }
+      setBulkSummary(
+        `Added ${valid.length} event${valid.length === 1 ? '' : 's'}.` +
+          (rowErrors.length ? ` Skipped ${rowErrors.length}: ${rowErrors.join('; ')}` : ''),
+      )
+    } catch (err) {
+      setBulkError(errText(err, 'Could not import that file'))
+    } finally {
+      setBulkBusy(false)
+      if (csvInputRef.current) csvInputRef.current.value = ''
+    }
+  }
+
   async function remove(ev: ProgramEvent) {
     setBusyId(ev.id)
     setError(null)
@@ -263,18 +346,47 @@ export default function Calendar() {
         </div>
         <div className="toolbar-spacer" />
         {programId && (
-          <button
-            className="btn btn-forest"
-            onClick={() => {
-              setDraft(emptyDraft())
-              setAlsoAnnounce(false)
-              setSaveError(null)
-            }}
-          >
-            + Add event
-          </button>
+          <>
+            <button className="btn btn-ghost" onClick={downloadEventTemplate}>
+              Download CSV template
+            </button>
+            <button className="btn btn-ghost" disabled={bulkBusy} onClick={() => csvInputRef.current?.click()}>
+              {bulkBusy ? 'Importing…' : 'Upload CSV'}
+            </button>
+            <input
+              ref={csvInputRef}
+              type="file"
+              accept=".csv,text/csv"
+              style={{ display: 'none' }}
+              onChange={(e) => {
+                const file = e.target.files?.[0]
+                if (file) void handleEventCsv(file)
+              }}
+            />
+            <button
+              className="btn btn-forest"
+              onClick={() => {
+                setDraft(emptyDraft())
+                setAlsoAnnounce(false)
+                setSaveError(null)
+              }}
+            >
+              + Add event
+            </button>
+          </>
         )}
       </div>
+
+      {bulkError && (
+        <div className="banner banner-error" role="alert" style={{ whiteSpace: 'pre-line' }}>
+          {bulkError}
+        </div>
+      )}
+      {bulkSummary && (
+        <div className="banner banner-success" role="status">
+          {bulkSummary}
+        </div>
+      )}
 
       {error && (
         <div className="banner banner-error" role="alert">

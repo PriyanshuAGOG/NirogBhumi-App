@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   addDoc,
@@ -14,6 +14,8 @@ import { useAuth } from '../auth/AuthProvider'
 import { usePrograms, type Program } from '../lib/usePrograms'
 import { errText } from '../lib/errors'
 import { relativeTime, toDate, dayKey } from '../lib/time'
+import { parseCsvRecords, toCsv, downloadCsv } from '../lib/csv'
+import { callBulkOnboard, summarizeBulkResults } from '../lib/bulkOnboard'
 import './Batches.css'
 
 interface Member {
@@ -57,6 +59,45 @@ function Roster({ program }: { program: Program }) {
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
   const [sentTo, setSentTo] = useState<string | null>(null)
+
+  // Bulk add via CSV - same underlying bulkOnboard callable as the
+  // Programs page's global import, just pre-scoped to this one batch so a
+  // coach only ever needs a single "contact" column, not a program column.
+  const csvInputRef = useRef<HTMLInputElement>(null)
+  const [csvBusy, setCsvBusy] = useState(false)
+  const [csvError, setCsvError] = useState<string | null>(null)
+  const [csvSummary, setCsvSummary] = useState<string | null>(null)
+
+  function downloadContactTemplate() {
+    downloadCsv(`${(program.name ?? 'batch').replace(/\s+/g, '_')}_contacts_template.csv`, toCsv([['contact'], ['+919876543210']]))
+  }
+
+  async function handleContactCsv(file: File) {
+    setCsvBusy(true)
+    setCsvError(null)
+    setCsvSummary(null)
+    try {
+      const text = await file.text()
+      const records = parseCsvRecords(text)
+      if (records.length === 0) { setCsvError('That file has no data rows.'); return }
+      if (records.length > 300) { setCsvError('Too many rows in one file (max 300) - split it into smaller batches.'); return }
+      const rows: { contact: string; programId: string }[] = []
+      const rowErrors: string[] = []
+      records.forEach((rec, idx) => {
+        const contact = (rec.contact ?? '').trim()
+        if (!contact) { rowErrors.push(`Row ${idx + 2}: missing contact`); return }
+        rows.push({ contact, programId: program.id })
+      })
+      if (rows.length === 0) { setCsvError(`No rows could be imported.\n${rowErrors.join('\n')}`); return }
+      const results = await callBulkOnboard(rows)
+      setCsvSummary(summarizeBulkResults(results) + (rowErrors.length ? ` Also skipped ${rowErrors.length} row(s) before import: ${rowErrors.join('; ')}` : ''))
+    } catch (err) {
+      setCsvError(errText(err, 'Could not import that file'))
+    } finally {
+      setCsvBusy(false)
+      if (csvInputRef.current) csvInputRef.current.value = ''
+    }
+  }
 
   useEffect(() => {
     setLoading(true)
@@ -139,6 +180,37 @@ function Roster({ program }: { program: Program }) {
               No pulse recorded for today yet — the daily aggregation writes it each morning.
             </p>
           )}
+        </div>
+      )}
+
+      <div className="toolbar">
+        <span className="section-h">Bulk add members</span>
+        <div className="toolbar-spacer" />
+        <button className="btn btn-ghost btn-sm" onClick={downloadContactTemplate}>
+          Download CSV template
+        </button>
+        <button className="btn btn-ghost btn-sm" disabled={csvBusy} onClick={() => csvInputRef.current?.click()}>
+          {csvBusy ? 'Importing…' : 'Upload CSV'}
+        </button>
+        <input
+          ref={csvInputRef}
+          type="file"
+          accept=".csv,text/csv"
+          style={{ display: 'none' }}
+          onChange={(e) => {
+            const file = e.target.files?.[0]
+            if (file) void handleContactCsv(file)
+          }}
+        />
+      </div>
+      {csvError && (
+        <div className="banner banner-error" role="alert" style={{ whiteSpace: 'pre-line' }}>
+          {csvError}
+        </div>
+      )}
+      {csvSummary && (
+        <div className="banner banner-success" role="status">
+          {csvSummary}
         </div>
       )}
 
