@@ -40,6 +40,11 @@ interface HealthRepository {
     fun listenUserCollection(collection: String, limit: Long = 30, orderByField: String? = null, descending: Boolean = true, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription
     fun listenPublicCollection(collection: String, limit: Long = 30, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription
     fun requestDataExport(done: (CloudResult<Unit>) -> Unit)
+    // Despite the name (kept to avoid touching the deletionRequests
+    // collection/queue), this is now an anonymization request, not a full
+    // erase: identifying info is deleted, health readings are stripped of
+    // any link back to the person and kept for aggregate research - see
+    // processApprovedDeletions in firebase/functions/src/index.ts.
     fun requestAccountDeletion(done: (CloudResult<Unit>) -> Unit)
     fun upsertUserRecord(collection: String, documentId: String, values: Map<String, Any?>, done: (CloudResult<Unit>) -> Unit = {})
     fun deleteUserRecord(collection: String, documentId: String, done: (CloudResult<Unit>) -> Unit)

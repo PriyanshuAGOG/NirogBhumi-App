@@ -799,23 +799,55 @@ export const sendBulkNotification = onCall({ region }, async request => {
   return { sent: targets.length };
 });
 
+// Was a full erase-everything sweep. Changed to anonymize instead of delete
+// for the health-metric collections - a BP reading or a walk distance has
+// real value in aggregate for understanding what actually helps people
+// manage and reverse conditions like type-2 diabetes, and that value
+// doesn't depend on knowing whose reading it was. Only identifying context
+// (profile, name/contact, consultations, coach notes, device identifiers,
+// generated narratives that reference the person, uploaded files that show
+// a name on their face) is deleted outright; the raw metric collections are
+// stripped of userId/profileId (and any free-text field that could carry a
+// name) and left in place. Firestore rules gate every read in those
+// collections on `resource.data.userId == request.auth.uid`, so once that
+// field is gone the record becomes unreadable by any individual user's
+// client - it only exists for internal, aggregate analysis from here on.
 export const processApprovedDeletions = onSchedule({ schedule: 'every 60 minutes', timeZone: 'Asia/Kolkata', region }, async () => {
   const requests = await db.collection('deletionRequests').where('status', '==', 'approved').limit(10).get();
-  // programMembers and the batchStats/checkedInMembers marker were missing
-  // from this list - both key documents by/contain the raw uid, so without
-  // this a "completed" deletion still left the person's roster entry (and
-  // their daily check-in marker) behind after userId was hashed off the
-  // request doc, an incomplete-erasure bug for a health app.
-  const ownedCollections = ['profiles','glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','labReports','dailyCheckins','dailyActions','weeklyReports','sugarStories','consultations','userPrograms','programPlans','checklistLogs','expertNotes','notifications','deviceConnections','programMembers','medicationLogs'];
+
+  const personalCollections = ['profiles', 'dailyActions', 'weeklyReports', 'sugarStories', 'consultations', 'userPrograms', 'programPlans', 'expertNotes', 'notifications', 'deviceConnections'];
+  const anonymizeCollections = ['glucoseReadings', 'bpReadings', 'sleepLogs', 'walkLogs', 'weightLogs', 'medicationLogs', 'checklistLogs', 'dailyCheckins', 'labReports'];
+
   for (const request of requests.docs) {
     const uid = request.get('userId'); if (!uid) continue;
     await request.ref.set({ status: 'processing', updatedAt: FieldValue.serverTimestamp() }, { merge: true });
-    for (const name of ownedCollections) {
+
+    for (const name of personalCollections) {
       const docs = await db.collection(name).where('userId', '==', uid).get();
       for (let offset = 0; offset < docs.docs.length; offset += 400) { const batch = db.batch(); docs.docs.slice(offset, offset + 400).forEach(doc => batch.delete(doc.ref)); await batch.commit(); }
     }
-    // programMembers is keyed by "uid" on the roster doc itself (see
-    // redeemProgramCode), not "userId" - the pass above won't match those.
+
+    for (const name of anonymizeCollections) {
+      const docs = await db.collection(name).where('userId', '==', uid).get();
+      for (let offset = 0; offset < docs.docs.length; offset += 400) {
+        const batch = db.batch();
+        docs.docs.slice(offset, offset + 400).forEach(doc => {
+          const update: Record<string, unknown> = { userId: FieldValue.delete(), profileId: FieldValue.delete(), anonymizedAt: FieldValue.serverTimestamp() };
+          // labReports carries free-text fields (lab name, notes) and a
+          // Storage fileUrl - the underlying file is deleted outright below
+          // (a scanned report shows a name on its face), so the dangling
+          // URL and any free text that could identify someone go with it.
+          if (name === 'labReports') { update.labName = FieldValue.delete(); update.notes = FieldValue.delete(); update.fileUrl = FieldValue.delete(); }
+          batch.set(doc.ref, update, { merge: true });
+        });
+        await batch.commit();
+      }
+    }
+
+    // programMembers and the batchStats/checkedInMembers marker are tied to
+    // program-membership identity (visible to a coach as roster rows), not
+    // a standalone health metric - deleted the same as the personal
+    // collections above, not anonymized.
     const roster = await db.collection('programMembers').where('uid', '==', uid).get();
     const programIds = new Set(roster.docs.map(doc => String(doc.get('programId') ?? '')).filter(Boolean));
     for (let offset = 0; offset < roster.docs.length; offset += 400) { const batch = db.batch(); roster.docs.slice(offset, offset + 400).forEach(doc => batch.delete(doc.ref)); await batch.commit(); }
@@ -830,6 +862,9 @@ export const processApprovedDeletions = onSchedule({ schedule: 'every 60 minutes
         await batch.commit();
       }
     }
+    // Raw uploaded files (lab scans, profile photos, consultation
+    // attachments, generated PDF reports) almost always show identifying
+    // detail on their face - deleted outright, never anonymized in place.
     for (const prefix of [`users/${uid}/`, `lab-reports/${uid}/`, `consultation-attachments/${uid}/`, `reports/${uid}/`]) await getStorage().bucket().deleteFiles({ prefix });
     await db.doc(`users/${uid}`).delete();
     await getAuth().deleteUser(uid);

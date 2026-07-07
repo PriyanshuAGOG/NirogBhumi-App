@@ -41,6 +41,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -2382,10 +2383,18 @@ fun relativeTimeLabel(date: java.util.Date): String {
     }
 }
 
-// Data export & account deletion - both real, backed by the same Cloud
+// Data export & anonymization - both real, backed by the same Cloud
 // Functions/Firestore request-queue path (requestDataExport/
 // requestAccountDeletion -> dataExportRequests/deletionRequests, processed by
 // existing scheduled Functions) rather than a generic form that goes nowhere.
+// This used to be a full erase-everything account deletion. It's now an
+// anonymization: identifying info (name, contact, profile, uploaded files,
+// consultations) is permanently removed, but health readings themselves
+// (sugar, BP, sleep, walks, weight, medications) are kept with every link
+// back to the person stripped out - see processApprovedDeletions in
+// firebase/functions/src/index.ts for exactly what happens to each
+// collection. The client-facing name/copy changed to "anonymize" to match;
+// the underlying request-queue collection name is unchanged.
 @Composable
 fun DataControlsScreen(state: NirogState) {
     var exporting by remember { mutableStateOf(false) }
@@ -2393,9 +2402,10 @@ fun DataControlsScreen(state: NirogState) {
     var confirmingDelete by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf(false) }
     var deletionRequested by remember { mutableStateOf(false) }
+    var showAnonymizeExplainer by remember { mutableStateOf(false) }
 
     Column(modifier = Modifier.fillMaxSize().background(Color(0xFFF8F6EF))) {
-        DetailScreenHeader("Export or delete my data", onBack = { state.currentScreen = "profile" })
+        DetailScreenHeader("Export or anonymize my data", onBack = { state.currentScreen = "profile" })
         Column(modifier = Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -2445,21 +2455,29 @@ fun DataControlsScreen(state: NirogState) {
                 Column(modifier = Modifier.padding(20.dp)) {
                     Icon(Icons.Filled.DeleteForever, contentDescription = null, tint = Color(0xFFB4472F))
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text("Delete my account", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF7B332E))
+                    Text("Anonymize my account", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF7B332E))
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        "Permanently removes your logs, reports, and program activity after identity verification. This can't be undone.",
+                        "Removes your name, contact details, and login access after identity verification. Your health readings stay on file with no link back to you - see what that means below. This can't be undone.",
                         fontSize = 13.sp, color = Color(0xFF7B332E), lineHeight = 18.sp
                     )
-                    Spacer(modifier = Modifier.height(14.dp))
+                    Spacer(modifier = Modifier.height(4.dp))
+                    TextButton(
+                        onClick = { showAnonymizeExplainer = true },
+                        contentPadding = PaddingValues(0.dp),
+                        modifier = Modifier.height(28.dp)
+                    ) {
+                        Text("What does anonymizing mean?", fontSize = 12.5.sp, fontWeight = FontWeight.Bold, color = Color(0xFF7B332E), textDecoration = TextDecoration.Underline)
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
                     if (deletionRequested) {
-                        Text("Deletion requested - pending approval and identity verification.", fontSize = 13.sp, color = Color(0xFF7B332E), fontWeight = FontWeight.SemiBold)
+                        Text("Anonymization requested - pending approval and identity verification.", fontSize = 13.sp, color = Color(0xFF7B332E), fontWeight = FontWeight.SemiBold)
                     } else {
                         OutlinedButton(
                             enabled = !deleting,
                             onClick = { confirmingDelete = true },
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFB4472F))
-                        ) { Text("Request account deletion") }
+                        ) { Text("Request anonymization") }
                     }
                 }
             }
@@ -2470,8 +2488,8 @@ fun DataControlsScreen(state: NirogState) {
     if (confirmingDelete) {
         AlertDialog(
             onDismissRequest = { confirmingDelete = false },
-            title = { Text("Delete your account?", fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221)) },
-            text = { Text("All your health logs and reports will be permanently deleted after verification. This can't be undone.", fontSize = 13.sp, color = Color(0xFF434842)) },
+            title = { Text("Anonymize your account?", fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221)) },
+            text = { Text("Your name, contact details, and login access will be permanently removed after verification. Your health readings stay on file with no link back to you. This can't be undone.", fontSize = 13.sp, color = Color(0xFF434842)) },
             confirmButton = {
                 Button(
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB4472F)),
@@ -2484,9 +2502,37 @@ fun DataControlsScreen(state: NirogState) {
                             else state.cloudMessage = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
                         }
                     }
-                ) { Text("Delete my account", color = Color.White) }
+                ) { Text("Anonymize my account", color = Color.White) }
             },
             dismissButton = { TextButton(onClick = { confirmingDelete = false }) { Text("Cancel", color = Color(0xFF737972)) } }
+        )
+    }
+
+    if (showAnonymizeExplainer) {
+        AlertDialog(
+            onDismissRequest = { showAnonymizeExplainer = false },
+            title = { Text("About anonymized health data", fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        "When you anonymize your account, we permanently delete anything that identifies you - your name, email, phone number, profile, uploaded reports, and consultation history.",
+                        fontSize = 13.sp, color = Color(0xFF434842), lineHeight = 18.sp
+                    )
+                    Text(
+                        "Your day-to-day health readings - blood sugar, blood pressure, sleep, walks, weight, medications - stay on file, but with every link back to you removed. No name, no contact info, nothing connecting a reading to a person.",
+                        fontSize = 13.sp, color = Color(0xFF434842), lineHeight = 18.sp
+                    )
+                    Text(
+                        "We use this anonymized data in aggregate - never about one specific person - to understand what habits and routines actually help people manage and reverse conditions like type-2 diabetes, and to keep improving the guidance Nirog Bhumi gives everyone.",
+                        fontSize = 13.sp, color = Color(0xFF434842), lineHeight = 18.sp
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showAnonymizeExplainer = false }) {
+                    Text("Got it", color = Color(0xFF314936), fontWeight = FontWeight.Bold)
+                }
+            }
         )
     }
 }

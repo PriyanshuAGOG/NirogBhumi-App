@@ -637,3 +637,34 @@ by the user. Work sequentially, CI-verified per slice, small commits.
       them out. Batches.tsx's existing per-batch roster already linked to
       this same full-history view per member, so no separate "batch member
       detail" page was needed - just the CSV bulk-add shortcut above.
+24. [x] **Account deletion → anonymization** — a deliberate product/policy
+    change: `processApprovedDeletions` (`firebase/functions/src/index.ts`)
+    used to erase every trace of a departing member. It now deletes only
+    identifying context - `profiles`, `dailyActions`, `weeklyReports`,
+    `sugarStories`, `consultations`, `userPrograms`, `programPlans`,
+    `expertNotes`, `notifications`, `deviceConnections`, the `programMembers`
+    roster row, and every raw uploaded file (lab scans, photos, PDFs - these
+    show a name on their face) - and *anonymizes in place* the actual
+    health-metric collections (`glucoseReadings`, `bpReadings`, `sleepLogs`,
+    `walkLogs`, `weightLogs`, `medicationLogs`, `checklistLogs`,
+    `dailyCheckins`, `labReports`): `userId`/`profileId` (and, for
+    `labReports`, the free-text `labName`/`notes`/`fileUrl`) are stripped
+    rather than the document being deleted. Firestore rules already gate
+    every read in those collections on `resource.data.userId ==
+    request.auth.uid`, so once that field is gone the record is unreadable
+    by any individual user's client - it exists from then on only for
+    internal, aggregate analysis (the stated goal: find out what actually
+    helps people manage/reverse conditions like type-2 diabetes, without
+    needing to know whose reading it was). The Auth account, `users/{uid}`
+    doc, and all personal collections are still deleted outright - this
+    isn't a "keep everything" softening, just a narrower definition of what
+    counts as identifying.
+    - Android: `DataControlsScreen` (`DetailsScreens.kt`) copy changed
+      throughout from "delete"/"deletion" to "anonymize"/"anonymization",
+      plus a new "What does anonymizing mean?" link that opens a plain-
+      language explainer dialog (what gets deleted, what gets kept and how,
+      and why - framed around the diabetes-reversal research goal). The
+      underlying `requestAccountDeletion` method/`deletionRequests`
+      collection name is unchanged - renaming was judged higher-risk than
+      the payoff for a purely cosmetic identifier match, so a doc comment
+      on the interface method carries the semantic change instead.
