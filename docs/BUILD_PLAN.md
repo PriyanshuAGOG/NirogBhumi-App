@@ -668,3 +668,27 @@ by the user. Work sequentially, CI-verified per slice, small commits.
       collection name is unchanged - renaming was judged higher-risk than
       the payoff for a purely cosmetic identifier match, so a doc comment
       on the interface method carries the semantic change instead.
+25. [x] **Privacy & Consent screen redesign** — the old screen's
+    title+badge `Row` had no `weight`/wrap on the title `Text`, so a long
+    title plus the REQUIRED/OPTIONAL badge could overflow the card at
+    smaller widths (the reported "misaligned"); the outer content `Column`
+    also had no `verticalScroll`, so it clipped rather than scrolled once
+    content exceeded the viewport (the reported "irresponsive"). Both are
+    fixed (`Modifier.weight(1f, fill = false)` on the title, `verticalScroll
+    (rememberScrollState())` on the content column) as part of a full
+    rewrite of `PrivacyConsentScreen`/`ConsentRow` in `DetailsScreens.kt`:
+    "Expert review" consent is now a genuinely interactive `Switch`
+    (previously static display only) that persists through the same
+    `saveProfile("consent"...)` shape the onboarding consent step writes,
+    with optimistic update + rollback on failure; health-data-storage and
+    medical-disclaimer consent are shown as Required (non-togglable in
+    place, since the app can't function without them - anonymizing the
+    account via Data Controls is the stated way to withdraw them, said
+    plainly in the row copy rather than left implied); a new "Anonymized
+    data & research" card explains in plain language what anonymizing does
+    and links straight to Data Controls; a new "Legal documents" section
+    (`LegalLinkRow`) deep-links into specific `LegalCenterScreen` accordion
+    sections via a new `NirogState.legalInitialSection` field (defaults to
+    "Medical Disclaimer" when unset, preserving old behavior for any other
+    entry point into Legal Center) instead of dumping the member on one
+    generic "read the policy" link.
