@@ -599,3 +599,41 @@ by the user. Work sequentially, CI-verified per slice, small commits.
       field nothing had ever written, so `programDurationDays` silently
       came out 0 for every member (shows as "Day N" with no total instead
       of "Day N of 42"). Both paths now derive it from `durationWeeks`.
+23. [x] **CSV bulk import (Programs/Batches/Calendar) + full member roster** —
+    the enterprise-scale onboarding/scheduling ask: stop making staff add
+    people or schedule events one at a time.
+    - New shared `console/src/lib/csv.ts` (RFC4180-ish parser handling
+      quoted/escaped fields, a serializer, and a browser-download helper) -
+      Members.tsx's previously hand-rolled CSV export now runs on the same
+      code instead of its own copy.
+    - **Calendar**: "Download CSV template" / "Upload CSV" on the program
+      calendar - bulk-creates `programEvents` directly via a chunked
+      `writeBatch` (event writes were already plain client Firestore writes,
+      so this needed no new backend function and works immediately,
+      independent of the org-policy IAM block below). Per-row validation
+      (title, valid type, parseable start time, safe http(s) link) with a
+      clear per-row error summary instead of a silent partial import.
+    - **Programs & Batches**: new `bulkOnboard` callable - given a CSV of
+      contacts (+ program, on the global Programs page; program is implied
+      per-batch on the Batches page), resolves each row to either an
+      immediate enroll (if an Auth account already exists for that
+      email/phone) or a pending invite (if not) in one server-side pass,
+      returning a per-row outcome for an honest import summary instead of
+      firing N individual calls. Same staff/own-program authorization
+      boundary as `adminEnrollUser`/`inviteToProgram`, checked per row.
+      Both pages also get a "Download CSV template" button. Like every
+      other function added this session, `bulkOnboard` is itself a
+      brand-new `onCall` and will need the same owner-side IAM/org-policy
+      fix (added to the list in `docs/deploy-wif-setup.md`) before it's
+      actually reachable.
+    - **Members page**: rebuilt to query `users` (every account) instead of
+      `programMembers` (enrolled-only) - the roster now shows every member
+      platform-wide with a "Not enrolled" filter/status, not just Care+
+      participants. No changes needed to `MemberDetail.tsx` - it already
+      read every log collection straight off the uid, independent of
+      program enrollment, so the full history (glucose/BP/sleep/walk/
+      weight/lab reports/medications/check-ins/coach notes) was already
+      reachable for any member once the roster itself stopped filtering
+      them out. Batches.tsx's existing per-batch roster already linked to
+      this same full-history view per member, so no separate "batch member
+      detail" page was needed - just the CSV bulk-add shortcut above.

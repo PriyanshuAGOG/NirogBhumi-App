@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   addDoc,
   collection,
@@ -17,6 +17,8 @@ import { db, functions } from '../lib/firebase'
 import { usePrograms, type Program } from '../lib/usePrograms'
 import { errText } from '../lib/errors'
 import { formatDate, toDate, toInputDateTime, fromInputDateTime } from '../lib/time'
+import { parseCsvRecords, toCsv, downloadCsv } from '../lib/csv'
+import { callBulkOnboard, summarizeBulkResults } from '../lib/bulkOnboard'
 import './Programs.css'
 
 interface ProgramCode {
@@ -108,6 +110,10 @@ export default function Programs() {
   const [iSaving, setISaving] = useState(false)
   const [iError, setIError] = useState<string | null>(null)
   const [busyInvite, setBusyInvite] = useState<string | null>(null)
+  const csvInputRef = useRef<HTMLInputElement>(null)
+  const [csvBusy, setCsvBusy] = useState(false)
+  const [csvError, setCsvError] = useState<string | null>(null)
+  const [csvSummary, setCsvSummary] = useState<string | null>(null)
 
   useEffect(() => {
     const unsub = onSnapshot(
@@ -241,6 +247,47 @@ export default function Programs() {
       setInvitesError(errText(err, 'Could not revoke the invite'))
     } finally {
       setBusyInvite(null)
+    }
+  }
+
+  function downloadInviteTemplate() {
+    const header = ['contact', 'program']
+    const example = ['+919876543210', programs[0]?.name ?? 'July 2026 Batch']
+    downloadCsv('onboard_by_contact_template.csv', toCsv([header, example]))
+  }
+
+  async function handleInviteCsv(file: File) {
+    setCsvBusy(true)
+    setCsvError(null)
+    setCsvSummary(null)
+    try {
+      const text = await file.text()
+      const records = parseCsvRecords(text)
+      if (records.length === 0) { setCsvError('That file has no data rows.'); return }
+      if (records.length > 300) { setCsvError('Too many rows in one file (max 300) - split it into smaller batches.'); return }
+
+      const programByName = new Map(programs.map((p) => [(p.name ?? '').trim().toLowerCase(), p.id]))
+      const rows: { contact: string; programId: string }[] = []
+      const rowErrors: string[] = []
+      records.forEach((rec, idx) => {
+        const rowNum = idx + 2
+        const contact = (rec.contact ?? '').trim()
+        const programName = (rec.program ?? '').trim()
+        if (!contact) { rowErrors.push(`Row ${rowNum}: missing contact`); return }
+        const programId = programByName.get(programName.toLowerCase())
+        if (!programId) { rowErrors.push(`Row ${rowNum}: program "${programName}" doesn't match any existing program`); return }
+        rows.push({ contact, programId })
+      })
+      if (rows.length === 0) { setCsvError(`No rows could be imported.\n${rowErrors.join('\n')}`); return }
+
+      const results = await callBulkOnboard(rows)
+      setCsvSummary(summarizeBulkResults(results) + (rowErrors.length ? ` Also skipped ${rowErrors.length} row(s) before import: ${rowErrors.join('; ')}` : ''))
+    } catch (err) {
+      const notDeployed = err instanceof FirebaseError && NOT_DEPLOYED.has(err.code)
+      setCsvError(notDeployed ? 'Bulk import service not deployed yet.' : errText(err, 'Could not import that file'))
+    } finally {
+      setCsvBusy(false)
+      if (csvInputRef.current) csvInputRef.current.value = ''
     }
   }
 
@@ -404,6 +451,26 @@ export default function Programs() {
       <div className="toolbar">
         <h2 className="section-h">Onboard by phone or email</h2>
         <div className="toolbar-spacer" />
+        <button className="btn btn-ghost" disabled={programs.length === 0} onClick={downloadInviteTemplate}>
+          Download CSV template
+        </button>
+        <button
+          className="btn btn-ghost"
+          disabled={programs.length === 0 || csvBusy}
+          onClick={() => csvInputRef.current?.click()}
+        >
+          {csvBusy ? 'Importing…' : 'Upload CSV'}
+        </button>
+        <input
+          ref={csvInputRef}
+          type="file"
+          accept=".csv,text/csv"
+          style={{ display: 'none' }}
+          onChange={(e) => {
+            const file = e.target.files?.[0]
+            if (file) void handleInviteCsv(file)
+          }}
+        />
         <button
           className="btn btn-forest"
           disabled={programs.length === 0}
@@ -418,7 +485,20 @@ export default function Programs() {
       <p className="page-lede">
         Add someone's phone number or email here before they've signed up - the moment they create
         an account with that exact contact, they're enrolled automatically. No code to hand out.
+        Upload a CSV to onboard many at once - anyone who already has an account is enrolled
+        immediately instead of waiting for signup.
       </p>
+
+      {csvError && (
+        <div className="banner banner-error" role="alert" style={{ whiteSpace: 'pre-line' }}>
+          {csvError}
+        </div>
+      )}
+      {csvSummary && (
+        <div className="banner banner-success" role="status">
+          {csvSummary}
+        </div>
+      )}
 
       {invitesError && (
         <div className="banner banner-error" role="alert">

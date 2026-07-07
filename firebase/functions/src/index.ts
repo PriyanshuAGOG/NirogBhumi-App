@@ -465,6 +465,101 @@ export const revokeInvite = onCall({ region }, async request => {
   return { revoked: true };
 });
 
+// CSV bulk import from the console (Programs page's global import, and
+// Batches page's per-batch shortcut) - one call per row would be slow and
+// give confusing partial-failure UX for a spreadsheet of dozens/hundreds of
+// contacts, so this processes the whole set server-side and returns a
+// per-row outcome the console can render as an import summary. For each
+// contact: if an Auth account already exists with that email/phone, enroll
+// them immediately (the same write adminEnrollUser does); otherwise create
+// a pending invite (the same write inviteToProgram does) that auto-consumes
+// the moment they sign up. Same staff/own-program authorization boundary as
+// adminEnrollUser/inviteToProgram, checked per row since a single CSV could
+// in principle mix programs a coach doesn't manage.
+export const bulkOnboard = onCall({ region }, async request => {
+  const auth = requireUser(request);
+  const role = auth.token.role;
+  const rows = Array.isArray(request.data?.rows) ? request.data.rows : [];
+  if (!rows.length) throw new HttpsError('invalid-argument', 'At least one row is required');
+  if (rows.length > 300) throw new HttpsError('invalid-argument', 'Too many rows in one import (max 300)');
+
+  const results: { contact: string; status: 'enrolled' | 'invited' | 'error'; message?: string }[] = [];
+  const programCache = new Map<string, FirebaseFirestore.DocumentSnapshot | null>();
+  async function getProgramChecked(programId: string): Promise<FirebaseFirestore.DocumentSnapshot | null> {
+    if (!programCache.has(programId)) {
+      const programDoc = await db.doc(`programs/${programId}`).get();
+      programCache.set(programId, programDoc.exists ? programDoc : null);
+    }
+    return programCache.get(programId) ?? null;
+  }
+
+  for (const row of rows as Array<Record<string, unknown>>) {
+    const contactRaw = String(row?.contact ?? '');
+    const programId = String(row?.programId ?? '');
+    if (!contactRaw || !programId) { results.push({ contact: contactRaw || '(blank)', status: 'error', message: 'Missing contact or program' }); continue; }
+    const contact = normalizeContact(contactRaw);
+    if (!contact) { results.push({ contact: contactRaw, status: 'error', message: 'Invalid email or phone' }); continue; }
+
+    const programDoc = await getProgramChecked(programId);
+    if (!programDoc) { results.push({ contact: contact.key, status: 'error', message: 'Program not found' }); continue; }
+    if (role !== 'admin' && role !== 'super_admin') {
+      if (role !== 'coach' || programDoc.get('coachId') !== auth.uid) {
+        results.push({ contact: contact.key, status: 'error', message: 'Not your program' });
+        continue;
+      }
+    }
+
+    try {
+      const existingUser = contact.type === 'email'
+        ? await getAuth().getUserByEmail(contact.key).catch(() => null)
+        : await getAuth().getUserByPhoneNumber(contact.key).catch(() => null);
+
+      const programName = String(programDoc.get('name') ?? 'Nirog Bhumi Program');
+      const durationDays = programDurationDays(programDoc);
+
+      if (existingUser) {
+        const uid = existingUser.uid;
+        const targetUser = await db.doc(`users/${uid}`).get();
+        const memberName = String(targetUser.get('fullName') ?? '').trim() || 'Member';
+        const batch = db.batch();
+        batch.set(db.doc(`users/${uid}`), {
+          programActive: true, activeProgramId: programId, activeProgramName: programName,
+          programDurationDays: durationDays, programStartedAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
+        }, { merge: true });
+        batch.set(db.doc(`programMembers/${programId}_${uid}`), {
+          programId, uid, name: memberName, status: 'active', joinedAt: FieldValue.serverTimestamp(),
+        }, { merge: true });
+        await batch.commit();
+        results.push({ contact: contact.key, status: 'enrolled' });
+      } else {
+        const inviteId = `${contact.type}_${contact.key}`;
+        await db.doc(`programInvites/${inviteId}`).set({
+          contact: contact.key, contactType: contact.type, programId, programName,
+          invitedBy: auth.uid, invitedByRole: role, createdAt: FieldValue.serverTimestamp(),
+          consumedAt: null, consumedByUid: null,
+        });
+        results.push({ contact: contact.key, status: 'invited' });
+      }
+    } catch (err) {
+      results.push({ contact: contact.key, status: 'error', message: err instanceof Error ? err.message : 'Something went wrong' });
+    }
+  }
+
+  await db.collection('auditLogs').add({
+    actorId: auth.uid, actorRole: role ?? 'admin', action: 'bulk_onboard', entityType: 'programInvite', entityId: 'bulk',
+    metadata: {
+      count: rows.length,
+      enrolled: results.filter(r => r.status === 'enrolled').length,
+      invited: results.filter(r => r.status === 'invited').length,
+      errors: results.filter(r => r.status === 'error').length,
+    },
+    createdAt: FieldValue.serverTimestamp(),
+  });
+
+  return { results };
+});
+
 export const requestDataExport = onCall({ region }, async request => {
   const auth = requireUser(request);
   // Each request triggers exportUserData, which reads ~19 collections and
