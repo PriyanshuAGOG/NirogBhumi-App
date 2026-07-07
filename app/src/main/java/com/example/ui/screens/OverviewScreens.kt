@@ -1,5 +1,7 @@
 package com.nirogbhumi.app.ui.screens
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -414,9 +416,23 @@ fun LabReportsScreen(state: NirogState) {
         var reportType by remember { mutableStateOf("HbA1c") }
         var labName by remember { mutableStateOf("") }
         var notes by remember { mutableStateOf("") }
+        var fileUrl by remember { mutableStateOf<String?>(null) }
+        var uploading by remember { mutableStateOf(false) }
         var saving by remember { mutableStateOf(false) }
+        val uploadLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+            if (uri != null) {
+                uploading = true
+                state.repository.uploadPrivateFile("lab-reports", uri) { result ->
+                    uploading = false
+                    when (result) {
+                        is CloudResult.Success -> fileUrl = result.value
+                        is CloudResult.Failure -> state.cloudMessage = result.message
+                    }
+                }
+            }
+        }
         AlertDialog(
-            onDismissRequest = { if (!saving) showAdd = false },
+            onDismissRequest = { if (!saving && !uploading) showAdd = false },
             title = { Text("Add lab report", fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Ink2) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -427,17 +443,34 @@ fun LabReportsScreen(state: NirogState) {
                             }
                         }
                     }
+                    OutlinedButton(
+                        onClick = { uploadLauncher.launch("*/*") },
+                        enabled = !uploading,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(Icons.Filled.AttachFile, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            when {
+                                uploading -> "Uploading..."
+                                fileUrl != null -> "File attached securely"
+                                else -> "Choose PDF or photo"
+                            }
+                        )
+                    }
                     OutlinedTextField(labName, { labName = it }, label = { Text("Lab name (optional)") }, modifier = Modifier.fillMaxWidth())
                     OutlinedTextField(notes, { notes = it }, label = { Text("Notes (optional)") }, minLines = 2, modifier = Modifier.fillMaxWidth())
                 }
             },
             confirmButton = {
-                Button(enabled = !saving, colors = ButtonDefaults.buttonColors(containerColor = Green2), onClick = {
+                Button(enabled = !saving && !uploading, colors = ButtonDefaults.buttonColors(containerColor = Green2), onClick = {
                     saving = true
                     state.repository.addHealthLog("labReports", mapOf(
                         "reportType" to reportType,
                         "labName" to labName.ifBlank { null },
                         "notes" to notes.ifBlank { null },
+                        "fileUrl" to fileUrl,
                         "measuredAt" to FieldValue.serverTimestamp(),
                         "source" to "manual"
                     )) { r ->
