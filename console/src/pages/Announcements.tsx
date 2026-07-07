@@ -1,27 +1,32 @@
-import { useEffect, useState } from 'react'
-import {
-  addDoc,
-  collection,
-  onSnapshot,
-  query,
-  serverTimestamp,
-  where,
-} from 'firebase/firestore'
+import { useEffect, useMemo, useState } from 'react'
+import { collection, onSnapshot, orderBy, query } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import { useAuth } from '../auth/AuthProvider'
 import { usePrograms } from '../lib/usePrograms'
 import { errText } from '../lib/errors'
 import { relativeTime, toDate } from '../lib/time'
+import {
+  AUDIENCE_LABELS,
+  callCreateAnnouncement,
+  callDeleteAnnouncement,
+  callPreviewAnnouncementAudience,
+  describeAudience,
+  type AnnouncementAudience,
+  type AudienceScope,
+} from '../lib/announcements'
 import './Announcements.css'
 
 interface Announcement {
   id: string
-  programId?: string
   authorId?: string
   authorName?: string
   title?: string
   body?: string
   createdAt?: unknown
+  expiresAt?: unknown
+  audience?: AnnouncementAudience
+  channels?: { inApp?: boolean; push?: boolean; email?: boolean }
+  recipientCount?: number
 }
 
 // Coaches reuse the same handful of message shapes far more often than they
@@ -50,39 +55,50 @@ const ANNOUNCEMENT_TEMPLATES: { label: string; title: string; body: string }[] =
   },
 ]
 
+const SCOPES_FOR_COACH: AudienceScope[] = ['program']
+const SCOPES_FOR_ADMIN: AudienceScope[] = ['program', 'all_enrolled', 'all_users', 'inactive', 'non_enrolled']
+
+function expiryLabel(value: unknown): string {
+  const date = toDate(value)
+  if (!date) return ''
+  const hoursLeft = Math.round((date.getTime() - Date.now()) / 3_600_000)
+  if (hoursLeft <= 0) return 'Expired'
+  if (hoursLeft < 24) return `Auto-removed in ${hoursLeft}h`
+  return `Auto-removed in ${Math.round(hoursLeft / 24)}d`
+}
+
 export default function Announcements() {
-  const { user } = useAuth()
+  const { user, role } = useAuth()
+  const isAdmin = role === 'admin' || role === 'super_admin'
   const { programs, loading: programsLoading, error: programsError } = usePrograms()
-  const [programId, setProgramId] = useState<string>('')
+
   const [items, setItems] = useState<Announcement[]>([])
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
+  const [scope, setScope] = useState<AudienceScope>('program')
+  const [selectedProgramIds, setSelectedProgramIds] = useState<string[]>([])
+  const [inactiveDays, setInactiveDays] = useState(4)
+  const [expiresInHours, setExpiresInHours] = useState(24)
+  const [channels, setChannels] = useState({ inApp: true, push: true, email: false })
+
+  const [previewCount, setPreviewCount] = useState<number | null>(null)
+  const [previewing, setPreviewing] = useState(false)
   const [posting, setPosting] = useState(false)
   const [postError, setPostError] = useState<string | null>(null)
-  const [posted, setPosted] = useState(false)
+  const [posted, setPosted] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
 
-  // Default to the first program once loaded.
-  useEffect(() => {
-    if (!programId && programs.length > 0) setProgramId(programs[0].id)
-  }, [programs, programId])
+  const availableScopes = isAdmin ? SCOPES_FOR_ADMIN : SCOPES_FOR_COACH
 
   useEffect(() => {
-    if (!programId) {
-      setItems([])
-      return
-    }
     setLoading(true)
     const unsub = onSnapshot(
-      query(collection(db, 'announcements'), where('programId', '==', programId)),
+      query(collection(db, 'announcements'), orderBy('createdAt', 'desc')),
       (snap) => {
-        const next = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Announcement, 'id'>) }))
-        next.sort(
-          (a, b) => (toDate(b.createdAt)?.getTime() ?? 0) - (toDate(a.createdAt)?.getTime() ?? 0),
-        )
-        setItems(next)
+        setItems(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Announcement, 'id'>) })))
         setLoading(false)
         setError(null)
       },
@@ -92,33 +108,74 @@ export default function Announcements() {
       },
     )
     return unsub
-  }, [programId])
+  }, [])
 
-  async function post() {
-    if (!programId || !title.trim() || !body.trim()) return
+  // Recipient count preview goes stale the moment any targeting input
+  // changes, so it's cleared rather than left showing a number that no
+  // longer matches what's about to be sent.
+  useEffect(() => {
+    setPreviewCount(null)
+  }, [scope, selectedProgramIds, inactiveDays])
+
+  const audience: AnnouncementAudience = useMemo(
+    () => ({ scope, programIds: selectedProgramIds, inactiveDays }),
+    [scope, selectedProgramIds, inactiveDays],
+  )
+
+  const canSend =
+    title.trim().length > 0 &&
+    body.trim().length > 0 &&
+    (scope !== 'program' || selectedProgramIds.length > 0) &&
+    (channels.inApp || channels.push || channels.email)
+
+  async function preview() {
+    if (scope === 'program' && !selectedProgramIds.length) return
+    setPreviewing(true)
+    try {
+      const count = await callPreviewAnnouncementAudience(audience)
+      setPreviewCount(count)
+    } catch (err) {
+      setPostError(errText(err, 'Could not preview this audience'))
+    } finally {
+      setPreviewing(false)
+    }
+  }
+
+  async function send() {
+    if (!canSend) return
     setPosting(true)
     setPostError(null)
-    setPosted(false)
+    setPosted(null)
     try {
-      await addDoc(collection(db, 'announcements'), {
-        programId,
-        authorId: user?.uid ?? null,
-        authorName: user?.displayName ?? user?.email ?? 'Coach',
+      const result = await callCreateAnnouncement({
         title: title.trim(),
         body: body.trim(),
-        createdAt: serverTimestamp(),
+        audience,
+        channels,
+        expiresInHours,
       })
       setTitle('')
       setBody('')
-      setPosted(true)
+      setSelectedProgramIds([])
+      setPreviewCount(null)
+      setPosted(`Sent to ${result.recipientCount} ${result.recipientCount === 1 ? 'person' : 'people'}.`)
     } catch (err) {
-      setPostError(errText(err, 'Announcement could not be posted'))
+      setPostError(errText(err, 'Announcement could not be sent'))
     } finally {
       setPosting(false)
     }
   }
 
-  const selectedName = programs.find((p) => p.id === programId)?.name ?? 'this batch'
+  async function remove(id: string) {
+    setDeletingId(id)
+    try {
+      await callDeleteAnnouncement(id)
+    } catch (err) {
+      setError(errText(err, 'Could not delete this announcement'))
+    } finally {
+      setDeletingId(null)
+    }
+  }
 
   return (
     <section className="page">
@@ -126,8 +183,8 @@ export default function Announcements() {
         <span className="overline">Announcements</span>
         <h1>Announcements</h1>
         <p className="page-lede">
-          Post to a batch's Announcements room. Members read these — only coaches and
-          admins can post.
+          Broadcast to exactly who needs it - one program, everyone enrolled, the whole app, or
+          members who've gone quiet - across in-app, push, and email in any combination.
         </p>
       </header>
 
@@ -137,88 +194,177 @@ export default function Announcements() {
         </div>
       )}
 
-      <div className="toolbar">
+      <div className="card composer">
+        <span className="overline">New announcement</span>
+        {postError && (
+          <div className="banner banner-error" role="alert">
+            {postError}
+          </div>
+        )}
+        {posted && (
+          <div className="banner banner-success" role="status">
+            {posted}
+          </div>
+        )}
+
         <div className="field">
-          <span className="field-label">Batch</span>
+          <span className="field-label">Start from a template (optional)</span>
           <select
             className="select"
-            value={programId}
-            onChange={(e) => setProgramId(e.target.value)}
-            disabled={programsLoading || programs.length === 0}
+            value=""
+            onChange={(e) => {
+              const chosen = ANNOUNCEMENT_TEMPLATES.find((t) => t.label === e.target.value)
+              if (chosen) {
+                setTitle(chosen.title)
+                setBody(chosen.body)
+              }
+            }}
           >
-            {programs.length === 0 && <option value="">No programs yet</option>}
-            {programs.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name ?? p.id}
+            <option value="">Choose a template…</option>
+            {ANNOUNCEMENT_TEMPLATES.map((t) => (
+              <option key={t.label} value={t.label}>
+                {t.label}
               </option>
             ))}
           </select>
         </div>
-      </div>
+        <div className="field">
+          <span className="field-label">Title</span>
+          <input
+            className="input"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="This week's focus"
+          />
+        </div>
+        <div className="field">
+          <span className="field-label">Message</span>
+          <textarea
+            className="textarea"
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
+            placeholder="Share what's ahead — warm and clear."
+          />
+        </div>
 
-      {programId && (
-        <div className="card composer">
-          <span className="overline">New announcement</span>
-          {postError && (
-            <div className="banner banner-error" role="alert">
-              {postError}
-            </div>
-          )}
-          {posted && (
-            <div className="banner banner-success" role="status">
-              Posted to {selectedName}.
-            </div>
-          )}
+        <div className="perm-grid">
+          <span className="perm-label">Who receives this</span>
           <div className="field">
-            <span className="field-label">Start from a template (optional)</span>
             <select
               className="select"
-              value=""
-              onChange={(e) => {
-                const chosen = ANNOUNCEMENT_TEMPLATES.find((t) => t.label === e.target.value)
-                if (chosen) {
-                  setTitle(chosen.title)
-                  setBody(chosen.body)
-                }
-              }}
+              value={scope}
+              onChange={(e) => setScope(e.target.value as AudienceScope)}
+              disabled={availableScopes.length === 1}
             >
-              <option value="">Choose a template…</option>
-              {ANNOUNCEMENT_TEMPLATES.map((t) => (
-                <option key={t.label} value={t.label}>
-                  {t.label}
+              {availableScopes.map((s) => (
+                <option key={s} value={s}>
+                  {AUDIENCE_LABELS[s]}
                 </option>
               ))}
             </select>
           </div>
-          <div className="field">
-            <span className="field-label">Title</span>
-            <input
-              className="input"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="This week's focus"
-            />
-          </div>
-          <div className="field">
-            <span className="field-label">Message</span>
-            <textarea
-              className="textarea"
-              value={body}
-              onChange={(e) => setBody(e.target.value)}
-              placeholder="Share what's ahead — warm and clear."
-            />
-          </div>
-          <div className="composer-actions">
-            <button
-              className="btn btn-forest"
-              disabled={posting || !title.trim() || !body.trim()}
-              onClick={() => void post()}
-            >
-              {posting ? 'Posting…' : 'Post announcement'}
-            </button>
-          </div>
+
+          {scope === 'program' && (
+            <div className="perm-checks">
+              {programsLoading && <span className="ann-author">Loading programs…</span>}
+              {!programsLoading && programs.length === 0 && (
+                <span className="ann-author">No programs yet</span>
+              )}
+              {programs.map((p) => (
+                <label key={p.id} className="check">
+                  <input
+                    type="checkbox"
+                    checked={selectedProgramIds.includes(p.id)}
+                    onChange={(e) =>
+                      setSelectedProgramIds((prev) =>
+                        e.target.checked ? [...prev, p.id] : prev.filter((id) => id !== p.id),
+                      )
+                    }
+                  />
+                  {p.name ?? p.id}
+                </label>
+              ))}
+            </div>
+          )}
+
+          {scope === 'inactive' && (
+            <div className="field">
+              <span className="field-label">Inactive for at least (days)</span>
+              <input
+                className="input"
+                type="number"
+                min={1}
+                max={365}
+                value={inactiveDays}
+                onChange={(e) => setInactiveDays(Math.max(1, Number(e.target.value) || 4))}
+                style={{ maxWidth: 120 }}
+              />
+            </div>
+          )}
         </div>
-      )}
+
+        <div className="perm-grid">
+          <span className="perm-label">Deliver via</span>
+          <div className="perm-checks">
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={channels.inApp}
+                onChange={(e) => setChannels((c) => ({ ...c, inApp: e.target.checked }))}
+              />
+              In-app
+            </label>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={channels.push}
+                onChange={(e) => setChannels((c) => ({ ...c, push: e.target.checked }))}
+              />
+              Push notification
+            </label>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={channels.email}
+                onChange={(e) => setChannels((c) => ({ ...c, email: e.target.checked }))}
+              />
+              Email
+            </label>
+          </div>
+          {channels.email && (
+            <span className="ann-author">
+              Email requires the Firebase "Trigger Email" extension to be installed and configured -
+              until then these are queued but not delivered.
+            </span>
+          )}
+        </div>
+
+        <div className="field">
+          <span className="field-label">Stays visible for (hours)</span>
+          <input
+            className="input"
+            type="number"
+            min={1}
+            max={720}
+            value={expiresInHours}
+            onChange={(e) => setExpiresInHours(Math.max(1, Number(e.target.value) || 24))}
+            style={{ maxWidth: 120 }}
+          />
+        </div>
+
+        <div className="composer-actions">
+          <button
+            className="btn btn-ghost"
+            disabled={previewing || (scope === 'program' && !selectedProgramIds.length)}
+            onClick={() => void preview()}
+          >
+            {previewing ? 'Checking…' : previewCount === null ? 'Preview audience' : `Reaches ${previewCount} people`}
+          </button>
+          <button className="btn btn-forest" disabled={posting || !canSend} onClick={() => void send()}>
+            {posting ? 'Sending…' : 'Send announcement'}
+          </button>
+        </div>
+      </div>
 
       {error && (
         <div className="banner banner-error" role="alert">
@@ -226,7 +372,7 @@ export default function Announcements() {
         </div>
       )}
 
-      {!programId ? null : loading ? (
+      {loading ? (
         <div className="card empty">
           <div className="spin spinner" aria-hidden />
           <p>Loading announcements…</p>
@@ -235,9 +381,7 @@ export default function Announcements() {
         <div className="card empty">
           <div className="empty-mark" aria-hidden>📣</div>
           <p className="empty-title">No announcements yet</p>
-          <p className="empty-sub">
-            The first note you post to {selectedName} will appear here, newest first.
-          </p>
+          <p className="empty-sub">The first one you send will appear here, newest first.</p>
         </div>
       ) : (
         <div className="ann-list">
@@ -248,7 +392,27 @@ export default function Announcements() {
                 <span className="ann-time">{relativeTime(a.createdAt)}</span>
               </div>
               <p className="ann-body">{a.body}</p>
-              <span className="ann-author">— {a.authorName ?? 'Coach'}</span>
+              <div className="ann-head">
+                <span className="ann-author">
+                  — {a.authorName ?? 'Staff'} · {describeAudience(a.audience)}
+                  {a.recipientCount != null ? ` · ${a.recipientCount} recipients` : ''}
+                  {a.channels
+                    ? ` · ${[a.channels.inApp && 'in-app', a.channels.push && 'push', a.channels.email && 'email']
+                        .filter(Boolean)
+                        .join(', ')}`
+                    : ''}
+                  {a.expiresAt ? ` · ${expiryLabel(a.expiresAt)}` : ''}
+                </span>
+                {(isAdmin || a.authorId === user?.uid) && (
+                  <button
+                    className="btn btn-danger btn-sm"
+                    disabled={deletingId === a.id}
+                    onClick={() => void remove(a.id)}
+                  >
+                    {deletingId === a.id ? 'Deleting…' : 'Delete'}
+                  </button>
+                )}
+              </div>
             </article>
           ))}
         </div>

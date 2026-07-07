@@ -692,3 +692,47 @@ by the user. Work sequentially, CI-verified per slice, small commits.
     "Medical Disclaimer" when unset, preserving old behavior for any other
     entry point into Legal Center) instead of dumping the member on one
     generic "read the policy" link.
+26. [x] **Announcement deletion + 24h default expiry, and a full audience-
+    targeting rebuild** — replaces the old model (one `announcements` doc
+    per program, fanned out by a Firestore trigger keyed on a single
+    `programId`, with no delete/update rule at all - a genuine pre-existing
+    gap, and read-scoped so loosely any enrolled member of *any* program
+    could read *every* program's announcements). Composing now goes through
+    one `createAnnouncement` callable (`firebase/functions/src/index.ts`)
+    that resolves a five-way audience - a specific program/batch (or several
+    at once), all enrolled Care+ members, every app user, members inactive
+    N+ days (`lastCheckinAt`, missing counted as inactive too - a plain range
+    query would silently exclude anyone who's *never* checked in), or
+    everyone not currently enrolled - into a concrete recipient list
+    (`resolveAudienceUids`, capped at 5,000 per send), then fans out across
+    any combination of three channels: in-app (a denormalized copy written
+    to each recipient's own `users/{uid}/announcements/{id}` subcollection -
+    trivially rules-scoped to `owner(uid)`, and what `AnnouncementsScreen`
+    now reads from instead of a per-program query), push (the existing
+    `notifications`/`sendPendingNotifications` pipeline, `type:'announcement'`
+    bypassing quiet hours/caps same as before), and email (writes into a
+    `mail` collection in the shape the Firebase "Trigger Email" extension
+    expects - honestly partial: the extension isn't installed yet, an
+    owner-gated prerequisite documented in `docs/deploy-wif-setup.md` #6,
+    same pattern as the org-policy IAM fix). A coach may only target
+    program(s) they're the assigned coach of; every cross-program scope is
+    admin-only. Every announcement gets a 24-hour default expiry
+    (`expiresAt`, overridable per send) enforced two ways: immediately in
+    the UI (the console list and the app's `AnnouncementsScreen` both stop
+    showing it), and for real within 15 minutes by piggybacking the cleanup
+    onto the existing `sendPendingNotifications` schedule rather than adding
+    a 4th Cloud Scheduler job (`deleteAnnouncementDoc` removes the source
+    doc plus every recipient's fan-out copy, tracked via a `recipientUids`
+    array on the source doc rather than a collection-group query). A new
+    `deleteAnnouncement` callable does the same thing on demand - a coach
+    may only remove their own post, admin/super_admin may remove any. The
+    console's Announcements page gained a full targeting UI (audience
+    scope selector, multi-program checklist, inactive-days input, three
+    channel checkboxes, a live "Preview audience" recipient-count check via
+    `previewAnnouncementAudience` before sending, and a Delete button per
+    past announcement); mobile compose is unchanged in scope (still posts
+    to the member's own program only) but now goes through the same
+    `createAnnouncement` callable instead of a raw client write, and gained
+    its own delete button (staff-only, confirm dialog). New rules-tests
+    cover both the source doc (staff-read-only, zero client writes) and the
+    fan-out subcollection (owner-read-only, zero client writes).

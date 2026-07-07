@@ -143,7 +143,8 @@ for SERVICE in \
   redeemprogramcode ensureprogrammembership requestdataexport \
   requestaccountdeletion gethealthfilesharelink createauditlog \
   setuserrole createstaffaccount bootstrapsuperadmin sendbulknotification \
-  adminenrolluser invitetoprogram revokeinvite bulkonboard; do
+  adminenrolluser invitetoprogram revokeinvite bulkonboard \
+  createannouncement previewannouncementaudience deleteannouncement; do
   gcloud run services add-iam-policy-binding "$SERVICE" \
     --project="$PROJECT_ID" --region="$REGION" \
     --member="allUsers" --role="roles/run.invoker"
@@ -240,3 +241,21 @@ to project `nirog-bhumi-app`). It should authenticate via WIF and run the
 same `firebase deploy` the manual Cloud Shell process did. From then on,
 backend changes on this branch (or any branch) can be deployed with one
 click from the Actions tab instead of a Cloud Shell session.
+
+## 6. Owner action: enable the email channel for announcements
+
+`createAnnouncement`'s email channel writes documents into a `mail`
+collection in the shape the Firebase **"Trigger Email"** extension expects
+(`{ to: [address], message: { subject, text } }`), but nothing processes
+that collection until the extension is actually installed and configured:
+
+1. Firebase Console → your project → **Extensions** → install **"Trigger Email"**.
+2. Point it at an SMTP provider (SendGrid, Mailgun, or any SMTP relay) and
+   supply those credentials during setup - this is the one secret-bearing
+   step only the project owner can do.
+3. Leave its configured Firestore collection as `mail` (the default) so it
+   matches what `createAnnouncement` already writes to.
+
+Until this is done, checking "Email" as a delivery channel queues real
+documents but nothing sends - the in-app and push channels work regardless,
+this only gates the third channel.

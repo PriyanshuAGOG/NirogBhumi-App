@@ -160,33 +160,12 @@ export const onBPReadingCreate = onDocumentCreated({ document: 'bpReadings/{read
   await recordBatchCheckin(String(d.userId));
 });
 
-// Fans a new coach/admin announcement out to every member of that program as
-// a push notification. type:'announcement' (like 'critical_alert') bypasses
-// sendPendingNotifications()'s quiet-hours defer and daily cap, since an
-// announcement is a deliberate one-off staff broadcast, not a routine
-// reminder - a member should never miss "class moved to 6pm" because it
-// landed during quiet hours or after their 3rd reminder that day.
-export const onAnnouncementCreate = onDocumentCreated({ document: 'announcements/{id}', region }, async event => {
-  const snap = event.data; if (!snap) return;
-  const data = snap.data();
-  const programId = String(data.programId ?? ''); if (!programId) return;
-  const authorId = String(data.authorId ?? '');
-  const title = String(data.title ?? 'New announcement').slice(0, 120);
-  const body = String(data.body ?? '').slice(0, 200);
-  const members = await db.collection('programMembers').where('programId', '==', programId).get();
-  for (let offset = 0; offset < members.docs.length; offset += 400) {
-    const batch = db.batch();
-    members.docs.slice(offset, offset + 400).forEach(member => {
-      const uid = String(member.get('uid') ?? '');
-      if (!uid || uid === authorId) return; // the author doesn't need a push about their own post
-      batch.set(db.collection('notifications').doc(), {
-        userId: uid, profileId: null, title, body, type: 'announcement',
-        status: 'scheduled', scheduledFor: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp(),
-      });
-    });
-    await batch.commit();
-  }
-});
+// Announcement creation/fan-out/deletion is handled by the createAnnouncement/
+// deleteAnnouncement callables further down (they need the Admin SDK to
+// resolve audiences that cross program boundaries - all users, all enrolled,
+// inactive, non-enrolled - which a Firestore trigger keyed on a single
+// programId field can't express). See resolveAudienceUids and
+// deleteAnnouncementDoc.
 
 // Daily maintenance job. Runs once a day; on Mondays it also builds weekly
 // reports. Keeping daily + weekly in one schedule keeps us to 3 Cloud
@@ -277,9 +256,231 @@ export const sendPendingNotifications = onSchedule({ schedule: 'every 15 minutes
       await doc.ref.set({ status: 'sent', sentAt: FieldValue.serverTimestamp() }, { merge: true });
     } catch (error) { console.error('FCM send failed', doc.id, error); await doc.ref.set({ status: 'failed', failureReason: 'send_failed', updatedAt: FieldValue.serverTimestamp() }, { merge: true }); }
   }
+
+  // Piggybacks the 24-hour-default announcement expiry cleanup onto this
+  // existing 15-minute schedule rather than adding a 4th Cloud Scheduler job
+  // (see the "3 jobs total" note on generateDailyContent) - deletes the
+  // parent doc plus every recipient's fan-out copy under
+  // users/{uid}/announcements, same as a manual deleteAnnouncement call.
+  const expired = await db.collection('announcements').where('expiresAt', '<=', Timestamp.now()).limit(20).get();
+  for (const doc of expired.docs) await deleteAnnouncementDoc(doc);
 });
 
 function requireUser(request: { auth?: { uid: string; token: Record<string, unknown> } }) { if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in required'); return request.auth; }
+
+type AnnouncementAudienceScope = 'program' | 'all_enrolled' | 'all_users' | 'inactive' | 'non_enrolled';
+
+interface AnnouncementAudience {
+  scope: AnnouncementAudienceScope;
+  programIds: string[];
+  inactiveDays: number;
+}
+
+// Above this, a single onCall/onSchedule invocation risks running long enough
+// (or writing enough batches) to be a bad idea in one shot - narrow the
+// audience instead. Comfortably covers this app's actual scale today while
+// keeping resolveAudienceUids/createAnnouncement bounded and predictable.
+const MAX_ANNOUNCEMENT_RECIPIENTS = 5000;
+
+// Resolves which uids a given audience selection actually reaches, and is
+// also the authorization boundary for *which* audiences someone may target:
+// 'program' is available to a coach too (but only for program(s) they're the
+// assigned coachId of - never an arbitrary list); every scope that crosses
+// program boundaries (all users, all enrolled, inactive, non-enrolled) is
+// admin-only, mirroring the programStaff()/admin() split used everywhere
+// else in this file.
+async function resolveAudienceUids(audience: AnnouncementAudience, callerRole: unknown, callerUid: string): Promise<string[]> {
+  const isAdmin = callerRole === 'admin' || callerRole === 'super_admin';
+  if (audience.scope !== 'program' && !isAdmin) throw new HttpsError('permission-denied', 'Only an admin can target this audience');
+
+  if (audience.scope === 'program') {
+    const programIds = Array.from(new Set(audience.programIds.filter(Boolean)));
+    if (!programIds.length) throw new HttpsError('invalid-argument', 'Select at least one program/batch');
+    if (!isAdmin) {
+      for (const id of programIds) {
+        const program = await db.doc(`programs/${id}`).get();
+        if (program.get('coachId') !== callerUid) throw new HttpsError('permission-denied', 'Not your program');
+      }
+    }
+    const uids = new Set<string>();
+    for (let i = 0; i < programIds.length; i += 10) {
+      const chunk = programIds.slice(i, i + 10);
+      const snap = await db.collection('programMembers').where('programId', 'in', chunk).get();
+      snap.docs.forEach(d => { const uid = String(d.get('uid') ?? ''); if (uid) uids.add(uid); });
+    }
+    return Array.from(uids);
+  }
+
+  if (audience.scope === 'all_enrolled') {
+    const snap = await db.collection('users').where('programActive', '==', true).limit(MAX_ANNOUNCEMENT_RECIPIENTS + 1).get();
+    if (snap.size > MAX_ANNOUNCEMENT_RECIPIENTS) throw new HttpsError('resource-exhausted', `Audience too large for one send (max ${MAX_ANNOUNCEMENT_RECIPIENTS}) - narrow it`);
+    return snap.docs.map(d => d.id);
+  }
+
+  // 'all_users', 'inactive', and 'non_enrolled' all need to see every user
+  // doc (a plain where('lastCheckinAt','&lt;=',cutoff) would silently skip
+  // anyone who's *never* checked in at all, since Firestore range filters
+  // exclude documents missing the field - and "never checked in" is exactly
+  // who an 'inactive' broadcast most needs to reach).
+  const snap = await db.collection('users').limit(MAX_ANNOUNCEMENT_RECIPIENTS + 1).get();
+  if (snap.size > MAX_ANNOUNCEMENT_RECIPIENTS) throw new HttpsError('resource-exhausted', `Audience too large for one send (max ${MAX_ANNOUNCEMENT_RECIPIENTS}) - narrow it`);
+  if (audience.scope === 'all_users') return snap.docs.map(d => d.id);
+  if (audience.scope === 'non_enrolled') return snap.docs.filter(d => d.get('programActive') !== true).map(d => d.id);
+  const days = Math.max(1, Math.min(365, Math.round(audience.inactiveDays) || 4));
+  const cutoffMillis = Date.now() - days * 86400000;
+  return snap.docs.filter(d => { const ts = d.get('lastCheckinAt'); return !ts || ts.toMillis() <= cutoffMillis; }).map(d => d.id);
+}
+
+// The one place recipient fan-out copies get deleted, shared by the manual
+// deleteAnnouncement callable and the 24h-default expiry sweep inside
+// sendPendingNotifications - both need to remove the same set of documents,
+// so this is the single source of truth for what "delete an announcement"
+// actually touches.
+async function deleteAnnouncementDoc(snap: FirebaseFirestore.DocumentSnapshot) {
+  const recipients: string[] = Array.isArray(snap.get('recipientUids')) ? snap.get('recipientUids') : [];
+  for (let offset = 0; offset < recipients.length; offset += 400) {
+    const batch = db.batch();
+    recipients.slice(offset, offset + 400).forEach(uid => batch.delete(db.doc(`users/${uid}/announcements/${snap.id}`)));
+    await batch.commit();
+  }
+  await snap.ref.delete();
+}
+
+// Replaces the old direct-client-write + onAnnouncementCreate-trigger pair:
+// audiences that cross program boundaries (all users, all enrolled,
+// inactive, non-enrolled) need the Admin SDK to resolve, which a client
+// write + Firestore trigger can't do - so composing now goes through this
+// callable end to end (resolve recipients, write the source doc, fan out to
+// every selected channel) instead of two separate code paths.
+export const createAnnouncement = onCall({ region, timeoutSeconds: 120 }, async request => {
+  const auth = requireUser(request);
+  const role = auth.token.role;
+  if (role !== 'admin' && role !== 'super_admin' && role !== 'coach') throw new HttpsError('permission-denied', 'Staff only');
+
+  const title = String(request.data?.title ?? '').trim().slice(0, 120);
+  const body = String(request.data?.body ?? '').trim().slice(0, 2000);
+  if (!title || !body) throw new HttpsError('invalid-argument', 'Title and body are required');
+
+  const rawAudience = (request.data?.audience ?? {}) as Record<string, unknown>;
+  const scope = String(rawAudience.scope ?? 'program') as AnnouncementAudienceScope;
+  if (!['program', 'all_enrolled', 'all_users', 'inactive', 'non_enrolled'].includes(scope)) throw new HttpsError('invalid-argument', 'Unknown audience scope');
+  const audience: AnnouncementAudience = {
+    scope,
+    programIds: Array.isArray(rawAudience.programIds) ? rawAudience.programIds.map(String) : [],
+    inactiveDays: Number(rawAudience.inactiveDays ?? 4),
+  };
+
+  const rawChannels = (request.data?.channels ?? {}) as Record<string, unknown>;
+  const channels = { inApp: rawChannels.inApp !== false, push: rawChannels.push === true, email: rawChannels.email === true };
+  if (!channels.inApp && !channels.push && !channels.email) throw new HttpsError('invalid-argument', 'Select at least one delivery channel');
+
+  const expiresInHours = Math.max(1, Math.min(720, Math.round(Number(request.data?.expiresInHours ?? 24)) || 24));
+
+  const recipients = await resolveAudienceUids(audience, role, auth.uid);
+  if (!recipients.length) throw new HttpsError('invalid-argument', 'No members match this audience');
+
+  const now = Timestamp.now();
+  const expiresAt = Timestamp.fromMillis(now.toMillis() + expiresInHours * 3600000);
+  const authorDoc = await db.doc(`users/${auth.uid}`).get();
+  const authorName = String(authorDoc.get('fullName') ?? 'Nirog Bhumi team');
+
+  const announcementRef = db.collection('announcements').doc();
+  await announcementRef.set({
+    title, body, authorId: auth.uid, authorName, createdAt: FieldValue.serverTimestamp(), expiresAt,
+    audience, channels, recipientUids: recipients, recipientCount: recipients.length,
+  });
+
+  if (channels.inApp) {
+    for (let offset = 0; offset < recipients.length; offset += 400) {
+      const batch = db.batch();
+      recipients.slice(offset, offset + 400).forEach(uid => {
+        batch.set(db.doc(`users/${uid}/announcements/${announcementRef.id}`), { announcementId: announcementRef.id, title, body, authorName, createdAt: now, expiresAt });
+      });
+      await batch.commit();
+    }
+  }
+
+  if (channels.push) {
+    for (let offset = 0; offset < recipients.length; offset += 400) {
+      const batch = db.batch();
+      recipients.slice(offset, offset + 400).forEach(uid => {
+        if (uid === auth.uid) return; // the author doesn't need a push about their own post
+        batch.set(db.collection('notifications').doc(), {
+          userId: uid, profileId: null, title, body, type: 'announcement',
+          status: 'scheduled', scheduledFor: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp(),
+        });
+      });
+      await batch.commit();
+    }
+  }
+
+  if (channels.email) {
+    // Writes into the `mail` collection shape the Firebase "Trigger Email"
+    // extension expects. That extension isn't installed yet (needs an owner
+    // action: install it + configure SMTP/SendGrid credentials, same
+    // owner-gated-infra pattern as the org-policy IAM fix documented in
+    // docs/deploy-wif-setup.md) - until then these docs are written but
+    // nothing sends them. Honest partial functionality, not a fake success.
+    for (let i = 0; i < recipients.length; i += 300) {
+      const chunk = recipients.slice(i, i + 300);
+      const userDocs = await db.getAll(...chunk.map(uid => db.doc(`users/${uid}`)));
+      const batch = db.batch();
+      userDocs.forEach(u => {
+        const email = u.get('email');
+        if (!email) return;
+        batch.set(db.collection('mail').doc(), { to: [String(email)], message: { subject: title, text: body } });
+      });
+      await batch.commit();
+    }
+  }
+
+  await db.collection('auditLogs').add({
+    actorId: auth.uid, actorRole: role ?? 'coach', action: 'create_announcement', entityType: 'announcement', entityId: announcementRef.id,
+    metadata: { scope: audience.scope, channels, recipientCount: recipients.length, title }, createdAt: FieldValue.serverTimestamp(),
+  });
+
+  return { announcementId: announcementRef.id, recipientCount: recipients.length };
+});
+
+// Lets the console show a live "This reaches N people" count before sending,
+// without actually creating/fanning out anything - reuses the exact same
+// resolver and authorization boundary as the real send.
+export const previewAnnouncementAudience = onCall({ region }, async request => {
+  const auth = requireUser(request);
+  const role = auth.token.role;
+  if (role !== 'admin' && role !== 'super_admin' && role !== 'coach') throw new HttpsError('permission-denied', 'Staff only');
+  const rawAudience = (request.data?.audience ?? {}) as Record<string, unknown>;
+  const scope = String(rawAudience.scope ?? 'program') as AnnouncementAudienceScope;
+  const audience: AnnouncementAudience = {
+    scope,
+    programIds: Array.isArray(rawAudience.programIds) ? rawAudience.programIds.map(String) : [],
+    inactiveDays: Number(rawAudience.inactiveDays ?? 4),
+  };
+  const recipients = await resolveAudienceUids(audience, role, auth.uid);
+  return { count: recipients.length };
+});
+
+// Manual early delete (the 24h default expiry above handles the rest on its
+// own). A coach may only remove their own post; admin/super_admin may remove
+// any announcement.
+export const deleteAnnouncement = onCall({ region }, async request => {
+  const auth = requireUser(request);
+  const role = auth.token.role;
+  const id = String(request.data?.id ?? '');
+  if (!id) throw new HttpsError('invalid-argument', 'id is required');
+  const ref = db.doc(`announcements/${id}`);
+  const snap = await ref.get();
+  if (!snap.exists) return { deleted: false };
+
+  const isAdmin = role === 'admin' || role === 'super_admin';
+  if (!isAdmin && (role !== 'coach' || snap.get('authorId') !== auth.uid)) {
+    throw new HttpsError('permission-denied', 'You can only delete your own announcements');
+  }
+
+  await deleteAnnouncementDoc(snap);
+  await db.collection('auditLogs').add({ actorId: auth.uid, actorRole: role ?? 'coach', action: 'delete_announcement', entityType: 'announcement', entityId: id, createdAt: FieldValue.serverTimestamp() });
+  return { deleted: true };
+});
 
 // The console's program editor (Programs.tsx) only ever sets durationWeeks -
 // durationDays has never actually been written by anything, so reading it

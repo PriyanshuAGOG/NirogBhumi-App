@@ -1948,9 +1948,8 @@ private fun CareTile(
 @Composable
 private fun PinnedAnnouncementCard(state: NirogState) {
     var latest by remember { mutableStateOf<Map<String, Any?>?>(null) }
-    DisposableEffect(state.activeProgramId) {
-        if (state.activeProgramId.isBlank()) return@DisposableEffect onDispose {}
-        val sub = state.repository.listenAnnouncements(state.activeProgramId) { result ->
+    DisposableEffect(Unit) {
+        val sub = state.repository.listenAnnouncements { result ->
             if (result is CloudResult.Success) latest = result.value.firstOrNull()?.values
         }
         onDispose { sub.cancel() }

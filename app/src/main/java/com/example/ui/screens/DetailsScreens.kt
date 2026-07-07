@@ -3200,10 +3200,11 @@ fun AnnouncementsScreen(state: NirogState) {
     var composeTitle by remember { mutableStateOf("") }
     var composeBody by remember { mutableStateOf("") }
     var posting by remember { mutableStateOf(false) }
+    var deletingId by remember { mutableStateOf("") }
+    val canDelete = state.isAdmin || state.staffRole == "coach"
 
-    DisposableEffect(state.activeProgramId) {
-        if (state.activeProgramId.isBlank()) { records = emptyList(); return@DisposableEffect onDispose {} }
-        val subscription = state.repository.listenAnnouncements(state.activeProgramId) { result ->
+    DisposableEffect(Unit) {
+        val subscription = state.repository.listenAnnouncements { result ->
             records = when (result) {
                 is com.nirogbhumi.app.data.CloudResult.Success -> result.value
                 is com.nirogbhumi.app.data.CloudResult.Failure -> emptyList()
@@ -3212,7 +3213,7 @@ fun AnnouncementsScreen(state: NirogState) {
         // Best-effort: opening this screen is "read" for the unread badge on
         // Chat Hub, whether or not the member is enrolled (fails silently
         // for non-members - they have no roster doc to mark anyway).
-        state.repository.markProgramRead(state.activeProgramId, "lastReadAnnouncementsAt") {}
+        if (state.activeProgramId.isNotBlank()) state.repository.markProgramRead(state.activeProgramId, "lastReadAnnouncementsAt") {}
         onDispose { subscription.cancel() }
     }
 
@@ -3275,6 +3276,11 @@ fun AnnouncementsScreen(state: NirogState) {
                                 }
                                 Spacer(modifier = Modifier.width(NirogSpace.sm))
                                 Text(record.values["title"]?.toString() ?: "Announcement", style = NirogType.bodyStrong, color = NirogColor.inkPrimary, modifier = Modifier.weight(1f))
+                                if (canDelete) {
+                                    IconButton(onClick = { deletingId = record.id }, modifier = Modifier.size(28.dp)) {
+                                        Icon(Icons.Filled.DeleteOutline, contentDescription = "Delete announcement", tint = NirogColor.inkMuted, modifier = Modifier.size(16.dp))
+                                    }
+                                }
                             }
                             Spacer(modifier = Modifier.height(NirogSpace.sm))
                             Text(record.values["body"]?.toString().orEmpty(), style = NirogType.body, color = NirogColor.inkSecondary)
@@ -3317,6 +3323,27 @@ fun AnnouncementsScreen(state: NirogState) {
                 ) { Text(if (posting) "Posting..." else "Post", color = NirogColor.onAccent) }
             },
             dismissButton = { TextButton(onClick = { showComposer = false }, enabled = !posting) { Text("Cancel", color = NirogColor.inkSecondary) } }
+        )
+    }
+
+    if (deletingId.isNotBlank()) {
+        AlertDialog(
+            onDismissRequest = { deletingId = "" },
+            title = { Text("Delete this announcement?", style = NirogType.cardTitle, color = NirogColor.inkPrimary) },
+            text = { Text("It will be removed for everyone who received it.", style = NirogType.body, color = NirogColor.inkSecondary) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val id = deletingId
+                        state.repository.deleteAnnouncement(id) { result ->
+                            if (result is com.nirogbhumi.app.data.CloudResult.Failure) state.cloudMessage = result.message
+                        }
+                        deletingId = ""
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = NirogColor.statusCritical)
+                ) { Text("Delete", color = NirogColor.onAccent) }
+            },
+            dismissButton = { TextButton(onClick = { deletingId = "" }) { Text("Cancel", color = NirogColor.inkSecondary) } }
         )
     }
 }

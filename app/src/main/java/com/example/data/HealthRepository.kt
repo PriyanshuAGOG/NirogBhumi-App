@@ -58,10 +58,15 @@ interface HealthRepository {
     // Never grants a new enrollment; only repairs an already-active one.
     fun ensureProgramMembership(done: (CloudResult<Boolean>) -> Unit = {})
 
-    // Care+ (program members only): one shared announcement feed, plus one chat room
-    // per program so members only see conversation relevant to the program they joined.
-    fun listenAnnouncements(programId: String, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription
+    // Announcements are read from the caller's own fan-out feed
+    // (users/{uid}/announcements) rather than a per-program collection, since
+    // an admin broadcast can now target far more than one program (all
+    // users, all enrolled, inactive members) - the createAnnouncement Cloud
+    // Function resolves who receives it and writes each recipient's own copy
+    // there, so this listener works the same regardless of audience.
+    fun listenAnnouncements(update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription
     fun postAnnouncement(programId: String, title: String, body: String, done: (CloudResult<Unit>) -> Unit)
+    fun deleteAnnouncement(id: String, done: (CloudResult<Unit>) -> Unit)
     fun listenProgramChat(programId: String, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription
     fun sendProgramChatMessage(
         programId: String,
@@ -334,13 +339,15 @@ class FirebaseHealthRepository : HealthRepository {
             .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Could not verify program membership", it)) }
     }
 
-    override fun listenAnnouncements(programId: String, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription {
+    override fun listenAnnouncements(update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription {
         val update = reporting("listenAnnouncements", update)
         val database = db ?: run { update(CloudResult.Failure("Firebase is not configured")); return CloudSubscription {} }
-        // Scoped to the caller's own program - without this filter, members of
-        // different programs would see each other's announcements mixed together.
-        val registration = database.collection("announcements")
-            .whereEqualTo("programId", programId)
+        val uid = userId ?: run { update(CloudResult.Success(emptyList())); return CloudSubscription {} }
+        // Own fan-out feed only - createAnnouncement already resolved who
+        // should see this at send time (one program, all enrolled, inactive,
+        // everyone), so reading just this subcollection is correct
+        // regardless of which audience actually reached this member.
+        val registration = database.collection("users").document(uid).collection("announcements")
             .orderBy("createdAt", com.google.firebase.firestore.Query.Direction.DESCENDING)
             .limit(50)
             .addSnapshotListener { snapshot, error ->
@@ -352,20 +359,28 @@ class FirebaseHealthRepository : HealthRepository {
 
     override fun postAnnouncement(programId: String, title: String, body: String, done: (CloudResult<Unit>) -> Unit) {
         val done = reporting("postAnnouncement", done)
-        val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
-        val database = db ?: return done(CloudResult.Failure("Firebase is not configured"))
-        database.collection("announcements").add(
+        val callable = functions?.getHttpsCallable("createAnnouncement")
+            ?: return done(CloudResult.Failure("Firebase is not configured"))
+        callable.call(
             mapOf(
-                "programId" to programId,
                 "title" to title,
                 "body" to body,
-                "authorId" to uid,
-                "createdAt" to FieldValue.serverTimestamp()
+                "audience" to mapOf("scope" to "program", "programIds" to listOf(programId)),
+                "channels" to mapOf("inApp" to true, "push" to true, "email" to false),
             )
         ).addOnSuccessListener {
             AnalyticsLogger.log("announcement_posted", mapOf("program_id" to programId))
             done(CloudResult.Success(Unit))
         }.addOnFailureListener { done(CloudResult.Failure(it.message ?: "Announcement could not be posted", it)) }
+    }
+
+    override fun deleteAnnouncement(id: String, done: (CloudResult<Unit>) -> Unit) {
+        val done = reporting("deleteAnnouncement", done)
+        val callable = functions?.getHttpsCallable("deleteAnnouncement")
+            ?: return done(CloudResult.Failure("Firebase is not configured"))
+        callable.call(mapOf("id" to id))
+            .addOnSuccessListener { done(CloudResult.Success(Unit)) }
+            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Announcement could not be deleted", it)) }
     }
 
     override fun listenProgramChat(programId: String, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription {
