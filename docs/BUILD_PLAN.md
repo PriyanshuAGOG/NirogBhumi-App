@@ -775,12 +775,17 @@ by the user. Work sequentially, CI-verified per slice, small commits.
       needed) - resolved all but the un-related dev-server-only
       `esbuild`/`vite` moderate finding (affects `vite dev`, not the
       deployed production build, left as-is rather than force-upgrading
-      Vite for a risk that doesn't reach production). `firebase-admin` in
-      `firebase/functions` bumped `^13.4.0` → `^14.1.0` for the same
-      reason (marginal improvement; the remaining moderate findings are
-      several layers deep inside Google's own `@google-cloud`/`google-gax`
-      dependency chain, already at the latest published version - not
-      independently fixable from this repo).
+      Vite for a risk that doesn't reach production). A `firebase-admin`
+      13.4.0 → 14.1.0 bump in `firebase/functions` was attempted for the
+      same reason but reverted - `npm install` accepted it locally, but CI's
+      `npm ci` correctly enforces the exact peer-dependency contract and
+      failed: `firebase-functions@6.6.0` only supports `firebase-admin@
+      ^11.10.0 || ^12.0.0 || ^13.0.0`, not 14.x yet. Left at `^13.4.0`; the
+      remaining moderate findings there are several layers deep inside
+      Google's own `@google-cloud`/`google-gax` dependency chain, already
+      at the latest version `firebase-admin@13.x` can pull in - not
+      independently fixable from this repo without also bumping
+      `firebase-functions` past what it currently supports.
     - Everything else checked and found clean: every `onCall` in
       `index.ts` requires `requireUser()` and checks the server-issued
       role custom claim (never a client-supplied role/uid); ownership
