@@ -736,3 +736,66 @@ by the user. Work sequentially, CI-verified per slice, small commits.
     its own delete button (staff-only, confirm dialog). New rules-tests
     cover both the source doc (staff-read-only, zero client writes) and the
     fan-out subcollection (owner-read-only, zero client writes).
+27. [x] **Full-platform security audit, round 2** — a deliberate re-pass
+    (`firebase/firestore.rules`, `firebase/storage.rules`,
+    `firebase/functions/src/index.ts`, the Android manifest/update-install
+    flow, and both npm dependency trees) covering everything added since
+    the round-1 audit (item... security items above): CSV bulk import,
+    manual/pre-invite enrollment, super-admin bootstrap, and the
+    announcements rebuild. Found and fixed one real, exploitable gap: the
+    `users/{uid}` **create** rule only ever locked down the `role` field
+    ("bootstrap self-enrollment bypass") - `programActive`, `activeProgramId`,
+    `activeProgramName`, `programDurationDays`, and `status` were all still
+    free for *any* signed-in client to set on their very first
+    `users/{uid}` write, because the existing **update** rule's "must equal
+    the already-stored value" guard has nothing to compare against on a
+    *create* (the doc doesn't exist yet). A scripted attacker (no app
+    needed, just a valid Firebase Auth account and the public Firestore SDK)
+    could sign up and, in the moment before `onUserCreate`'s merge-only
+    trigger writes its own fields, `setDoc` their own profile doc with
+    `programActive: true` and any `activeProgramId` they chose - free
+    Care+ enrollment into any program of their choosing, bypassing
+    `redeemProgramCode` entirely, since the trigger's merge never touches
+    those keys and would silently leave the attacker's version in place.
+    Fixed by requiring those fields be entirely *absent* on create (not
+    just role-restricted), mirroring the update rule's boundary - they can
+    now only ever be set by `admin()` or a Cloud Function via the Admin
+    SDK, matching the original intent. Four new rules-tests cover the
+    create path specifically (the existing "self-enrollment bypass fix"
+    describe block only ever covered *update*). One legitimate client call
+    (`WelcomeFlow.kt`'s onboarding-complete `saveProfile`) was echoing
+    `programActive` back on every completion - always redundant, since it's
+    only ever a local mirror of what `redeemProgramCode` already set
+    server-side - removed rather than special-cased, so the client no
+    longer depends on that field passing through at all.
+    - Also fixed, lower severity: `console`'s `firebase` dependency
+      (10.14.1, the latest available 10.x) carried a **High**-severity
+      transitive `undici` advisory plus 9 moderate ones; bumped to
+      `^11.10.0` (typecheck + build verified clean, no code changes
+      needed) - resolved all but the un-related dev-server-only
+      `esbuild`/`vite` moderate finding (affects `vite dev`, not the
+      deployed production build, left as-is rather than force-upgrading
+      Vite for a risk that doesn't reach production). `firebase-admin` in
+      `firebase/functions` bumped `^13.4.0` → `^14.1.0` for the same
+      reason (marginal improvement; the remaining moderate findings are
+      several layers deep inside Google's own `@google-cloud`/`google-gax`
+      dependency chain, already at the latest published version - not
+      independently fixable from this repo).
+    - Everything else checked and found clean: every `onCall` in
+      `index.ts` requires `requireUser()` and checks the server-issued
+      role custom claim (never a client-supplied role/uid); ownership
+      checks (`getHealthFileShareLink`, `requestDataExport`,
+      `exportUserData`) are all path/uid-prefix-scoped so one member can
+      never reach another's private Storage files or export data;
+      `storage.rules`'s `safeType()`/`safeAudioType()` content-type regexes
+      are full-string matches (no substring-injection room to smuggle a
+      different MIME type through); `bootstrapSuperAdmin` is a hardcoded
+      single email + a transaction-guarded one-time marker (already
+      consumed, permanently disabled); the Android manifest has
+      `allowBackup="false"`, full `data_extraction_rules`/`backup_rules`
+      exclusions, a narrow `FileProvider` path config, no custom deep-link
+      scheme, and the self-update install flow's checksum verification and
+      `FileProvider`/`FLAG_GRANT_READ_URI_PERMISSION` usage are sound.
+      A full pass over the admin console, remaining CI/CD workflow
+      hardening, and further Android review (WebView/logging/local storage)
+      is still outstanding - continuing this audit.

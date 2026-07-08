@@ -2204,6 +2204,13 @@ fun OnboardingCompleteScreen(state: NirogState) {
                 onClick = {
                     state.authError = ""
                     isSaving = true
+                    // programActive is never sent from here - it's a server-set
+                    // enrollment field (redeemProgramCode already wrote it via the
+                    // Admin SDK if a code was redeemed), and firestore.rules
+                    // rejects a client trying to set it at all, whether creating or
+                    // updating this doc - state.isProgramActive is only ever a
+                    // local mirror of that value, re-sending it here would be
+                    // redundant at best.
                     state.repository.saveProfile(mapOf(
                         "onboardingComplete" to true,
                         "trackingFor" to if (state.isTrackingForSelf) "self" else "family",
@@ -2211,8 +2218,7 @@ fun OnboardingCompleteScreen(state: NirogState) {
                         "bpStatus" to state.selectedBpStatus,
                         "onMedication" to state.selectedOnMedication,
                         "doctorSupervision" to state.selectedDoctorSupervision,
-                        "goals" to state.selectedGoals.toList(),
-                        "programActive" to state.isProgramActive
+                        "goals" to state.selectedGoals.toList()
                     )) { result ->
                         isSaving = false
                         if (result is com.nirogbhumi.app.data.CloudResult.Success) state.currentScreen = "dashboard"

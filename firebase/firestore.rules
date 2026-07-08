@@ -32,7 +32,23 @@ service cloud.firestore {
     function ownProgram(programId) { return signedIn() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.activeProgramId == programId; }
 
     match /users/{uid} {
-      allow create: if owner(uid) && request.resource.data.userId == uid && (!('role' in request.resource.data) || request.resource.data.role == 'user');
+      // Same enrollment/status fields the update rule below locks down must
+      // also be blocked on create, not just update - resource.data doesn't
+      // exist yet for a create, so the update rule's "must match the
+      // existing value" comparison can't apply here. Without this, a client
+      // could self-grant Care+ enrollment (or any status) for free the
+      // moment their own users/{uid} doc is created, by simply including
+      // programActive/activeProgramId in that very first write - entirely
+      // bypassing redeemProgramCode. Requiring these fields be absent means
+      // they can only ever be set afterward by admin() or a Cloud Function
+      // via the Admin SDK (which bypasses rules entirely).
+      allow create: if owner(uid) && request.resource.data.userId == uid
+        && (!('role' in request.resource.data) || request.resource.data.role == 'user')
+        && !('status' in request.resource.data)
+        && !('programActive' in request.resource.data)
+        && !('activeProgramId' in request.resource.data)
+        && !('activeProgramName' in request.resource.data)
+        && !('programDurationDays' in request.resource.data);
       allow read: if owner(uid) || staff() || assigned(uid);
       // Role/status/enrollment fields are the actual security and billing
       // boundary of this doc, so the owner can never change them directly -

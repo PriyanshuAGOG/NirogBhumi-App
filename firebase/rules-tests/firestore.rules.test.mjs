@@ -278,6 +278,32 @@ describe('users/{uid} program-field lock (self-enrollment bypass fix)', () => {
   });
 });
 
+describe('users/{uid} program-field lock also applies on create (not just update)', () => {
+  it('denies a brand-new user creating their own doc with programActive included', async () => {
+    await assertFails(setDoc(doc(member('newmem'), 'users/newmem'), {
+      userId: 'newmem', programActive: true, activeProgramId: 'progA',
+    }));
+  });
+
+  it('denies a brand-new user creating their own doc with a forged status', async () => {
+    await assertFails(setDoc(doc(member('newmem'), 'users/newmem'), {
+      userId: 'newmem', status: 'active',
+    }));
+  });
+
+  it('denies a brand-new user creating their own doc with the admin role', async () => {
+    await assertFails(setDoc(doc(member('newmem'), 'users/newmem'), {
+      userId: 'newmem', role: 'admin',
+    }));
+  });
+
+  it('still lets a brand-new user create their own doc without those fields', async () => {
+    await assertSucceeds(setDoc(doc(member('newmem'), 'users/newmem'), {
+      userId: 'newmem', fullName: 'New Member',
+    }));
+  });
+});
+
 describe('health-log collection group (glucoseReadings as representative)', () => {
   beforeEach(async () => {
     await seed(async (db) => {
