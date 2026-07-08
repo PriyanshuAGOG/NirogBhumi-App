@@ -795,7 +795,53 @@ by the user. Work sequentially, CI-verified per slice, small commits.
       `allowBackup="false"`, full `data_extraction_rules`/`backup_rules`
       exclusions, a narrow `FileProvider` path config, no custom deep-link
       scheme, and the self-update install flow's checksum verification and
-      `FileProvider`/`FLAG_GRANT_READ_URI_PERMISSION` usage are sound.
-      A full pass over the admin console, remaining CI/CD workflow
-      hardening, and further Android review (WebView/logging/local storage)
-      is still outstanding - continuing this audit.
+      `FileProvider`/`FLAG_GRANT_READ_URI_PERMISSION` usage are sound; the
+      app has no `WebView`/`addJavascriptInterface` anywhere, and nothing
+      sensitive (health values, tokens) ever reaches `Log.*` or
+      `SharedPreferences` (only UI-state flags and update-channel bookkeeping
+      live there).
+    - Round 2 continued: found and fixed a real **CSV injection** hole
+      (CWE-1236) in `console/src/lib/csv.ts`'s shared `csvCell()` - a
+      member's self-editable `fullName` flows straight into the Members
+      roster CSV export (`Members.tsx:downloadRosterCsv`) with no formula
+      escaping, so a value like `=HYPERLINK("http://evil","click")` would
+      execute/render as a live formula/link the moment staff opened the
+      exported file in Excel or Sheets. Fixed at the one shared choke point
+      (every CSV export in the console - roster, Calendar/Programs/Batches
+      templates - goes through `toCsv`/`csvCell`): any cell starting with
+      `=`, `+`, `-`, `@`, tab, or CR now gets a leading single quote, Excel's
+      own "treat as literal text" escape, applied before the existing
+      comma/quote/newline RFC4180 quoting so it survives either way the cell
+      ends up wrapped.
+    - Also added baseline security headers to the console's Firebase
+      Hosting config (`firebase.json`): `X-Frame-Options: DENY` (this admin
+      console does one-click destructive actions - role changes, bulk
+      notify, delete announcement - with no header set before, an attacker
+      could iframe it on a decoy page for a clickjacking attack against a
+      signed-in admin), `X-Content-Type-Options: nosniff`, and
+      `Referrer-Policy: strict-origin-when-cross-origin`. A
+      Content-Security-Policy is deliberately *not* added yet - getting it
+      wrong (missing an origin Firebase Auth/Firestore/Functions/Google
+      Sign-In actually needs) fails silently in a real browser with no way
+      to catch it from this sandbox's CI, so it needs real-browser
+      verification before being added rather than being guessed at here.
+    - Console npm audit re-checked clean (`dangerouslySetInnerHTML`/
+      `innerHTML` don't appear anywhere; the one dynamic `<a href>`
+      render - Calendar's "Join link" - is already scheme-validated via
+      `safeHttpUrl()`, confirmed still in place and confirmed it's the
+      *only* such render site in the whole console); `AuthProvider.tsx`'s
+      role always comes from a real `getIdTokenResult()` claim, never
+      cached/trusted client state.
+    - CI/CD: every workflow already has an explicit, minimally-scoped
+      `permissions:` block (`contents: read`, plus `id-token: write` only
+      where WIF is actually used) - no workflow relies on the broad
+      default token. `ci.yml`'s `pull_request` trigger (not the riskier
+      `pull_request_target`) never exposes secrets to a fork's code. One
+      real but lower-priority recommendation left as a follow-up rather
+      than guessed at: `google-github-actions/auth@v3` (the step that
+      receives the WIF provider/service-account secrets as input) is
+      pinned to a mutable major-version tag, not a commit SHA - the
+      standard supply-chain hardening step, but this sandbox's outbound
+      web access couldn't verify the real current SHA to pin against, and
+      guessing one wrong would break every future deploy outright, which
+      is worse than the tag-pin status quo.
