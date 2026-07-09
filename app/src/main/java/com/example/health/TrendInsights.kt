@@ -190,7 +190,10 @@ fun computeWeeklySummary(
     nowMillis: Long,
 ): WeeklySummary? {
     val cutoffMillis = nowMillis - (WEEK_WINDOW_DAYS - 1).toLong() * 86_400_000L
-    fun withinWeek(values: Map<String, Any?>): Boolean = (docTimeMillis(values) ?: return false) >= cutoffMillis
+    fun withinWeek(values: Map<String, Any?>): Boolean {
+        val millis = docTimeMillis(values) ?: return false
+        return millis >= cutoffMillis
+    }
 
     val weekGlucose = glucoseReadings.filter { withinWeek(it.values) && it.values["readingType"] != "hba1c" }
     val weekBp = bpReadings.filter { withinWeek(it.values) }
