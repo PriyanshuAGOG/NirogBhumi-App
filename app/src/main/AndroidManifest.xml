@@ -81,6 +81,23 @@
             android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
         </provider>
+        <!-- exported="true" is required here, not a broad-access oversight -
+             the home-screen launcher (a different app/process) is the one
+             that sends APPWIDGET_UPDATE; Android would block that delivery
+             entirely on API 31+ if this were exported="false". The widget
+             itself has no other surface: its buttons only ever launch this
+             app's own MainActivity with a fixed internal action string. -->
+        <receiver
+            android:name=".widget.HealthQuickLogWidgetReceiver"
+            android:exported="true"
+            android:label="@string/quick_log_widget_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/health_quick_log_widget_info" />
+        </receiver>
     </application>
 
 </manifest>

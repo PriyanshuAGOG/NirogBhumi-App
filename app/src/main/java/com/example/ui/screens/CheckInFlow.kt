@@ -30,6 +30,7 @@ import com.nirogbhumi.app.health.HealthConnectManager
 import com.nirogbhumi.app.health.TodaySyncSummary
 import com.nirogbhumi.app.ui.NirogState
 import com.nirogbhumi.app.ui.SugarLog
+import kotlinx.coroutines.launch
 
 private val Green = Color(0xFF314936)
 private val DeepInk = Color(0xFF1B3221)
@@ -54,6 +55,7 @@ fun DailyCheckInScreen(state: NirogState) {
     var step by remember { mutableStateOf(state.checkinStartStep) }
     var saving by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    val widgetScope = rememberCoroutineScope()
 
     // Device pre-fill: a fast, silent check for today's steps/sleep already synced
     // from a connected watch/band, so a connected user has less left to log by hand.
@@ -300,14 +302,20 @@ fun DailyCheckInScreen(state: NirogState) {
                                         state.sugarLogs.add(0, SugarLog(state.sugarLogs.size + 1, v, sugarType, "Today, Just Now", status))
                                         state.repository.addHealthLog("glucoseReadings", values) { r ->
                                             saving = false
-                                            if (r is CloudResult.Success) { sugarDocId = r.value; sugarResult = "$sugarType $v mg/dL"; advance() } else error = (r as CloudResult.Failure).message
+                                            if (r is CloudResult.Success) {
+                                                sugarDocId = r.value; sugarResult = "$sugarType $v mg/dL"; advance()
+                                                widgetScope.launch { com.nirogbhumi.app.widget.updateHealthQuickLogWidget(context, v) }
+                                            } else error = (r as CloudResult.Failure).message
                                         }
                                     } else {
                                         state.fastingSugarValue = v
                                         if (state.sugarLogs.isNotEmpty()) state.sugarLogs[0] = state.sugarLogs[0].copy(value = v, type = sugarType, status = status)
                                         state.repository.updateHealthLog("glucoseReadings", existing, values) { r ->
                                             saving = false
-                                            if (r is CloudResult.Success) { sugarResult = "$sugarType $v mg/dL"; advance() } else error = (r as CloudResult.Failure).message
+                                            if (r is CloudResult.Success) {
+                                                sugarResult = "$sugarType $v mg/dL"; advance()
+                                                widgetScope.launch { com.nirogbhumi.app.widget.updateHealthQuickLogWidget(context, v) }
+                                            } else error = (r as CloudResult.Failure).message
                                         }
                                     }
                                 }

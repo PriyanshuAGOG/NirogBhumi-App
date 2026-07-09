@@ -984,3 +984,24 @@ by the user. Work sequentially, CI-verified per slice, small commits.
       spoken numbers into digit form in its transcript, so a plain regex
       for "the first number(s) heard" covers real speech without needing
       a spelled-out-numbers parser.
+    - **Home screen widget**: new `widget/HealthQuickLogWidget.kt` built on
+      Jetpack Glance (`androidx.glance:glance-appwidget`, first use of this
+      dependency in the app). Deliberately rejected a true "log a value
+      with zero taps and no app open at all" tile - a home-screen surface
+      has no numeric keypad and no way to review or correct a fat-fingered
+      value before it's saved, the same safety reasoning already applied
+      to the populated-preview empty states. Instead the widget shows the
+      last-logged fasting sugar reading (from a small per-widget
+      `PreferencesGlanceStateDefinition` cache, refreshed by a new
+      `updateHealthQuickLogWidget()` call wired into both save-success
+      paths - `QuickLogFastingOverlay` and `CheckInFlow`'s sugar step) and
+      two tappable rows that jump straight into this app's existing
+      quick-log entry points via two fixed custom Intent actions
+      (`ACTION_OPEN_QUICK_LOG_SUGAR`/`ACTION_OPEN_QUICK_LOG_BP`, read back
+      in `MainActivity.onCreate`/`onNewIntent`) - chosen over Glance's
+      `ActionParameters` marshalling to keep the new API surface small and
+      predictable. `HealthQuickLogWidgetReceiver` is `exported="true"`
+      (mandatory - the launcher process, not this app, sends
+      `APPWIDGET_UPDATE`, and Android 12+ silently drops that delivery to
+      a non-exported receiver) but exposes nothing beyond that fixed
+      update action and the two internal navigation intents.

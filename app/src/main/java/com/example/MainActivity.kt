@@ -31,6 +31,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import com.nirogbhumi.app.ui.NirogState
 import com.nirogbhumi.app.ui.screens.*
 import com.nirogbhumi.app.ui.theme.MyApplicationTheme
+import kotlinx.coroutines.launch
 
 private const val IS_PRODUCTION_APK = true
 
@@ -61,6 +62,7 @@ class MainActivity : ComponentActivity() {
         .addOnFailureListener { /* not signed in as a tester yet, or no newer release - nothing to show */ }
     }
     nirogState.pendingDeepLink = sanitizedRoute(intent.getStringExtra("route"))
+    applyQuickLogWidgetAction(intent)
     val tourSeen = getSharedPreferences("nirog_prefs", MODE_PRIVATE).getBoolean("onboarding_tour_seen", false)
     nirogState.shouldShowTour = !tourSeen
     enableEdgeToEdge()
@@ -274,6 +276,22 @@ class MainActivity : ComponentActivity() {
     sanitizedRoute(intent.getStringExtra("route")).takeIf { it.isNotBlank() }?.let {
       nirogState.pendingDeepLink = it
       nirogState.currentScreen = it
+    }
+    applyQuickLogWidgetAction(intent)
+  }
+
+  // The home-screen widget's two buttons launch this same Activity with one
+  // of these fixed action strings instead of an arbitrary extra - jumps
+  // straight to an existing quick-log entry point rather than the widget
+  // trying to capture a precise health value itself with no way to review
+  // or correct it before saving.
+  private fun applyQuickLogWidgetAction(intent: Intent) {
+    when (intent.action) {
+      com.nirogbhumi.app.widget.ACTION_OPEN_QUICK_LOG_SUGAR -> nirogState.isQuickLogFastingOpen = true
+      com.nirogbhumi.app.widget.ACTION_OPEN_QUICK_LOG_BP -> {
+        nirogState.checkinStartStep = 1
+        nirogState.currentScreen = "daily_checkin"
+      }
     }
   }
 }
@@ -510,6 +528,8 @@ fun QuickLogFastingOverlay(state: NirogState) {
     var savedDocId by remember { mutableStateOf<String?>(null) }
     var confirming by remember { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val widgetScope = androidx.compose.runtime.rememberCoroutineScope()
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -646,6 +666,9 @@ fun QuickLogFastingOverlay(state: NirogState) {
                                 if (result is com.nirogbhumi.app.data.CloudResult.Success<*>) {
                                     state.cloudMessage = "Synced securely"
                                     confirming = true
+                                    widgetScope.launch {
+                                        com.nirogbhumi.app.widget.updateHealthQuickLogWidget(context, state.quickLogFastingValue)
+                                    }
                                 } else if (result is com.nirogbhumi.app.data.CloudResult.Failure) {
                                     state.cloudMessage = result.message
                                 }

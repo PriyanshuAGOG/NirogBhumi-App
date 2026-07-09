@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">Nirog Bhumi</string>
+    <string name="quick_log_widget_label">Nirog Bhumi Quick Log</string>
 </resources>
