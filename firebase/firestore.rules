@@ -241,12 +241,14 @@ service cloud.firestore {
       // member can't plant a doc for a program they didn't redeem a code
       // for, or forge their own contributionKm/lastCheckinAt stats.
       allow create: if programStaff(request.resource.data.programId);
-      // A member may also touch their own doc, but only its two unread-badge
-      // read-marker fields - never contributionKm/lastCheckinAt/status/name,
+      // A member may also touch their own doc, but only these self-service
+      // fields - the two unread-badge read markers, and leaderboardOptIn
+      // (opt-in batch leaderboard: a member chooses whether their own name
+      // appears, never contributionKm/lastCheckinAt/status/name themselves,
       // which stay staff (or Cloud Function)-only above.
       allow update: if programStaff(resource.data.programId)
         || (signedIn() && resource.data.uid == request.auth.uid
-            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastReadGeneralAt', 'lastReadAnnouncementsAt']));
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastReadGeneralAt', 'lastReadAnnouncementsAt', 'leaderboardOptIn']));
       allow delete: if programStaff(resource.data.programId);
     }
     // Aggregated, PII-free batch counts written by Cloud Functions only. Members

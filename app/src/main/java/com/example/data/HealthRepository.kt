@@ -75,6 +75,16 @@ interface HealthRepository {
     fun listenAnnouncements(update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription
     fun postAnnouncement(programId: String, title: String, body: String, done: (CloudResult<Unit>) -> Unit)
     fun deleteAnnouncement(id: String, done: (CloudResult<Unit>) -> Unit)
+    // Fire-and-forget: a member's own view of an announcement, deduped
+    // server-side (see markAnnouncementSeen Cloud Function) so re-opening it
+    // doesn't inflate the count. Never surfaces a failure to the caller -
+    // this is a nice-to-have coach-facing stat, not something worth an error
+    // banner if it doesn't land.
+    fun markAnnouncementSeen(announcementId: String, done: (CloudResult<Unit>) -> Unit = {})
+    // Staff-only one-shot read of the master announcements/{id} doc's
+    // seenCount/recipientCount (the member-facing fan-out copy carries
+    // neither field) - first is seenCount, second is recipientCount.
+    fun fetchAnnouncementMeta(announcementId: String, done: (CloudResult<Pair<Int, Int>>) -> Unit)
     fun listenProgramChat(programId: String, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription
     fun sendProgramChatMessage(
         programId: String,
@@ -123,6 +133,10 @@ interface HealthRepository {
     // field is "lastReadGeneralAt" or "lastReadAnnouncementsAt" - marks the
     // caller's own roster doc read up to now. Called on entering that room.
     fun markProgramRead(programId: String, field: String, done: (CloudResult<Unit>) -> Unit = {})
+    // Opt-in batch leaderboard: a member chooses whether their own name and
+    // walking minutes appear in the next daily leaderboard recompute -
+    // rules-enforced self-only field, same shape as markProgramRead above.
+    fun setLeaderboardOptIn(programId: String, optIn: Boolean, done: (CloudResult<Unit>) -> Unit = {})
 
     // Smart reminder timing: called once a Daily Check-in completes. Blends
     // the hour of day into users/{uid}.checkinHourHint (a light exponential
@@ -407,6 +421,27 @@ class FirebaseHealthRepository : HealthRepository {
             .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Announcement could not be deleted", it)) }
     }
 
+    override fun markAnnouncementSeen(announcementId: String, done: (CloudResult<Unit>) -> Unit) {
+        val done = reporting("markAnnouncementSeen", done)
+        val callable = functions?.getHttpsCallable("markAnnouncementSeen")
+            ?: return done(CloudResult.Failure("Firebase is not configured"))
+        callable.call(mapOf("announcementId" to announcementId))
+            .addOnSuccessListener { done(CloudResult.Success(Unit)) }
+            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Could not record view", it)) }
+    }
+
+    override fun fetchAnnouncementMeta(announcementId: String, done: (CloudResult<Pair<Int, Int>>) -> Unit) {
+        val done = reporting("fetchAnnouncementMeta", done)
+        val database = db ?: return done(CloudResult.Failure("Firebase is not configured"))
+        database.collection("announcements").document(announcementId).get()
+            .addOnSuccessListener { snap ->
+                val seenCount = (snap.get("seenCount") as? Number)?.toInt() ?: 0
+                val recipientCount = (snap.get("recipientCount") as? Number)?.toInt() ?: 0
+                done(CloudResult.Success(seenCount to recipientCount))
+            }
+            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Could not load view count", it)) }
+    }
+
     override fun listenProgramChat(programId: String, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription {
         val update = reporting("listenProgramChat", update)
         val database = db ?: run { update(CloudResult.Failure("Firebase is not configured")); return CloudSubscription {} }
@@ -635,6 +670,16 @@ class FirebaseHealthRepository : HealthRepository {
             .update(field, FieldValue.serverTimestamp())
             .addOnSuccessListener { done(CloudResult.Success(Unit)) }
             .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Could not mark as read", it)) }
+    }
+
+    override fun setLeaderboardOptIn(programId: String, optIn: Boolean, done: (CloudResult<Unit>) -> Unit) {
+        val done = reporting("setLeaderboardOptIn", done)
+        val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
+        val database = db ?: return done(CloudResult.Failure("Firebase is not configured"))
+        database.collection("programMembers").document("${programId}_$uid")
+            .update("leaderboardOptIn", optIn)
+            .addOnSuccessListener { done(CloudResult.Success(Unit)) }
+            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Could not update leaderboard setting", it)) }
     }
 
     override fun recordCheckinCompletion(hourOfDay: Int, done: (CloudResult<Int>) -> Unit) {

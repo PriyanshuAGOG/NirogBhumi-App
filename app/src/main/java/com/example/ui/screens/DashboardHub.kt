@@ -2049,6 +2049,26 @@ private fun ProgramStatusHero(state: NirogState, dayNumber: Long) {
     val checkedIn = (pulse?.get("checkedInCount") as? Number)?.toInt() ?: 0
     val memberCount = (pulse?.get("memberCount") as? Number)?.toInt() ?: 0
     val collectiveMinutes = (pulse?.get("collectiveMinutes") as? Number)?.toInt() ?: 0
+    val leaderboard = remember(pulse) {
+        (pulse?.get("leaderboard") as? List<*>)?.mapNotNull { entry ->
+            val fields = entry as? Map<*, *> ?: return@mapNotNull null
+            val name = fields["name"] as? String ?: return@mapNotNull null
+            val minutes = (fields["minutes"] as? Number)?.toInt() ?: return@mapNotNull null
+            name to minutes
+        } ?: emptyList()
+    }
+
+    // Opt-in only: leaderboardOptIn defaults false/absent on every roster doc,
+    // so nobody's name appears anywhere until they flip this on themselves -
+    // the aggregate collectiveMinutes total above stays the only thing shown
+    // by default, exactly as before.
+    var leaderboardOptIn by remember { mutableStateOf(false) }
+    LaunchedEffect(state.activeProgramId) {
+        if (state.activeProgramId.isBlank()) return@LaunchedEffect
+        state.repository.peekMembership(state.activeProgramId) { result ->
+            if (result is CloudResult.Success) leaderboardOptIn = result.value?.values?.get("leaderboardOptIn") as? Boolean ?: false
+        }
+    }
 
     // Program-day milestone (30/60/90) - a device-local one-time flag (not
     // Firestore-synced state) since it's a celebratory toast, not data the
@@ -2109,15 +2129,54 @@ private fun ProgramStatusHero(state: NirogState, dayNumber: Long) {
                     Text("Day $dayNumber - a real milestone in your program!", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
                 }
             }
-            // Cooperative, never a per-member ranking - a team total only.
+            // Cooperative by default - the team total, no names attached -
+            // unless a member explicitly opts themselves into the leaderboard
+            // below, which only ever adds names for people who opted in.
             if (collectiveMinutes > 0) {
                 Spacer(modifier = Modifier.height(16.dp))
                 Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.18f)))
                 Spacer(modifier = Modifier.height(12.dp))
                 Text(
-                    "$collectiveMinutes minutes walked as a batch this month - no rankings, just the team total.",
+                    "$collectiveMinutes minutes walked as a batch this month.",
                     fontSize = 12.sp, color = NirogColor.forestPale, lineHeight = 17.sp,
                 )
+                if (leaderboard.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    leaderboard.forEachIndexed { index, (name, minutes) ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text("${index + 1}. $name", fontSize = 12.5.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            Text("${minutes}m", fontSize = 12.5.sp, color = NirogColor.forestPale)
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(10.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "Show my name on the leaderboard",
+                        fontSize = 11.5.sp, color = NirogColor.forestPale, modifier = Modifier.weight(1f),
+                    )
+                    Switch(
+                        checked = leaderboardOptIn,
+                        onCheckedChange = { checked ->
+                            leaderboardOptIn = checked
+                            state.repository.setLeaderboardOptIn(state.activeProgramId, checked) { result ->
+                                if (result is CloudResult.Failure) {
+                                    leaderboardOptIn = !checked
+                                    state.cloudMessage = result.message
+                                }
+                            }
+                        },
+                        colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = NirogColor.forestPale),
+                    )
+                }
             }
         }
     }

@@ -3248,6 +3248,15 @@ fun AnnouncementsScreen(state: NirogState) {
     var posting by remember { mutableStateOf(false) }
     var deletingId by remember { mutableStateOf("") }
     val canDelete = state.isAdmin || state.staffRole == "coach"
+    val isStaffViewer = state.canManageProgram(state.activeProgramId)
+    // "Seen by N": a coach can't tell from the member-facing fan-out doc alone
+    // whether an update actually landed - seenCount/recipientCount live only
+    // on the staff-readable master announcements/{id} doc (see
+    // markAnnouncementSeen/fetchAnnouncementMeta), fetched once per id here
+    // rather than a live listener since this is a glance-at stat, not
+    // something that needs to tick up in real time while the screen is open.
+    val alreadyMarkedSeen = remember { mutableSetOf<String>() }
+    var seenMetaByAnnouncementId by remember { mutableStateOf<Map<String, Pair<Int, Int>>>(emptyMap()) }
 
     DisposableEffect(Unit) {
         val subscription = state.repository.listenAnnouncements { result ->
@@ -3261,6 +3270,27 @@ fun AnnouncementsScreen(state: NirogState) {
         // for non-members - they have no roster doc to mark anyway).
         if (state.activeProgramId.isNotBlank()) state.repository.markProgramRead(state.activeProgramId, "lastReadAnnouncementsAt") {}
         onDispose { subscription.cancel() }
+    }
+
+    LaunchedEffect(records, isStaffViewer) {
+        val current = records ?: return@LaunchedEffect
+        if (isStaffViewer) {
+            // A coach viewing their own broadcast isn't "a member seeing it" -
+            // only fetch the count, never call markAnnouncementSeen below.
+            current.forEach { record ->
+                if (record.id !in seenMetaByAnnouncementId) {
+                    state.repository.fetchAnnouncementMeta(record.id) { result ->
+                        if (result is com.nirogbhumi.app.data.CloudResult.Success) {
+                            seenMetaByAnnouncementId = seenMetaByAnnouncementId + (record.id to result.value)
+                        }
+                    }
+                }
+            }
+        } else {
+            current.forEach { record ->
+                if (alreadyMarkedSeen.add(record.id)) state.repository.markAnnouncementSeen(record.id)
+            }
+        }
     }
 
     Column(modifier = Modifier.fillMaxSize().background(NirogColor.surface)) {
@@ -3330,9 +3360,20 @@ fun AnnouncementsScreen(state: NirogState) {
                             }
                             Spacer(modifier = Modifier.height(NirogSpace.sm))
                             Text(record.values["body"]?.toString().orEmpty(), style = NirogType.body, color = NirogColor.inkSecondary)
-                            if (timestamp != null) {
+                            if (timestamp != null || isStaffViewer) {
                                 Spacer(modifier = Modifier.height(NirogSpace.sm))
-                                Text(relativeTimeLabel(timestamp), style = NirogType.overline, color = NirogColor.inkMuted)
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    if (timestamp != null) {
+                                        Text(relativeTimeLabel(timestamp), style = NirogType.overline, color = NirogColor.inkMuted)
+                                    }
+                                    val meta = seenMetaByAnnouncementId[record.id]
+                                    if (isStaffViewer && meta != null) {
+                                        if (timestamp != null) {
+                                            Text(" · ", style = NirogType.overline, color = NirogColor.inkMuted)
+                                        }
+                                        Text("Seen by ${meta.first} of ${meta.second}", style = NirogType.overline, color = NirogColor.inkMuted)
+                                    }
+                                }
                             }
                         }
                     }
@@ -3396,10 +3437,38 @@ fun AnnouncementsScreen(state: NirogState) {
 
 private val QUICK_REACTIONS = listOf("👍", "❤️", "😂", "🙏")
 
-// Single-token @mentions ("@Priya", not "@Priya Sharma") - there's no roster
-// autocomplete yet, so this is rendering-only highlighting of whatever the
-// sender typed, not a validated reference to a real member.
+// Single-token @mentions ("@Priya", not "@Priya Sharma") - autocomplete
+// below only ever inserts a first name for exactly this reason, so what a
+// member picks from the roster picker always renders as a real highlighted
+// mention rather than silently only highlighting half of it.
 private val MENTION_REGEX = Regex("(?<=^|\\s)@[\\p{L}0-9_]+")
+
+// Rather than a new Firestore read of the batch roster (programMembers is
+// deliberately staff-only - see firestore.rules - so member names never leak
+// between members through that collection), the autocomplete list is built
+// from senderName values already visible in this same chat's own messages.
+// That means you can only @mention someone who's actually posted here, which
+// is a reasonable bar for a "who am I replying to" picker and needs zero
+// rules changes.
+private fun chatRosterNames(records: List<com.nirogbhumi.app.data.CloudDocument>, excludeName: String): List<String> =
+    records.mapNotNull { it.values["senderName"]?.toString()?.trim() }
+        .filter { it.isNotBlank() && it != "Member" && it != excludeName }
+        .distinct()
+        .sorted()
+
+// Null unless the caret is currently sitting right after an unterminated
+// "@token" (no whitespace between the @ and the end of the string, and the
+// @ itself preceded only by start-of-text or whitespace) - the same boundary
+// MENTION_REGEX uses, so anything picked from the dropdown below is
+// guaranteed to actually render as a highlighted mention afterward.
+private fun activeMentionQuery(text: String): String? {
+    val at = text.lastIndexOf('@')
+    if (at == -1) return null
+    if (at > 0 && !text[at - 1].isWhitespace()) return null
+    val after = text.substring(at + 1)
+    if (after.any { it.isWhitespace() }) return null
+    return after
+}
 
 private fun mentionAnnotatedText(text: String, mentionColor: Color): androidx.compose.ui.text.AnnotatedString =
     buildAnnotatedString {
@@ -4032,6 +4101,43 @@ fun ProgramChatScreen(state: NirogState) {
                 Text("Photo ready to send", style = NirogType.caption, color = NirogColor.inkSecondary, modifier = Modifier.weight(1f))
                 IconButton(onClick = { pendingPhotoUri = null }, enabled = !uploadingPhoto) {
                     Icon(Icons.Filled.Close, contentDescription = "Remove photo", tint = NirogColor.inkMuted, modifier = Modifier.size(18.dp))
+                }
+            }
+        }
+
+        // @mention autocomplete: suggests only names already seen in this
+        // same chat (see chatRosterNames doc comment for why), replacing the
+        // partial "@token" being typed with the picked first name plus a
+        // trailing space so typing can continue straight after.
+        val mentionQuery = remember(messageInput) { activeMentionQuery(messageInput) }
+        val mentionSuggestions = remember(mentionQuery, records) {
+            if (mentionQuery == null) emptyList()
+            else chatRosterNames(records ?: emptyList(), excludeName = state.profileName.ifBlank { "Member" })
+                .filter { it.startsWith(mentionQuery, ignoreCase = true) }
+                .take(5)
+        }
+        if (mentionSuggestions.isNotEmpty()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = NirogSpace.lg, vertical = NirogSpace.xs),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                mentionSuggestions.forEach { name ->
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(NirogColor.surfaceSunken)
+                            .clickable {
+                                val at = messageInput.lastIndexOf('@')
+                                val firstName = name.substringBefore(' ')
+                                messageInput = messageInput.substring(0, at + 1) + firstName + " "
+                            }
+                            .padding(horizontal = 14.dp, vertical = 8.dp),
+                    ) {
+                        Text("@${name.substringBefore(' ')}", style = NirogType.caption, fontWeight = FontWeight.Bold, color = NirogColor.forest)
+                    }
                 }
             }
         }

@@ -1073,3 +1073,51 @@ by the user. Work sequentially, CI-verified per slice, small commits.
       brand-new member never sees a hollow judgment about a week that
       hasn't happened. Rendered as `WeeklyScoreCard` right below the
       streak chip on Today, above the first-week checklist.
+30. [x] **@mention autocomplete with roster picker** (`ProgramChatScreen`,
+    `DetailsScreens.kt`): typing "@" now shows a row of tappable name chips
+    instead of only highlighting a finished "@Name" after the fact. The
+    suggestion list is deliberately NOT a new read of the `programMembers`
+    roster (that collection is staff-only by design - see its rules
+    comment: "member names never leak between members") - it's built from
+    `senderName` values already visible in this same chat's own messages
+    (`chatRosterNames`), so a member can only autocomplete someone who's
+    actually posted here. Needed zero rules changes. `activeMentionQuery`
+    detects an unterminated "@token" at the end of the typed text (same
+    boundary as the existing `MENTION_REGEX`); picking a suggestion inserts
+    only its first name, matching the existing single-token mention
+    highlighter (`@Priya`, never `@Priya Sharma`) so anything picked always
+    actually renders as a highlighted mention afterward.
+31. [x] **Opt-in batch leaderboard + "Seen by N" on announcements** - a
+    matched full-stack pair (both touch `functions/index.ts`,
+    `firestore.rules`, and rules-tests, so shipped together):
+    - **Opt-in batch leaderboard**: `ProgramStatusHero`'s existing
+      `collectiveMinutes` team total was deliberately never a per-member
+      ranking ("no rankings, just the team total"). `generateDailyContent`'s
+      existing daily walk-minutes aggregation now also accumulates a
+      per-uid breakdown in the same loop (no new Firestore query - it
+      already fetches every `walkLogs` doc for the team total), and writes
+      a `leaderboard: [{name, minutes}]` array onto the same `batchStats`
+      doc, but populated ONLY from `programMembers` docs with
+      `leaderboardOptIn === true` - nobody's name appears until they flip
+      it on themselves. Self-service opt-in needed one field added to
+      `programMembers`'s existing self-update allow-list (`markProgramRead`'s
+      pattern: `lastReadGeneralAt`/`lastReadAnnouncementsAt`, now also
+      `leaderboardOptIn`) - two new rules tests cover it (self opt-in
+      succeeds, opting in someone else's doc fails). No new collections,
+      no new Cloud Function callable.
+    - **"Seen by N" on announcements**: new `seenCount` field on the master
+      `announcements/{id}` doc (staff-readable only, per existing rules),
+      incremented via a new `markAnnouncementSeen` callable using a
+      `seenMarkers/{uid}` marker subcollection under the announcement doc to
+      dedup repeat views - the exact same pattern `batchStats/{id}/
+      checkedInMembers` already uses for the same reason (count each member
+      once, not once per view). No new rules needed for the marker
+      subcollection - it's covered by the existing `match /{document=**}
+      { allow read, write: if false; }` catch-all, since only the Cloud
+      Function (Admin SDK) ever touches it. Android's `AnnouncementsScreen`
+      calls `markAnnouncementSeen` once per rendered announcement for
+      member viewers (deduped client-side too, via a remembered id set);
+      staff viewers instead one-shot-fetch `seenCount`/`recipientCount` from
+      the master doc and see "Seen by N of M" inline - a coach previewing
+      their own broadcast is explicitly excluded from inflating their own
+      seen count.

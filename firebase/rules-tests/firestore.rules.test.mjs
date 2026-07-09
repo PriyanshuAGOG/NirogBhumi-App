@@ -119,6 +119,18 @@ describe('programMembers self-update (unread badge read markers)', () => {
       lastReadGeneralAt: serverTimestamp(),
     }));
   });
+
+  it('lets a member opt themselves into the batch leaderboard', async () => {
+    await assertSucceeds(updateDoc(doc(member('mem1'), 'programMembers/progA_mem1'), {
+      leaderboardOptIn: true,
+    }));
+  });
+
+  it('denies a member opting someone else into the leaderboard', async () => {
+    await assertFails(updateDoc(doc(member('someone-else'), 'programMembers/progA_mem1'), {
+      leaderboardOptIn: true,
+    }));
+  });
 });
 
 describe('programChatMessages reactions-only update', () => {

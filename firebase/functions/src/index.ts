@@ -189,12 +189,26 @@ export const generateDailyContent = onSchedule({ schedule: '0 5 * * *', timeZone
     const uids = membersSnap.docs.map(m => String(m.get('uid') ?? '')).filter(Boolean);
     if (!uids.length) continue;
     let totalMinutes = 0;
+    // Per-uid breakdown alongside the existing team total - only ever
+    // surfaced client-side for members who've opted in (below), never a
+    // silent default-on ranking.
+    const minutesByUid: Record<string, number> = {};
     for (let i = 0; i < uids.length; i += 30) {
       const chunk = uids.slice(i, i + 30);
       const walks = await db.collection('walkLogs').where('userId', 'in', chunk).where('createdAt', '>=', monthStartTs).get();
-      walks.docs.forEach(w => { totalMinutes += Number(w.get('minutes') ?? 0); });
+      walks.docs.forEach(w => {
+        const minutes = Number(w.get('minutes') ?? 0);
+        totalMinutes += minutes;
+        const uid = String(w.get('userId') ?? '');
+        if (uid) minutesByUid[uid] = (minutesByUid[uid] ?? 0) + minutes;
+      });
     }
-    await db.doc(`batchStats/${programId}_${today}`).set({ programId, dayKey: today, collectiveMinutes: Math.round(totalMinutes), memberCount: uids.length, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    const leaderboard = membersSnap.docs
+      .filter(m => m.get('leaderboardOptIn') === true)
+      .map(m => ({ name: String(m.get('name') ?? 'Member'), minutes: Math.round(minutesByUid[String(m.get('uid') ?? '')] ?? 0) }))
+      .sort((a, b) => b.minutes - a.minutes)
+      .slice(0, 10);
+    await db.doc(`batchStats/${programId}_${today}`).set({ programId, dayKey: today, collectiveMinutes: Math.round(totalMinutes), memberCount: uids.length, leaderboard, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   }
 
   const weekdayIST = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', weekday: 'short' }).format(new Date());
@@ -387,7 +401,7 @@ export const createAnnouncement = onCall({ region, timeoutSeconds: 120 }, async 
   const announcementRef = db.collection('announcements').doc();
   await announcementRef.set({
     title, body, authorId: auth.uid, authorName, createdAt: FieldValue.serverTimestamp(), expiresAt,
-    audience, channels, recipientUids: recipients, recipientCount: recipients.length,
+    audience, channels, recipientUids: recipients, recipientCount: recipients.length, seenCount: 0,
   });
 
   if (channels.inApp) {
@@ -480,6 +494,28 @@ export const deleteAnnouncement = onCall({ region }, async request => {
   await deleteAnnouncementDoc(snap);
   await db.collection('auditLogs').add({ actorId: auth.uid, actorRole: role ?? 'coach', action: 'delete_announcement', entityType: 'announcement', entityId: id, createdAt: FieldValue.serverTimestamp() });
   return { deleted: true };
+});
+
+// "Seen by N" for a coach, without a per-message read-receipt list on the
+// member-facing fan-out doc (users/{uid}/announcements/{id}) - a small
+// marker subcollection under the master doc dedups repeat views from the
+// same member, mirroring the exact pattern batchStats/{id}/checkedInMembers
+// already uses for the same reason (increment once per uid, not once per
+// view). Never throws on a bad/expired id - marking something as "seen"
+// that no longer exists shouldn't surface an error to the member's UI.
+export const markAnnouncementSeen = onCall({ region }, async request => {
+  const auth = requireUser(request);
+  const announcementId = String(request.data?.announcementId ?? '');
+  if (!announcementId) throw new HttpsError('invalid-argument', 'announcementId is required');
+  const announcementRef = db.doc(`announcements/${announcementId}`);
+  const markerRef = announcementRef.collection('seenMarkers').doc(auth.uid);
+  await db.runTransaction(async tx => {
+    const [announcementSnap, markerSnap] = await Promise.all([tx.get(announcementRef), tx.get(markerRef)]);
+    if (!announcementSnap.exists || markerSnap.exists) return;
+    tx.set(markerRef, { seenAt: FieldValue.serverTimestamp() });
+    tx.update(announcementRef, { seenCount: FieldValue.increment(1) });
+  });
+  return { ok: true };
 });
 
 // The console's program editor (Programs.tsx) only ever sets durationWeeks -
