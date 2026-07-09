@@ -104,6 +104,25 @@ fun DailyCheckInScreen(state: NirogState) {
     fun advance() { error = null; step = if (editingFromSummary) { editingFromSummary = false; 4 } else step + 1 }
     fun editStep(target: Int) { error = null; editingFromSummary = true; step = target }
 
+    // Resume-mid-flow: if the process gets reclaimed by the OS partway through
+    // (a call, a notification, low memory) rather than the member deliberately
+    // leaving, routeAfterAuthSuccess (WelcomeFlow.kt) reads this same pref on
+    // the next cold start and reopens straight to this exact step instead of
+    // the dashboard. Cleared once the flow reaches the closing summary (step
+    // 4) or the member taps Close on purpose - a stale value would otherwise
+    // resume a check-in that's already finished or intentionally abandoned.
+    val resumePrefs = remember { context.getSharedPreferences("nirog_prefs", android.content.Context.MODE_PRIVATE) }
+    LaunchedEffect(step) {
+        if (step in 0..3) {
+            resumePrefs.edit()
+                .putLong("checkin_resume_daykey", com.nirogbhumi.app.ui.localDayKey(System.currentTimeMillis()))
+                .putInt("checkin_resume_step", step)
+                .apply()
+        } else {
+            resumePrefs.edit().remove("checkin_resume_daykey").remove("checkin_resume_step").apply()
+        }
+    }
+
     Column(
         modifier = Modifier.fillMaxSize().background(PaperBg)
     ) {
@@ -112,7 +131,10 @@ fun DailyCheckInScreen(state: NirogState) {
             modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 12.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = { state.currentScreen = "dashboard" }) {
+            IconButton(onClick = {
+                resumePrefs.edit().remove("checkin_resume_daykey").remove("checkin_resume_step").apply()
+                state.currentScreen = "dashboard"
+            }) {
                 Icon(Icons.Filled.Close, contentDescription = "Close", tint = DeepInk)
             }
             if (step < 4) {

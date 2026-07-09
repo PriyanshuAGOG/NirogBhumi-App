@@ -18,6 +18,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -118,7 +119,7 @@ private fun refreshAdminClaim(state: NirogState) {
 
 // Existing accounts signing back in (any method) must land on their dashboard,
 // not repeat onboarding - only a genuinely new account has no completed profile yet.
-private fun routeAfterAuthSuccess(state: NirogState, deepLinkFallback: String = "dashboard") {
+private fun routeAfterAuthSuccess(state: NirogState, context: android.content.Context, deepLinkFallback: String = "dashboard") {
     val uid = runCatching { FirebaseAuth.getInstance().currentUser?.uid }.getOrNull()
     if (uid == null) { state.currentScreen = "consent"; return }
     refreshAdminClaim(state)
@@ -126,7 +127,27 @@ private fun routeAfterAuthSuccess(state: NirogState, deepLinkFallback: String = 
         .addOnSuccessListener { document ->
             if (document.getBoolean("onboardingComplete") == true) {
                 applyProfileDocument(state, document)
-                state.currentScreen = deepLinkFallback
+                // Resuming mid check-in: the OS can reclaim the process at any point
+                // (a call, a notification, low memory), which shouldn't cost a member
+                // their half-finished check-in. Only kicks in when nothing else (an
+                // explicit deep link) already claims this launch, and only for the
+                // same local calendar day - a stale step from a prior day would be
+                // confusing rather than helpful, so it's ignored once the day rolls
+                // over. CheckInFlow clears this same pref whenever a member finishes
+                // the flow or taps Close on purpose, so this only fires for a genuine
+                // interruption, never a deliberate exit.
+                val resumeStep = if (deepLinkFallback == "dashboard") {
+                    val prefs = context.getSharedPreferences("nirog_prefs", android.content.Context.MODE_PRIVATE)
+                    val savedDayKey = prefs.getLong("checkin_resume_daykey", -1L)
+                    val savedStep = prefs.getInt("checkin_resume_step", -1)
+                    if (savedStep in 0..3 && savedDayKey == com.nirogbhumi.app.ui.localDayKey(System.currentTimeMillis())) savedStep else null
+                } else null
+                if (resumeStep != null) {
+                    state.checkinStartStep = resumeStep
+                    state.currentScreen = "daily_checkin"
+                } else {
+                    state.currentScreen = deepLinkFallback
+                }
             } else {
                 state.currentScreen = "consent"
             }
@@ -137,11 +158,12 @@ private fun routeAfterAuthSuccess(state: NirogState, deepLinkFallback: String = 
 // SCREEN 1: SPLASH SCREEN
 @Composable
 fun SplashScreen(state: NirogState) {
+    val context = LocalContext.current.applicationContext
     LaunchedEffect(Unit) {
         kotlinx.coroutines.delay(900)
         val user = runCatching { FirebaseAuth.getInstance().currentUser }.getOrNull()
         if (user == null) state.currentScreen = "welcome"
-        else routeAfterAuthSuccess(state, state.pendingDeepLink.ifBlank { "dashboard" })
+        else routeAfterAuthSuccess(state, context, state.pendingDeepLink.ifBlank { "dashboard" })
     }
     Box(
         modifier = Modifier
@@ -716,6 +738,7 @@ fun LoginOtpScreen(state: NirogState) {
     var isValidState by remember { mutableStateOf(true) }
     var resendTimer by remember { mutableStateOf(28) }
     val activity = LocalActivity.current
+    val context = LocalContext.current.applicationContext
 
     LaunchedEffect(Unit) {
         while (resendTimer > 0) {
@@ -854,7 +877,7 @@ fun LoginOtpScreen(state: NirogState) {
                             } else {
                                 state.authBusy = true
                                 FirebaseAuthGateway.verifyOtp(state.otpVerificationId, pinVal,
-                                    onSuccess = { state.authBusy = false; routeAfterAuthSuccess(state) },
+                                    onSuccess = { state.authBusy = false; routeAfterAuthSuccess(state, context) },
                                     onError = { state.authBusy = false; state.authError = it; isValidState = false })
                             }
                         },
@@ -882,6 +905,7 @@ fun EmailAuthScreen(state: NirogState) {
     var passwordInput by remember { mutableStateOf("") }
     var isPasswordVisible by remember { mutableStateOf(false) }
     val activity = LocalActivity.current
+    val context = LocalContext.current.applicationContext
     val googleLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         state.authBusy = true
         state.authError = ""
@@ -889,7 +913,7 @@ fun EmailAuthScreen(state: NirogState) {
             result.data,
             onSuccess = {
                 state.authBusy = false
-                routeAfterAuthSuccess(state)
+                routeAfterAuthSuccess(state, context)
             },
             onError = {
                 state.authBusy = false
@@ -1104,7 +1128,7 @@ fun EmailAuthScreen(state: NirogState) {
                             state.userEmail = emailInput
                             state.authBusy = true; state.authError = ""
                             FirebaseAuthGateway.email(emailInput, passwordInput, state.isSignUpMode,
-                                onSuccess = { state.authBusy = false; routeAfterAuthSuccess(state) },
+                                onSuccess = { state.authBusy = false; routeAfterAuthSuccess(state, context) },
                                 onError = { state.authBusy = false; state.authError = it })
                         },
                         enabled = emailInput.contains("@") && passwordInput.length >= 6 && !state.authBusy,

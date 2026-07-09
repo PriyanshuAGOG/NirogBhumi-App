@@ -1005,3 +1005,33 @@ by the user. Work sequentially, CI-verified per slice, small commits.
       `APPWIDGET_UPDATE`, and Android 12+ silently drops that delivery to
       a non-exported receiver) but exposes nothing beyond that fixed
       update action and the two internal navigation intents.
+28. [x] **Navigation & findability, part 1** — first two of a three-item
+    backlog (global search and a deeper trend-graphs/insights pass are
+    tracked separately as larger changes):
+    - **Resume-mid-flow for Daily Check-in**: previously, `checkinStartStep`
+      only ever lived in memory - if the OS reclaimed the process mid
+      check-in (a call, a notification, low memory), reopening the app
+      restarted at the dashboard with no memory of the in-progress flow,
+      even though every completed step had already been saved to
+      Firestore. `CheckInFlow.kt`'s `DailyCheckInScreen` now writes
+      `{checkin_resume_daykey, checkin_resume_step}` to the existing
+      `nirog_prefs` SharedPreferences on every step change (cleared once
+      the flow reaches the closing summary), and `WelcomeFlow.kt`'s
+      `routeAfterAuthSuccess` - the single function all four sign-in/
+      splash paths already funnel through - reads it back on the next cold
+      start and lands on `daily_checkin` at that exact step instead of the
+      dashboard, but only for the same local calendar day (`localDayKey`)
+      and only when nothing else (an explicit deep link) already claims
+      the launch. Tapping Close explicitly clears the pref, so a
+      deliberate exit is never mistaken for an interruption on the next
+      launch.
+    - **Nav-parity audit**: Care+, Learn, and Insights are already
+      top-level `NirogBottomNavigationBar` items exactly one tap away,
+      the same tier as Today and Track - structurally at parity, not
+      buried. The one real (if minor) asymmetry found: Today already
+      carries contextual shortcuts into Insights (the Weekly Rhythm card)
+      and Care (the first-week checklist's "Meet your batch" row), but
+      had none pointed at Learn. Added a matching link card on Today,
+      styled identically to the existing Health File card, so all three
+      secondary tabs get equal contextual surfacing rather than just
+      equal bottom-nav placement.

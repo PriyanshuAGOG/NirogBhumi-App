@@ -945,6 +945,39 @@ fun TodayTab(state: NirogState) {
             }
         }
 
+        // Nav-parity: Today already has a one-tap contextual shortcut into
+        // Insights (Weekly Rhythm card) and Care (the checklist's "Meet your
+        // batch" row), but nothing pointed at Learn - not "buried" (it's a
+        // same-tier bottom-nav tab either way) but a real asymmetry in how
+        // often it actually gets surfaced day to day. This closes that gap
+        // with the same card treatment as Health File just above.
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { state.activeTab = "Learn" }
+                .border(width = 0.5.dp, color = NirogColor.outlineVariant.copy(alpha = 0.3f), shape = RoundedCornerShape(24.dp)),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            shape = RoundedCornerShape(24.dp)
+        ) {
+            Row(
+                modifier = Modifier.padding(16.dp).fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier.size(36.dp).clip(RoundedCornerShape(12.dp)).background(NirogColor.surfaceLow),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Filled.MenuBook, "Learn", tint = NirogColor.forest, modifier = Modifier.size(18.dp))
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Learn & Explore", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B2219))
+                    Text("Ayurvedic wisdom & modern metabolic science", fontSize = 11.5.sp, color = NirogColor.inkMuted)
+                }
+                Text("Browse", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = NirogColor.forest)
+            }
+        }
+
         // The one thing Today has that Track doesn't: a program-aware view of
         // what's coming up in Care+. Only rendered for enrolled members, and
         // only when there's something upcoming to show - never an empty card.
