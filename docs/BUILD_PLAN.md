@@ -966,3 +966,21 @@ by the user. Work sequentially, CI-verified per slice, small commits.
       member's own real readings (a real concern for a diabetes app -
       never showing a fabricated-but-plausible-looking glucose number
       undistinguished from a genuine one).
+    - **Voice-entry for readings**: new shared
+      `rememberVoiceInputLauncher`/`parseSpokenNumber`/
+      `parseSpokenTwoNumbers` (`ui/components/VoiceInput.kt`), built on the
+      system speech-recognition UI (`RecognizerIntent.ACTION_RECOGNIZE_SPEECH`)
+      rather than a new on-device model - needs no new manifest permission
+      (`RECORD_AUDIO` was already declared for Health Connect; the
+      recognizer app itself owns the mic, not this app's process), and
+      `resolveActivity()` guards against the rare device with no
+      recognizer installed at all, surfacing a plain "voice entry isn't
+      available" message instead of silently doing nothing. Wired into
+      `QuickLogFastingOverlay`'s slider and, via a new optional
+      `onVoiceInput` parameter on `CheckInFlow`'s shared `BigInput`, into
+      all three numeric Daily Check-in steps (sugar, weight, and blood
+      pressure - `parseSpokenTwoNumbers` handles "120 over 80" style
+      phrasing for the latter). The system recognizer already normalizes
+      spoken numbers into digit form in its transcript, so a plain regex
+      for "the first number(s) heard" covers real speech without needing
+      a spelled-out-numbers parser.

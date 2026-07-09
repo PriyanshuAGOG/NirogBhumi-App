@@ -14,6 +14,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -575,11 +576,26 @@ fun QuickLogFastingOverlay(state: NirogState) {
                         ) { Text("Done", fontWeight = FontWeight.Bold, color = Color.White) }
                     }
                 } else {
-                    Text(
-                        text = "Slide to record the fasting value displayed on your metabolic monitor.",
-                        fontSize = 13.sp,
-                        color = Color(0xFF737972)
+                    val voiceLaunch = com.nirogbhumi.app.ui.components.rememberVoiceInputLauncher(
+                        prompt = "Say your fasting sugar, e.g. \"110\"",
+                        onResult = { heard ->
+                            val value = com.nirogbhumi.app.ui.components.parseSpokenNumber(heard)?.toFloatOrNull()?.toInt()
+                            if (value != null) state.quickLogFastingValue = value.coerceIn(50, 250)
+                            else state.cloudMessage = "Didn't catch a number - try again or use the slider."
+                        },
+                        onUnavailable = { state.cloudMessage = "Voice entry isn't available on this device." },
                     )
+                    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "Slide to record the fasting value displayed on your metabolic monitor.",
+                            fontSize = 13.sp,
+                            color = Color(0xFF737972),
+                            modifier = Modifier.weight(1f),
+                        )
+                        IconButton(onClick = voiceLaunch) {
+                            Icon(imageVector = Icons.Filled.Mic, contentDescription = "Say the value instead", tint = Color(0xFF314936))
+                        }
+                    }
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),

@@ -178,11 +178,21 @@ fun DailyCheckInScreen(state: NirogState) {
                             TypeChip(type, sugarType == type) { sugarType = type; sugarInput = "" }
                         }
                     }
+                    val sugarVoice = com.nirogbhumi.app.ui.components.rememberVoiceInputLauncher(
+                        prompt = if (sugarType == "HbA1c") "Say your HbA1c, e.g. \"6.5\"" else "Say your sugar reading, e.g. \"110\"",
+                        onResult = { heard ->
+                            val parsed = com.nirogbhumi.app.ui.components.parseSpokenNumber(heard)
+                            if (parsed != null) sugarInput = if (sugarType == "HbA1c") parsed else parsed.substringBefore(".")
+                            else error = "Didn't catch a number - try again or type it in."
+                        },
+                        onUnavailable = { error = "Voice entry isn't available on this device." },
+                    )
                     BigInput(
                         value = sugarInput,
                         onChange = { v -> sugarInput = if (sugarType == "HbA1c") v.filter { it.isDigit() || it == '.' } else v.filter(Char::isDigit) },
                         suffix = if (sugarType == "HbA1c") "%" else "mg/dL",
-                        keyboard = if (sugarType == "HbA1c") KeyboardType.Decimal else KeyboardType.Number
+                        keyboard = if (sugarType == "HbA1c") KeyboardType.Decimal else KeyboardType.Number,
+                        onVoiceInput = sugarVoice,
                     )
                 }
                 1 -> CheckInStep(
@@ -191,9 +201,18 @@ fun DailyCheckInScreen(state: NirogState) {
                     title = "Blood pressure",
                     helper = "Enter both numbers, or skip."
                 ) {
+                    val bpVoice = com.nirogbhumi.app.ui.components.rememberVoiceInputLauncher(
+                        prompt = "Say both numbers, e.g. \"120 over 80\"",
+                        onResult = { heard ->
+                            val parsed = com.nirogbhumi.app.ui.components.parseSpokenTwoNumbers(heard)
+                            if (parsed != null) { systolic = parsed.first.toString(); diastolic = parsed.second.toString() }
+                            else error = "Didn't catch both numbers - try \"120 over 80\", or type them in."
+                        },
+                        onUnavailable = { error = "Voice entry isn't available on this device." },
+                    )
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         Box(Modifier.weight(1f)) { BigInput(systolic, { systolic = it.filter(Char::isDigit) }, "SYS", KeyboardType.Number) }
-                        Box(Modifier.weight(1f)) { BigInput(diastolic, { diastolic = it.filter(Char::isDigit) }, "DIA", KeyboardType.Number) }
+                        Box(Modifier.weight(1f)) { BigInput(diastolic, { diastolic = it.filter(Char::isDigit) }, "DIA", KeyboardType.Number, onVoiceInput = bpVoice) }
                     }
                 }
                 2 -> CheckInStep(
@@ -202,7 +221,15 @@ fun DailyCheckInScreen(state: NirogState) {
                     title = "Weight",
                     helper = "Optional — weekly is plenty for most people."
                 ) {
-                    BigInput(weightInput, { weightInput = it.filter { c -> c.isDigit() || c == '.' } }, "kg", KeyboardType.Decimal)
+                    val weightVoice = com.nirogbhumi.app.ui.components.rememberVoiceInputLauncher(
+                        prompt = "Say your weight in kilograms, e.g. \"72\"",
+                        onResult = { heard ->
+                            val parsed = com.nirogbhumi.app.ui.components.parseSpokenNumber(heard)
+                            if (parsed != null) weightInput = parsed else error = "Didn't catch a number - try again or type it in."
+                        },
+                        onUnavailable = { error = "Voice entry isn't available on this device." },
+                    )
+                    BigInput(weightInput, { weightInput = it.filter { c -> c.isDigit() || c == '.' } }, "kg", KeyboardType.Decimal, onVoiceInput = weightVoice)
                 }
                 3 -> CheckInStep(
                     icon = Icons.Filled.Medication,
@@ -407,7 +434,7 @@ private fun TypeChip(label: String, selected: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun BigInput(value: String, onChange: (String) -> Unit, suffix: String, keyboard: KeyboardType) {
+private fun BigInput(value: String, onChange: (String) -> Unit, suffix: String, keyboard: KeyboardType, onVoiceInput: (() -> Unit)? = null) {
     OutlinedTextField(
         value = value,
         onValueChange = onChange,
@@ -415,6 +442,13 @@ private fun BigInput(value: String, onChange: (String) -> Unit, suffix: String, 
         textStyle = LocalTextStyle.current.copy(fontSize = 28.sp, fontWeight = FontWeight.Bold, color = DeepInk),
         label = { Text(suffix) },
         suffix = { Text(suffix, fontSize = 14.sp, color = Muted) },
+        trailingIcon = onVoiceInput?.let {
+            {
+                IconButton(onClick = it) {
+                    Icon(Icons.Filled.Mic, contentDescription = "Say the value instead", tint = Muted)
+                }
+            }
+        },
         placeholder = { Text("—", fontSize = 28.sp, color = Color(0xFFC3C8C0)) },
         keyboardOptions = KeyboardOptions(keyboardType = keyboard),
         singleLine = true,
