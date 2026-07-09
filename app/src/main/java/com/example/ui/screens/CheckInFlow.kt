@@ -82,7 +82,25 @@ fun DailyCheckInScreen(state: NirogState) {
     var medicationName by remember { mutableStateOf("") }
     var medicationResult by remember { mutableStateOf<String?>(null) }
 
-    fun advance() { error = null; step++ }
+    // Real Firestore doc ids for whatever's already been saved this session -
+    // null means "not saved yet" (addHealthLog creates); non-null means a tap
+    // on "Edit" from the closing summary should correct that same document
+    // (updateHealthLog) instead of logging a duplicate reading. The raw input
+    // fields above are never cleared after saving, so jumping back to an
+    // already-completed step already shows the previously entered value with
+    // no extra re-population logic needed.
+    var sugarDocId by remember { mutableStateOf<String?>(null) }
+    var bpDocId by remember { mutableStateOf<String?>(null) }
+    var weightDocId by remember { mutableStateOf<String?>(null) }
+    var medicationDocId by remember { mutableStateOf<String?>(null) }
+    // True only while correcting a single already-completed step reached via
+    // an Edit tap on the closing summary - the next successful save should
+    // return straight to that summary instead of continuing forward through
+    // the remaining steps a second time.
+    var editingFromSummary by remember { mutableStateOf(false) }
+
+    fun advance() { error = null; step = if (editingFromSummary) { editingFromSummary = false; 4 } else step + 1 }
+    fun editStep(target: Int) { error = null; editingFromSummary = true; step = target }
 
     Column(
         modifier = Modifier.fillMaxSize().background(PaperBg)
@@ -208,7 +226,7 @@ fun DailyCheckInScreen(state: NirogState) {
                         colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Green, unfocusedBorderColor = Color(0xFFD8D0C0), focusedContainerColor = Color.White, unfocusedContainerColor = Color.White)
                     )
                 }
-                else -> CheckInDone(state, sugarResult, bpResult, weightResult, medicationResult)
+                else -> CheckInDone(state, sugarResult, bpResult, weightResult, medicationResult, onEdit = ::editStep)
             }
 
             error?.let {
@@ -230,21 +248,40 @@ fun DailyCheckInScreen(state: NirogState) {
                                     val v = sugarInput.toDoubleOrNull() ?: run { error = "Enter a valid value"; return@Button }
                                     if (v < 3.0 || v > 20.0) { error = "Enter a value between 3 and 20%"; return@Button }
                                     saving = true
-                                    state.repository.addHealthLog("glucoseReadings", mapOf("value" to v, "unit" to "%", "readingType" to "hba1c", "measuredAt" to FieldValue.serverTimestamp(), "source" to "manual")) { r ->
-                                        saving = false
-                                        if (r is CloudResult.Success) { sugarResult = "HbA1c $v%"; advance() } else error = (r as CloudResult.Failure).message
+                                    val values = mapOf("value" to v, "unit" to "%", "readingType" to "hba1c", "measuredAt" to FieldValue.serverTimestamp(), "source" to "manual")
+                                    val existing = sugarDocId
+                                    if (existing == null) {
+                                        state.repository.addHealthLog("glucoseReadings", values) { r ->
+                                            saving = false
+                                            if (r is CloudResult.Success) { sugarDocId = r.value; sugarResult = "HbA1c $v%"; advance() } else error = (r as CloudResult.Failure).message
+                                        }
+                                    } else {
+                                        state.repository.updateHealthLog("glucoseReadings", existing, values) { r ->
+                                            saving = false
+                                            if (r is CloudResult.Success) { sugarResult = "HbA1c $v%"; advance() } else error = (r as CloudResult.Failure).message
+                                        }
                                     }
                                 } else {
                                     val v = sugarInput.toIntOrNull() ?: run { error = "Enter a valid number"; return@Button }
                                     if (v < 20 || v > 800) { error = "Enter a value between 20 and 800 mg/dL"; return@Button }
                                     saving = true
-                                    state.repository.addHealthLog("glucoseReadings", mapOf("value" to v, "unit" to "mg/dL", "readingType" to if (sugarType == "Fasting") "fasting" else "post_meal", "measuredAt" to FieldValue.serverTimestamp(), "source" to "manual")) { r ->
-                                        saving = false
-                                        if (r is CloudResult.Success) {
-                                            state.fastingSugarValue = v
-                                            state.sugarLogs.add(0, SugarLog(state.sugarLogs.size + 1, v, sugarType, "Today, Just Now", if (v > 130) "High" else if (v < 80) "Low" else "Normal"))
-                                            sugarResult = "$sugarType $v mg/dL"; advance()
-                                        } else error = (r as CloudResult.Failure).message
+                                    val status = if (v > 130) "High" else if (v < 80) "Low" else "Normal"
+                                    val values = mapOf("value" to v, "unit" to "mg/dL", "readingType" to if (sugarType == "Fasting") "fasting" else "post_meal", "measuredAt" to FieldValue.serverTimestamp(), "source" to "manual")
+                                    val existing = sugarDocId
+                                    if (existing == null) {
+                                        state.fastingSugarValue = v
+                                        state.sugarLogs.add(0, SugarLog(state.sugarLogs.size + 1, v, sugarType, "Today, Just Now", status))
+                                        state.repository.addHealthLog("glucoseReadings", values) { r ->
+                                            saving = false
+                                            if (r is CloudResult.Success) { sugarDocId = r.value; sugarResult = "$sugarType $v mg/dL"; advance() } else error = (r as CloudResult.Failure).message
+                                        }
+                                    } else {
+                                        state.fastingSugarValue = v
+                                        if (state.sugarLogs.isNotEmpty()) state.sugarLogs[0] = state.sugarLogs[0].copy(value = v, type = sugarType, status = status)
+                                        state.repository.updateHealthLog("glucoseReadings", existing, values) { r ->
+                                            saving = false
+                                            if (r is CloudResult.Success) { sugarResult = "$sugarType $v mg/dL"; advance() } else error = (r as CloudResult.Failure).message
+                                        }
                                     }
                                 }
                             }
@@ -254,9 +291,18 @@ fun DailyCheckInScreen(state: NirogState) {
                                 if (sys == null || dia == null) { error = "Enter both numbers, or skip"; return@Button }
                                 if (sys < 60 || sys > 260 || dia < 30 || dia > 180) { error = "Enter a plausible BP (systolic 60-260, diastolic 30-180)"; return@Button }
                                 saving = true
-                                state.repository.addHealthLog("bpReadings", mapOf("systolic" to sys, "diastolic" to dia, "measuredAt" to FieldValue.serverTimestamp(), "source" to "manual")) { r ->
-                                    saving = false
-                                    if (r is CloudResult.Success) { state.latestBpReading = "$sys/$dia"; bpResult = "$sys/$dia mmHg"; advance() } else error = (r as CloudResult.Failure).message
+                                val values = mapOf("systolic" to sys, "diastolic" to dia, "measuredAt" to FieldValue.serverTimestamp(), "source" to "manual")
+                                val existing = bpDocId
+                                if (existing == null) {
+                                    state.repository.addHealthLog("bpReadings", values) { r ->
+                                        saving = false
+                                        if (r is CloudResult.Success) { bpDocId = r.value; state.latestBpReading = "$sys/$dia"; bpResult = "$sys/$dia mmHg"; advance() } else error = (r as CloudResult.Failure).message
+                                    }
+                                } else {
+                                    state.repository.updateHealthLog("bpReadings", existing, values) { r ->
+                                        saving = false
+                                        if (r is CloudResult.Success) { state.latestBpReading = "$sys/$dia"; bpResult = "$sys/$dia mmHg"; advance() } else error = (r as CloudResult.Failure).message
+                                    }
                                 }
                             }
                             2 -> {
@@ -264,21 +310,43 @@ fun DailyCheckInScreen(state: NirogState) {
                                 val w = weightInput.toDoubleOrNull() ?: run { error = "Enter a valid weight"; return@Button }
                                 if (w < 20.0 || w > 300.0) { error = "Enter a weight between 20 and 300 kg"; return@Button }
                                 saving = true
-                                state.repository.addHealthLog("weightLogs", mapOf("valueKg" to w, "measuredAt" to FieldValue.serverTimestamp(), "source" to "manual")) { r ->
-                                    saving = false
-                                    if (r is CloudResult.Success) { state.profileWeight = weightInput; weightResult = "$w kg"; advance() } else error = (r as CloudResult.Failure).message
+                                val values = mapOf("valueKg" to w, "measuredAt" to FieldValue.serverTimestamp(), "source" to "manual")
+                                val existing = weightDocId
+                                if (existing == null) {
+                                    state.repository.addHealthLog("weightLogs", values) { r ->
+                                        saving = false
+                                        if (r is CloudResult.Success) { weightDocId = r.value; state.profileWeight = weightInput; weightResult = "$w kg"; advance() } else error = (r as CloudResult.Failure).message
+                                    }
+                                } else {
+                                    state.repository.updateHealthLog("weightLogs", existing, values) { r ->
+                                        saving = false
+                                        if (r is CloudResult.Success) { state.profileWeight = weightInput; weightResult = "$w kg"; advance() } else error = (r as CloudResult.Failure).message
+                                    }
                                 }
                             }
                             3 -> {
                                 val taken = medicationTaken ?: run { advance(); return@Button }
                                 saving = true
                                 val name = medicationName.trim().take(80)
-                                state.repository.addHealthLog("medicationLogs", mapOf("taken" to taken, "name" to name.ifBlank { null }, "measuredAt" to FieldValue.serverTimestamp(), "source" to "manual")) { r ->
-                                    saving = false
-                                    if (r is CloudResult.Success) {
-                                        medicationResult = (if (taken) "Taken" else "Missed") + if (name.isNotBlank()) " · $name" else ""
-                                        advance()
-                                    } else error = (r as CloudResult.Failure).message
+                                val values = mapOf("taken" to taken, "name" to name.ifBlank { null }, "measuredAt" to FieldValue.serverTimestamp(), "source" to "manual")
+                                val existing = medicationDocId
+                                if (existing == null) {
+                                    state.repository.addHealthLog("medicationLogs", values) { r ->
+                                        saving = false
+                                        if (r is CloudResult.Success) {
+                                            medicationDocId = r.value
+                                            medicationResult = (if (taken) "Taken" else "Missed") + if (name.isNotBlank()) " · $name" else ""
+                                            advance()
+                                        } else error = (r as CloudResult.Failure).message
+                                    }
+                                } else {
+                                    state.repository.updateHealthLog("medicationLogs", existing, values) { r ->
+                                        saving = false
+                                        if (r is CloudResult.Success) {
+                                            medicationResult = (if (taken) "Taken" else "Missed") + if (name.isNotBlank()) " · $name" else ""
+                                            advance()
+                                        } else error = (r as CloudResult.Failure).message
+                                    }
                                 }
                             }
                         }
@@ -289,10 +357,19 @@ fun DailyCheckInScreen(state: NirogState) {
                     shape = RoundedCornerShape(27.dp)
                 ) {
                     if (saving) CircularProgressIndicator(Modifier.size(20.dp), color = Color.White, strokeWidth = 2.dp)
-                    else Text(if (step == 3) "Finish" else "Save & next", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 16.sp)
+                    else Text(
+                        if (editingFromSummary) "Save change" else if (step == 3) "Finish" else "Save & next",
+                        fontWeight = FontWeight.Bold, color = Color.White, fontSize = 16.sp,
+                    )
                 }
-                TextButton(onClick = { if (!saving) advance() }, modifier = Modifier.fillMaxWidth()) {
-                    Text(if (step == 3) "Skip & finish" else "Skip this", color = Muted, fontWeight = FontWeight.SemiBold)
+                if (!editingFromSummary) {
+                    TextButton(onClick = { if (!saving) advance() }, modifier = Modifier.fillMaxWidth()) {
+                        Text(if (step == 3) "Skip & finish" else "Skip this", color = Muted, fontWeight = FontWeight.SemiBold)
+                    }
+                } else {
+                    TextButton(onClick = { if (!saving) { editingFromSummary = false; step = 4 } }, modifier = Modifier.fillMaxWidth()) {
+                        Text("Cancel", color = Muted, fontWeight = FontWeight.SemiBold)
+                    }
                 }
             }
         }
@@ -347,12 +424,12 @@ private fun BigInput(value: String, onChange: (String) -> Unit, suffix: String, 
 }
 
 @Composable
-private fun ColumnScope.CheckInDone(state: NirogState, sugar: String?, bp: String?, weight: String?, medication: String?) {
+private fun ColumnScope.CheckInDone(state: NirogState, sugar: String?, bp: String?, weight: String?, medication: String?, onEdit: (Int) -> Unit) {
     val logged = listOfNotNull(
-        sugar?.let { "Blood sugar" to it },
-        bp?.let { "Blood pressure" to it },
-        weight?.let { "Weight" to it },
-        medication?.let { "Medication" to it }
+        sugar?.let { Triple("Blood sugar", it, 0) },
+        bp?.let { Triple("Blood pressure", it, 1) },
+        weight?.let { Triple("Weight", it, 2) },
+        medication?.let { Triple("Medication", it, 3) }
     )
     // Smart reminder timing: a genuine completion (not an empty skip-through)
     // feeds the hour into checkinHourHint, then re-aligns the on-device
@@ -415,11 +492,17 @@ private fun ColumnScope.CheckInDone(state: NirogState, sugar: String?, bp: Strin
     }
     if (logged.isNotEmpty()) {
         Spacer(Modifier.height(8.dp))
-        logged.forEach { (label, value) ->
-            Surface(Modifier.fillMaxWidth(), color = Color.White, shape = RoundedCornerShape(14.dp), border = androidx.compose.foundation.BorderStroke(0.5.dp, Color(0xFFD8D0C0))) {
-                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+        logged.forEach { (label, value, stepIndex) ->
+            Surface(
+                modifier = Modifier.fillMaxWidth().clickable { onEdit(stepIndex) },
+                color = Color.White, shape = RoundedCornerShape(14.dp),
+                border = androidx.compose.foundation.BorderStroke(0.5.dp, Color(0xFFD8D0C0)),
+            ) {
+                Row(Modifier.padding(start = 16.dp, end = 6.dp, top = 16.dp, bottom = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(label, fontSize = 14.sp, color = Muted, modifier = Modifier.weight(1f))
                     Text(value, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = DeepInk)
+                    Spacer(Modifier.width(4.dp))
+                    Icon(Icons.Filled.Edit, contentDescription = "Edit $label", tint = Muted, modifier = Modifier.size(18.dp))
                 }
             }
         }

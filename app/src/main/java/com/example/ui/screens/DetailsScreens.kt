@@ -1265,6 +1265,33 @@ fun ProfileScreen(state: NirogState) {
             }
         }
 
+        // Shown only for members who tapped "Skip" on HealthProfileSetupScreen
+        // during onboarding - healthProfileCompleted only ever becomes true
+        // through that screen's actual Continue button, never implied by the
+        // (also-legitimate) skip-time default values themselves.
+        if (!state.healthProfileCompleted) {
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp)
+                    .clickable {
+                        state.healthProfileReturnRoute = "profile"
+                        state.currentScreen = "health_profile_setup"
+                    },
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFEBF3EC)),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.MedicalInformation, contentDescription = null, tint = Color(0xFF3F7D58), modifier = Modifier.size(22.dp))
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Complete your health profile", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFF1B2219))
+                        Text("Helps us personalize your reminders and insights - takes under a minute.", fontSize = 12.sp, color = Color(0xFF526057), lineHeight = 16.sp)
+                    }
+                    Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Color(0xFF3F7D58))
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+
         Spacer(modifier = Modifier.height(8.dp))
 
         SettingsSection(title = "Account") {

@@ -490,6 +490,26 @@ fun TodayTab(state: NirogState) {
         }
     }
 
+    // "You usually log by now" - checkinHourHint is the same rolling-average
+    // hour ReminderScheduler.scheduleSmart() already schedules the push
+    // reminder around, surfaced here too as a same-session in-app nudge for
+    // anyone who has the push reminder toggled off (or just has the app open
+    // right now) rather than only ever reaching them as a notification.
+    // Re-peeked whenever a check-in completes so today's own hint update
+    // doesn't require a cold restart to take effect.
+    var checkinHourHint by remember { mutableStateOf<Int?>(null) }
+    LaunchedEffect(state.checkedInToday) {
+        state.repository.peekCheckinHourHint { result ->
+            if (result is CloudResult.Success) checkinHourHint = result.value
+        }
+    }
+    var lateNudgeDismissed by remember { mutableStateOf(false) }
+    val showLateNudge = remember(checkinHourHint, state.checkedInToday, lateNudgeDismissed) {
+        val hint = checkinHourHint
+        !state.checkedInToday && !lateNudgeDismissed && hint != null &&
+            java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY) >= hint
+    }
+
     val focusAction = remember(state.isProgramActive, state.checkedInToday, loggedReadingToday, walkLoggedToday, state.dailyRitualsCompleted.contains("Walk")) {
         com.nirogbhumi.app.health.TodayFocusEngine.pick(
             isProgramActive = state.isProgramActive,
@@ -554,6 +574,30 @@ fun TodayTab(state: NirogState) {
         }
 
         FirstWeekChecklistCard(state, checkinStreak)
+
+        if (showLateNudge) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(NirogColor.statusAttentionBg)
+                    .clickable { state.currentScreen = "daily_checkin" }
+                    .padding(start = 16.dp, end = 6.dp, top = 12.dp, bottom = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Outlined.Schedule, contentDescription = null, tint = NirogColor.statusAttention, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(10.dp))
+                Text(
+                    "You usually log by now - a quick check-in takes under a minute.",
+                    style = NirogType.secondary,
+                    color = NirogColor.inkPrimary,
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(onClick = { lateNudgeDismissed = true }, modifier = Modifier.size(28.dp)) {
+                    Icon(Icons.Filled.Close, contentDescription = "Dismiss", tint = NirogColor.inkMuted, modifier = Modifier.size(16.dp))
+                }
+            }
+        }
 
         // Highlight daily task card - driven entirely by TodayFocusEngine, so
         // this card genuinely changes with real usage instead of always

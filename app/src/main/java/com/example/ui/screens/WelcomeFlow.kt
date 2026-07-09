@@ -72,6 +72,7 @@ private fun applyProfileDocument(state: NirogState, document: com.google.firebas
     document.getString("bpStatus")?.let { state.selectedBpStatus = it }
     document.getString("onMedication")?.let { state.selectedOnMedication = it }
     document.getString("doctorSupervision")?.let { state.selectedDoctorSupervision = it }
+    document.getBoolean("healthProfileCompleted")?.let { state.healthProfileCompleted = it }
     document.getString("photoUrl")?.let { state.photoUrl = it }
     document.getBoolean("programActive")?.let { state.isProgramActive = it }
     document.getString("activeProgramId")?.let { state.activeProgramId = it }
@@ -1710,6 +1711,12 @@ fun CaregiverOptionCard(title: String, desc: String, isSelected: Boolean, onClic
 // SCREEN 8: HEALTH PROFILE METABOLIC QUESTIONS
 @Composable
 fun HealthProfileSetupScreen(state: NirogState) {
+    // Re-entered later from Profile's "Complete your health profile" nudge
+    // (healthProfileReturnRoute set) rather than mid-onboarding - every exit
+    // here (back/skip/continue) should land back on Profile instead of
+    // continuing into goal_selection, which no longer makes sense once
+    // onboarding is long finished.
+    val returnRoute = state.healthProfileReturnRoute.ifBlank { null }
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1722,17 +1729,21 @@ fun HealthProfileSetupScreen(state: NirogState) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            IconButton(onClick = { state.currentScreen = "selection_caregiver" }) {
+            IconButton(onClick = { state.currentScreen = returnRoute ?: "selection_caregiver" }) {
                 Icon(imageVector = Icons.Filled.ArrowBack, contentDescription = "Back", tint = Ink)
             }
             Text(
-                "Step 2 of 3",
+                if (returnRoute != null) "Health profile" else "Step 2 of 3",
                 fontWeight = FontWeight.Bold,
                 fontSize = 13.sp,
                 color = Ink.copy(alpha = 0.5f)
             )
-            TextButton(onClick = { state.currentScreen = "goal_selection" }) {
-                Text("Skip", color = DeepGreen, fontWeight = FontWeight.Bold)
+            if (returnRoute == null) {
+                TextButton(onClick = { state.currentScreen = "goal_selection" }) {
+                    Text("Skip", color = DeepGreen, fontWeight = FontWeight.Bold)
+                }
+            } else {
+                Spacer(modifier = Modifier.width(48.dp))
             }
         }
 
@@ -1793,16 +1804,52 @@ fun HealthProfileSetupScreen(state: NirogState) {
             Spacer(modifier = Modifier.height(32.dp))
         }
 
+        var saving by remember { mutableStateOf(false) }
         Box(modifier = Modifier.padding(16.dp)) {
             Button(
-                onClick = { state.currentScreen = "goal_selection" },
+                onClick = {
+                    state.healthProfileCompleted = true
+                    if (returnRoute == null) {
+                        // Still mid-onboarding - OnboardingCompleteScreen's
+                        // saveProfile call a few steps ahead persists these
+                        // fields together with everything else, same as before.
+                        state.currentScreen = "goal_selection"
+                    } else {
+                        // Re-entered from Profile after onboarding already
+                        // finished - there's no later save step to piggyback
+                        // on, so persist directly and only navigate back once
+                        // it actually lands.
+                        saving = true
+                        state.repository.saveProfile(mapOf(
+                            "diabetesStatus" to state.selectedDiabetesStatus,
+                            "bpStatus" to state.selectedBpStatus,
+                            "onMedication" to state.selectedOnMedication,
+                            "doctorSupervision" to state.selectedDoctorSupervision,
+                            "healthProfileCompleted" to true,
+                        )) { result ->
+                            saving = false
+                            if (result is com.nirogbhumi.app.data.CloudResult.Success) {
+                                state.currentScreen = returnRoute
+                                state.healthProfileReturnRoute = ""
+                            } else {
+                                state.healthProfileCompleted = false
+                                state.cloudMessage = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
+                            }
+                        }
+                    }
+                },
+                enabled = !saving,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(54.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = DeepGreen),
                 shape = RoundedCornerShape(27.dp)
             ) {
-                Text("Continue", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                if (saving) {
+                    CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+                } else {
+                    Text("Continue", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                }
             }
         }
     }
@@ -2211,6 +2258,19 @@ fun OnboardingCompleteScreen(state: NirogState) {
                     // updating this doc - state.isProgramActive is only ever a
                     // local mirror of that value, re-sending it here would be
                     // redundant at best.
+                    // Personalizes the very first reminder schedule instead of
+                    // leaving checkinHourHint null (which falls back to a flat
+                    // 7pm - see ReminderScheduler.scheduleSmart). Clamped to a
+                    // waking-hours window so a signup at, say, 2am doesn't seed
+                    // a 2am daily reminder - the actual signup hour is used
+                    // whenever it's already a reasonable time to be nudged,
+                    // and only off-hours signups fall back to the old flat
+                    // default. This is read the moment the member later
+                    // enables the Daily check-in reminder toggle (Notification
+                    // Settings screen already calls peekCheckinHourHint there),
+                    // so it never needs scheduling directly from here.
+                    val signupHour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+                    val seededHourHint = if (signupHour in 7..21) signupHour else 19
                     state.repository.saveProfile(mapOf(
                         "onboardingComplete" to true,
                         "trackingFor" to if (state.isTrackingForSelf) "self" else "family",
@@ -2218,7 +2278,9 @@ fun OnboardingCompleteScreen(state: NirogState) {
                         "bpStatus" to state.selectedBpStatus,
                         "onMedication" to state.selectedOnMedication,
                         "doctorSupervision" to state.selectedDoctorSupervision,
-                        "goals" to state.selectedGoals.toList()
+                        "goals" to state.selectedGoals.toList(),
+                        "healthProfileCompleted" to state.healthProfileCompleted,
+                        "checkinHourHint" to seededHourHint,
                     )) { result ->
                         isSaving = false
                         if (result is com.nirogbhumi.app.data.CloudResult.Success) state.currentScreen = "dashboard"

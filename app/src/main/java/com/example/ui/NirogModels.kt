@@ -41,6 +41,18 @@ class NirogState {
     // straight to "Privacy Policy" from a specific link instead of always
     // landing on the default "Medical Disclaimer" section.
     var legalInitialSection by mutableStateOf<String?>(null)
+    // True only once the member has actually gone through
+    // HealthProfileSetupScreen's "Continue" (not "Skip") - the four
+    // selectedDiabetesStatus/selectedBpStatus/selectedOnMedication/
+    // selectedDoctorSupervision fields can't tell this apart on their own,
+    // since their skip-time defaults ("None"/"Normal"/"No"/"Yes") are also
+    // legitimate real answers someone could deliberately choose.
+    var healthProfileCompleted by mutableStateOf(false)
+    // Where HealthProfileSetupScreen's back/Continue/Skip should land when
+    // it's re-entered later from Profile's "Complete your health profile"
+    // nudge, instead of always continuing into goal_selection - blank means
+    // "still in the original onboarding chain."
+    var healthProfileReturnRoute by mutableStateOf("")
     var currentScreen by mutableStateOf("splash") // "splash", "welcome", "value_slides", "consent", "login_mobile", "login_otp", "email_auth", "password_reset", "setup_profile", "selection_caregiver", "health_profile_setup", "goal_selection", "program_code_optional", "onboarding_complete", "dashboard", "sugar_detail", "consult_stepper", "active_journey"
     var viewMode by mutableStateOf("mobile") // "mobile", "admin", "expert"
 

@@ -918,3 +918,41 @@ by the user. Work sequentially, CI-verified per slice, small commits.
       sustained abuse - both flagged for a future round rather than
       fixed here given the added complexity of a real fix (attempt
       counters, anomaly detection) relative to this round's scope.
+27. [x] **Onboarding + daily-logging UX pass** — four of a seven-item
+    backlog (the other three - populated-preview empty states, voice-entry,
+    and a home-screen widget - are larger and tracked separately):
+    - **Skip-and-fill-later health profile**: `HealthProfileSetupScreen`
+      already had a working "Skip" button - the actual gap was no way to
+      tell "genuinely chose None/Normal/No/Yes" apart from "skipped and
+      those are just the defaults," and nothing surfaced the gap
+      afterward. New `NirogState.healthProfileCompleted` (persisted as
+      `users/{uid}.healthProfileCompleted`) is set true only via that
+      screen's real Continue button; Profile now shows a "Complete your
+      health profile" nudge card whenever it's false, re-entering the same
+      screen via a new `healthProfileReturnRoute` field so back/Continue
+      land back on Profile instead of continuing into `goal_selection`
+      (which wouldn't make sense long after onboarding).
+    - **Time-of-signup-aware reminder defaults**: `checkinHourHint` used to
+      stay null (falling back to a flat 7pm - see
+      `ReminderScheduler.scheduleSmart`) until a member's first real
+      check-in. `OnboardingCompleteScreen`'s existing `saveProfile` call
+      now seeds it from the actual signup hour, clamped to a 7am-9pm
+      window so an off-hours signup doesn't lock in a 2am daily reminder.
+      Needed no new scheduling call - Notification Settings' existing
+      "turn on Daily check-in" toggle already reads this same field.
+    - **"You usually log by now" nudge**: a dismissible banner on the
+      Today tab (reusing the same `checkinHourHint`) that appears once
+      the member's typical check-in hour has passed and they haven't
+      checked in yet today, tapping straight into Daily Check-in.
+    - **Quick-edit/undo on the last logged reading**: new
+      `HealthRepository.updateHealthLog()` (narrower allow-list than
+      `addHealthLog`, targets a real doc id, never stamps a fresh
+      `createdAt`) needed no rules change - the existing health-log
+      update rule (`ownsResource() && ownsRequest() && preservesUserId()`)
+      already covers a member correcting their own reading. Wired into
+      both the primary logging surfaces: `QuickLogFastingOverlay` now
+      shows a "Logged ✓" confirmation with Edit/Done instead of closing
+      immediately, and `CheckInDone`'s per-metric summary rows are
+      tappable, jumping back to that exact step (`editingFromSummary`)
+      and correcting the same document instead of creating a duplicate
+      one when re-saved.

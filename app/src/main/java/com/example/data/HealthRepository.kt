@@ -30,6 +30,14 @@ interface HealthRepository {
     val userId: String?
     fun saveProfile(values: Map<String, Any?>, done: (CloudResult<Unit>) -> Unit)
     fun addHealthLog(collection: String, values: Map<String, Any?>, done: (CloudResult<String>) -> Unit)
+    // Corrects a reading logged moments ago (a typo'd value, the wrong meal
+    // context) without needing a full history screen - narrower than
+    // upsertUserRecord (that one's for device-sync records keyed by a stable
+    // caller-chosen id, and stamps a fresh createdAt every call, which would
+    // wrongly reset when this reading was actually taken). This targets the
+    // real Firestore-assigned doc id addHealthLog already returned, and never
+    // touches createdAt/measuredAt unless the caller explicitly includes it.
+    fun updateHealthLog(collection: String, documentId: String, values: Map<String, Any?>, done: (CloudResult<Unit>) -> Unit)
     fun uploadPrivateFile(folder: String, uri: Uri, done: (CloudResult<String>) -> Unit)
     // orderByField/descending default to unset (Firestore's own implementation-
     // defined order) to preserve every existing call site's behavior - only
@@ -202,6 +210,22 @@ class FirebaseHealthRepository : HealthRepository {
                 done(CloudResult.Success(ref.id))
             }
             .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Log could not be saved", it)) }
+    }
+
+    override fun updateHealthLog(collection: String, documentId: String, values: Map<String, Any?>, done: (CloudResult<Unit>) -> Unit) {
+        val done = reporting("updateHealthLog:$collection", done)
+        // Deliberately narrower than addHealthLog's allow-list - only the
+        // readings a member could plausibly want to quick-correct right
+        // after logging; labReports/consultations/orders/etc go through
+        // their own dedicated edit flows, not this one.
+        val allowed = setOf("glucoseReadings", "bpReadings", "sleepLogs", "walkLogs", "weightLogs", "medicationLogs")
+        if (collection !in allowed) return done(CloudResult.Failure("Unsupported health log"))
+        if (userId == null) return done(CloudResult.Failure("Sign in is required"))
+        val ref = db?.collection(collection)?.document(documentId)
+            ?: return done(CloudResult.Failure("Firebase is not configured"))
+        ref.set(values, SetOptions.merge())
+            .addOnSuccessListener { done(CloudResult.Success(Unit)) }
+            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Could not update", it)) }
     }
 
     override fun uploadPrivateFile(folder: String, uri: Uri, done: (CloudResult<String>) -> Unit) {

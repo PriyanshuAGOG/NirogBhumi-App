@@ -12,6 +12,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -499,6 +500,15 @@ private fun UpdateLifecycleEffects(state: NirogState) {
 
 @Composable
 fun QuickLogFastingOverlay(state: NirogState) {
+    // Right after saving, stays open one more beat showing a confirmation
+    // with an Edit action instead of dismissing immediately - fixing a
+    // typo'd value previously meant finding it again in the reading
+    // history screen. savedDocId tracks the real Firestore doc id so a
+    // correction updates that same reading rather than creating a
+    // duplicate one.
+    var savedDocId by remember { mutableStateOf<String?>(null) }
+    var confirming by remember { mutableStateOf(false) }
+    var saving by remember { mutableStateOf(false) }
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -537,80 +547,119 @@ fun QuickLogFastingOverlay(state: NirogState) {
                     }
                 }
 
-                Text(
-                    text = "Slide to record the fasting value displayed on your metabolic monitor.",
-                    fontSize = 13.sp,
-                    color = Color(0xFF737972)
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.Bottom
-                ) {
-                    Text(
-                        text = "${state.quickLogFastingValue}",
-                        fontSize = 44.sp,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Black,
-                        color = Color(0xFF1B3221)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = "mg/dL",
-                        fontSize = 14.sp,
-                        color = Color(0xFF737972),
-                        modifier = Modifier.padding(bottom = 8.dp)
-                    )
-                }
-
-                Slider(
-                    value = state.quickLogFastingValue.toFloat(),
-                    onValueChange = { state.quickLogFastingValue = it.toInt() },
-                    valueRange = 50f..250f,
-                    colors = SliderDefaults.colors(
-                        thumbColor = Color(0xFF314936),
-                        activeTrackColor = Color(0xFFBFEE95)
-                    )
-                )
-
-                Button(
-                    onClick = {
-                        state.fastingSugarValue = state.quickLogFastingValue
-                        state.sugarLogs.add(
-                            0,
-                            com.nirogbhumi.app.ui.SugarLog(
-                                state.sugarLogs.size + 1,
-                                state.quickLogFastingValue,
-                                "Fasting",
-                                "Today, Just Now",
-                                if (state.quickLogFastingValue > 125) "High" else if (state.quickLogFastingValue < 80) "Low" else "Normal"
-                            )
+                if (confirming) {
+                    // Just-saved confirmation, replacing the slider - the
+                    // whole point of this state is giving a moment to catch
+                    // a typo right here instead of after closing the sheet.
+                    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(imageVector = Icons.Filled.CheckCircle, contentDescription = null, tint = Color(0xFF3F7D58))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Logged ${state.quickLogFastingValue} mg/dL",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp,
+                            color = Color(0xFF1B3221),
                         )
-                        state.repository.addHealthLog(
-                            "glucoseReadings",
-                            mapOf(
+                    }
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        OutlinedButton(
+                            onClick = { confirming = false },
+                            modifier = Modifier.weight(1f).height(48.dp),
+                            shape = RoundedCornerShape(24.dp),
+                        ) { Text("Edit", fontWeight = FontWeight.Bold) }
+                        Button(
+                            onClick = { state.isQuickLogFastingOpen = false },
+                            modifier = Modifier.weight(1f).height(48.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF314936)),
+                            shape = RoundedCornerShape(24.dp),
+                        ) { Text("Done", fontWeight = FontWeight.Bold, color = Color.White) }
+                    }
+                } else {
+                    Text(
+                        text = "Slide to record the fasting value displayed on your metabolic monitor.",
+                        fontSize = 13.sp,
+                        color = Color(0xFF737972)
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.Bottom
+                    ) {
+                        Text(
+                            text = "${state.quickLogFastingValue}",
+                            fontSize = 44.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Black,
+                            color = Color(0xFF1B3221)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "mg/dL",
+                            fontSize = 14.sp,
+                            color = Color(0xFF737972),
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+                    }
+
+                    Slider(
+                        value = state.quickLogFastingValue.toFloat(),
+                        onValueChange = { state.quickLogFastingValue = it.toInt() },
+                        valueRange = 50f..250f,
+                        colors = SliderDefaults.colors(
+                            thumbColor = Color(0xFF314936),
+                            activeTrackColor = Color(0xFFBFEE95)
+                        )
+                    )
+
+                    Button(
+                        enabled = !saving,
+                        onClick = {
+                            saving = true
+                            state.fastingSugarValue = state.quickLogFastingValue
+                            val status = if (state.quickLogFastingValue > 125) "High" else if (state.quickLogFastingValue < 80) "Low" else "Normal"
+                            val values = mapOf(
                                 "value" to state.quickLogFastingValue,
                                 "unit" to "mg/dL",
                                 "readingType" to "fasting",
                                 "measuredAt" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
                                 "source" to "manual"
                             )
-                        ) { result ->
-                            state.cloudMessage = when (result) {
-                                is com.nirogbhumi.app.data.CloudResult.Success -> "Synced securely"
-                                is com.nirogbhumi.app.data.CloudResult.Failure -> result.message
+                            fun onDone(result: com.nirogbhumi.app.data.CloudResult<*>) {
+                                saving = false
+                                if (result is com.nirogbhumi.app.data.CloudResult.Success<*>) {
+                                    state.cloudMessage = "Synced securely"
+                                    confirming = true
+                                } else if (result is com.nirogbhumi.app.data.CloudResult.Failure) {
+                                    state.cloudMessage = result.message
+                                }
                             }
+                            val existingDocId = savedDocId
+                            if (existingDocId == null) {
+                                state.sugarLogs.add(0, com.nirogbhumi.app.ui.SugarLog(state.sugarLogs.size + 1, state.quickLogFastingValue, "Fasting", "Today, Just Now", status))
+                                state.repository.addHealthLog("glucoseReadings", values) { result ->
+                                    if (result is com.nirogbhumi.app.data.CloudResult.Success) savedDocId = result.value
+                                    onDone(result)
+                                }
+                            } else {
+                                if (state.sugarLogs.isNotEmpty()) {
+                                    state.sugarLogs[0] = state.sugarLogs[0].copy(value = state.quickLogFastingValue, status = status)
+                                }
+                                state.repository.updateHealthLog("glucoseReadings", existingDocId, values, ::onDone)
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF314936)),
+                        shape = RoundedCornerShape(24.dp)
+                    ) {
+                        if (saving) {
+                            CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+                        } else {
+                            Text(text = if (savedDocId == null) "Save Fasting Sugar" else "Update Fasting Sugar", fontWeight = FontWeight.Bold, color = Color.White)
                         }
-                        state.isQuickLogFastingOpen = false
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF314936)),
-                    shape = RoundedCornerShape(24.dp)
-                ) {
-                    Text(text = "Save Fasting Sugar", fontWeight = FontWeight.Bold, color = Color.White)
+                    }
                 }
             }
         }
