@@ -49,6 +49,8 @@ import androidx.health.connect.client.PermissionController
 import com.nirogbhumi.app.health.HealthConnectManager
 import com.nirogbhumi.app.health.HealthConnectStatus
 import com.nirogbhumi.app.health.computeSleepGlucoseInsight
+import com.nirogbhumi.app.health.computeMedicationGlucoseInsight
+import com.nirogbhumi.app.health.computeMealTimingInsight
 import com.nirogbhumi.app.ui.NirogState
 import com.nirogbhumi.app.ui.canManageProgram
 import com.nirogbhumi.app.ui.SugarLog
@@ -64,7 +66,9 @@ import kotlinx.coroutines.launch
 @Composable
 fun BloodSugarDetailScreen(state: NirogState) {
     DisposableEffect(Unit) {
-        val subscription = state.repository.listenUserCollection("glucoseReadings", 30, orderByField = "measuredAt", descending = true) { result ->
+        // 180, not 30 - a 90-day trend chart needs enough history even for
+        // members logging fasting+post-meal readings most days.
+        val subscription = state.repository.listenUserCollection("glucoseReadings", 180, orderByField = "measuredAt", descending = true) { result ->
             when (result) {
                 is com.nirogbhumi.app.data.CloudResult.Success -> {
                     val synced = result.value.mapIndexedNotNull { index, doc ->
@@ -80,7 +84,7 @@ fun BloodSugarDetailScreen(state: NirogState) {
                             java.text.SimpleDateFormat("MMM d, h:mm a", java.util.Locale.getDefault()).format(it)
                         } ?: "Synced"
                         val status = if (value > 130) "High" else if (value < 80) "Low" else "Normal"
-                        SugarLog(index + 1, value, type, time, status)
+                        SugarLog(index + 1, value, type, time, status, measuredAtMillis = timestamp?.toDate()?.time ?: System.currentTimeMillis())
                     }
                     if (synced.isNotEmpty()) {
                         state.sugarLogs.clear()
@@ -162,83 +166,10 @@ fun BloodSugarDetailScreen(state: NirogState) {
                 }
             }
 
-            // Trend chart built from real logged readings
+            // Trend chart built from real logged readings - shared 7/30/90-day
+            // range chart with BP/Sleep Overview (OverviewScreens.kt).
             Text("Recent Trend", fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
-
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.3f), shape = RoundedCornerShape(20.dp)),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                shape = RoundedCornerShape(20.dp)
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    val points = state.sugarLogs.take(7).reversed()
-                    if (points.size < 2) {
-                        Text(
-                            "Log at least 2 readings to see a trend line here.",
-                            fontSize = 13.sp,
-                            color = Color(0xFF737972),
-                            modifier = Modifier.padding(vertical = 24.dp)
-                        )
-                    } else {
-                        Canvas(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(140.dp)
-                        ) {
-                            val stepX = size.width / (points.size - 1)
-                            val maxY = (points.maxOf { it.value } + 10).toFloat()
-                            val minY = (points.minOf { it.value } - 10).coerceAtLeast(0).toFloat()
-                            val heightRange = (maxY - minY).coerceAtLeast(1f)
-
-                            val safeMinY = size.height - ((100f - minY) / heightRange * size.height)
-                            val safeMaxY = size.height - ((140f - minY) / heightRange * size.height)
-
-                            drawRect(
-                                color = Color(0xFFE5F1E2).copy(alpha = 0.5f),
-                                topLeft = androidx.compose.ui.geometry.Offset(0f, safeMaxY.coerceIn(0f, size.height)),
-                                size = androidx.compose.ui.geometry.Size(size.width, (safeMinY - safeMaxY).coerceIn(0f, size.height))
-                            )
-
-                            var lastX = 0f
-                            var lastY = 0f
-                            points.forEachIndexed { i, log ->
-                                val x = i * stepX
-                                val fraction = (log.value - minY) / heightRange
-                                val y = size.height - (fraction * size.height)
-
-                                drawCircle(color = Color(0xFF1B3221), radius = 4.dp.toPx(), center = androidx.compose.ui.geometry.Offset(x, y))
-
-                                if (i > 0) {
-                                    drawLine(
-                                        color = Color(0xFF1B3221),
-                                        start = androidx.compose.ui.geometry.Offset(lastX, lastY),
-                                        end = androidx.compose.ui.geometry.Offset(x, y),
-                                        strokeWidth = 2.dp.toPx()
-                                    )
-                                }
-                                lastX = x
-                                lastY = y
-                            }
-                        }
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            points.forEachIndexed { i, log ->
-                                Text(
-                                    log.type.take(4),
-                                    fontSize = 10.sp,
-                                    fontWeight = if (i == points.size - 1) FontWeight.Bold else FontWeight.Normal,
-                                    color = if (i == points.size - 1) Color(0xFF1B3221) else Color(0xFF737972)
-                                )
-                            }
-                        }
-                    }
-                }
-            }
+            RangeTrendChart(state.sugarLogs.map { it.measuredAtMillis to it.value.toFloat() }, "sugar")
 
             // High/Normal History Rows List
             Text("Logged History", fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
@@ -790,6 +721,7 @@ fun ActiveJourneyScreen(state: NirogState) {
 fun InsightDetailScreen(state: NirogState) {
     var sleepLogs by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>>(emptyList()) }
     var glucoseReadings by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>>(emptyList()) }
+    var medicationLogs by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>>(emptyList()) }
     DisposableEffect(state.repository.userId) {
         val sleepSub = state.repository.listenUserCollection("sleepLogs", limit = 60, orderByField = "createdAt", descending = true) { result ->
             if (result is CloudResult.Success) sleepLogs = result.value
@@ -797,9 +729,14 @@ fun InsightDetailScreen(state: NirogState) {
         val glucoseSub = state.repository.listenUserCollection("glucoseReadings", limit = 60, orderByField = "measuredAt", descending = true) { result ->
             if (result is CloudResult.Success) glucoseReadings = result.value
         }
-        onDispose { sleepSub.cancel(); glucoseSub.cancel() }
+        val medicationSub = state.repository.listenUserCollection("medicationLogs", limit = 60, orderByField = "measuredAt", descending = true) { result ->
+            if (result is CloudResult.Success) medicationLogs = result.value
+        }
+        onDispose { sleepSub.cancel(); glucoseSub.cancel(); medicationSub.cancel() }
     }
     val insight = remember(sleepLogs, glucoseReadings) { computeSleepGlucoseInsight(sleepLogs, glucoseReadings) }
+    val medicationInsight = remember(medicationLogs, glucoseReadings) { computeMedicationGlucoseInsight(medicationLogs, glucoseReadings) }
+    val mealInsight = remember(glucoseReadings) { computeMealTimingInsight(glucoseReadings) }
 
     Column(
         modifier = Modifier
@@ -874,6 +811,88 @@ fun InsightDetailScreen(state: NirogState) {
                             fontSize = 13.sp,
                             color = Color(0xFF737972),
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                    }
+                }
+            }
+
+            Divider(color = Color(0xFFC3C8C0).copy(alpha = 0.3f))
+
+            Text("How medication adherence can affect fasting sugar", fontSize = 22.sp, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+            Text(
+                "Missing a dose can show up as higher fasting sugar the same day. Keep logging both medication and sugar readings on the same days to see your own comparison here.",
+                fontSize = 14.sp, color = Color(0xFF434842), lineHeight = 20.sp
+            )
+            if (medicationInsight != null) {
+                Card(
+                    modifier = Modifier.fillMaxWidth().border(width = 0.5.dp, color = Color(0xFF9CB79F).copy(alpha = 0.3f), shape = RoundedCornerShape(20.dp)),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFF4E9D3)),
+                    shape = RoundedCornerShape(20.dp)
+                ) {
+                    Column(modifier = Modifier.padding(20.dp)) {
+                        Text("YOUR OWN DATA", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFFB9832B))
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            "Fasting sugar has averaged %.0f mg/dL on days you took your medication (%d logged) vs %.0f mg/dL on days it was missed (%d logged).".format(
+                                medicationInsight.takenAvg, medicationInsight.takenDays, medicationInsight.missedAvg, medicationInsight.missedDays
+                            ),
+                            fontSize = 14.sp, color = Color(0xFF4B3B1B), lineHeight = 20.sp,
+                        )
+                    }
+                }
+            } else {
+                Card(
+                    modifier = Modifier.fillMaxWidth().border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.35f), shape = RoundedCornerShape(20.dp)),
+                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    shape = RoundedCornerShape(20.dp)
+                ) {
+                    Column(modifier = Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Filled.Insights, contentDescription = null, tint = Color(0xFF9CB79F), modifier = Modifier.size(28.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            "Not enough logged medication + sugar days yet for your personal comparison.",
+                            fontSize = 13.sp, color = Color(0xFF737972), textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                    }
+                }
+            }
+
+            Divider(color = Color(0xFFC3C8C0).copy(alpha = 0.3f))
+
+            Text("How meal timing can affect post-meal sugar", fontSize = 22.sp, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+            Text(
+                "There's no single meal that always runs higher for everyone - it depends on what and when you eat. Keep logging post-meal readings across breakfast, lunch, and dinner to see if one of yours stands out.",
+                fontSize = 14.sp, color = Color(0xFF434842), lineHeight = 20.sp
+            )
+            if (mealInsight != null) {
+                Card(
+                    modifier = Modifier.fillMaxWidth().border(width = 0.5.dp, color = Color(0xFF9CB79F).copy(alpha = 0.3f), shape = RoundedCornerShape(20.dp)),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFF4E9D3)),
+                    shape = RoundedCornerShape(20.dp)
+                ) {
+                    Column(modifier = Modifier.padding(20.dp)) {
+                        Text("YOUR OWN DATA", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFFB9832B))
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            "Your post-${mealInsight.mealLabel.lowercase()} sugar has averaged %.0f mg/dL (%d readings), higher than after your other meals (%.0f mg/dL).".format(
+                                mealInsight.mealAvg, mealInsight.mealCount, mealInsight.otherAvg
+                            ),
+                            fontSize = 14.sp, color = Color(0xFF4B3B1B), lineHeight = 20.sp,
+                        )
+                    }
+                }
+            } else {
+                Card(
+                    modifier = Modifier.fillMaxWidth().border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.35f), shape = RoundedCornerShape(20.dp)),
+                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    shape = RoundedCornerShape(20.dp)
+                ) {
+                    Column(modifier = Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Filled.Insights, contentDescription = null, tint = Color(0xFF9CB79F), modifier = Modifier.size(28.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            "Not enough post-meal readings logged across different meals yet for your personal comparison.",
+                            fontSize = 13.sp, color = Color(0xFF737972), textAlign = androidx.compose.ui.text.style.TextAlign.Center
                         )
                     }
                 }

@@ -15,7 +15,13 @@ data class SugarLog(
     val value: Int,
     val type: String, // "Fasting" or "Post-meal"
     val time: String,
-    val status: String // "High", "Normal" or "Low"
+    val status: String, // "High", "Normal" or "Low"
+    // Defaults to "now" so the existing optimistic quick-log call sites (which
+    // log the instant a reading is entered) don't need updating - only the
+    // Firestore-sync call sites pass the reading's real measuredAt, which the
+    // 7/30/90-day trend chart needs for real day-bucketing instead of relying
+    // on the pre-formatted display string in `time`.
+    val measuredAtMillis: Long = System.currentTimeMillis()
 )
 
 data class ConsultationSlot(

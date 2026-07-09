@@ -20,6 +20,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
@@ -67,27 +68,75 @@ private fun MetricSummaryCard(label: String, value: String, unit: String, sub: S
     }
 }
 
+private enum class TrendRange(val days: Int, val label: String) {
+    WEEK(7, "7D"), MONTH(30, "30D"), QUARTER(90, "90D")
+}
+
+/**
+ * Shared 7/30/90-day trend chart for the metric detail screens (BP, Sleep,
+ * Blood Sugar) - one implementation instead of three near-identical Canvas
+ * blocks. Buckets raw readings into one point per local calendar day (the
+ * latest reading that day) rather than plotting every raw reading, since a
+ * 90-day range can otherwise pack in far too many points to read; days with
+ * no reading simply produce no point; there's no real time-scale x-axis
+ * (points are spaced evenly), matching the simplification the rest of the
+ * app's hand-rolled charts (Weekly Rhythm, onboarding sparklines) already use.
+ */
 @Composable
-private fun TrendLine(points: List<Float>) {
-    if (points.size < 2) return
+fun RangeTrendChart(readings: List<Pair<Long, Float>>, unit: String) {
+    var range by remember { mutableStateOf(TrendRange.WEEK) }
+    val now = remember { System.currentTimeMillis() }
+    val bucketed = remember(readings, range) {
+        val cutoff = now - range.days.toLong() * 86_400_000L
+        readings
+            .filter { it.first >= cutoff }
+            .groupBy { com.nirogbhumi.app.ui.localDayKey(it.first) }
+            .toSortedMap()
+            .map { (_, vals) -> vals.maxBy { it.first }.second }
+    }
     Card(
         modifier = Modifier.fillMaxWidth().border(0.5.dp, Color(0xFFC3C8C0).copy(alpha = 0.3f), RoundedCornerShape(20.dp)),
         colors = CardDefaults.cardColors(containerColor = Color.White),
         shape = RoundedCornerShape(20.dp)
     ) {
         Column(Modifier.padding(16.dp)) {
-            Text("Recent trend", fontWeight = FontWeight.SemiBold, color = Ink2)
-            Spacer(Modifier.height(12.dp))
-            Canvas(Modifier.fillMaxWidth().height(120.dp)) {
-                val min = points.min(); val range = (points.max() - min).coerceAtLeast(1f)
-                repeat(4) { row -> val y = size.height * row / 3f; drawLine(Color(0xFFD8D0C0), Offset(0f, y), Offset(size.width, y), 1f) }
-                points.zipWithNext().forEachIndexed { i, pair ->
-                    val x1 = size.width * i / (points.size - 1); val x2 = size.width * (i + 1) / (points.size - 1)
-                    val y1 = size.height - ((pair.first - min) / range * size.height); val y2 = size.height - ((pair.second - min) / range * size.height)
-                    drawLine(Green2, Offset(x1, y1), Offset(x2, y2), 4f)
-                    drawCircle(Ink2, 4.dp.toPx(), Offset(x1, y1))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("Trend", fontWeight = FontWeight.SemiBold, color = Ink2)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    TrendRange.entries.forEach { r ->
+                        val selected = range == r
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(if (selected) Green2 else Color(0xFFEEE8DC))
+                                .clickable { range = r }
+                                .padding(horizontal = 10.dp, vertical = 5.dp)
+                        ) {
+                            Text(r.label, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (selected) Color.White else Muted2)
+                        }
+                    }
                 }
-                drawCircle(Ink2, 4.dp.toPx(), Offset(size.width.toFloat(), size.height - ((points.last() - min) / range * size.height)))
+            }
+            Spacer(Modifier.height(12.dp))
+            if (bucketed.size < 2) {
+                Text(
+                    "Not enough $unit readings in the last ${range.days} days to chart a trend yet.",
+                    fontSize = 13.sp, color = Muted2, modifier = Modifier.padding(vertical = 20.dp)
+                )
+            } else {
+                Canvas(Modifier.fillMaxWidth().height(120.dp)) {
+                    val min = bucketed.min(); val spread = (bucketed.max() - min).coerceAtLeast(1f)
+                    repeat(4) { row -> val y = size.height * row / 3f; drawLine(Color(0xFFD8D0C0), Offset(0f, y), Offset(size.width, y), 1f) }
+                    bucketed.zipWithNext().forEachIndexed { i, pair ->
+                        val x1 = size.width * i / (bucketed.size - 1); val x2 = size.width * (i + 1) / (bucketed.size - 1)
+                        val y1 = size.height - ((pair.first - min) / spread * size.height); val y2 = size.height - ((pair.second - min) / spread * size.height)
+                        drawLine(Green2, Offset(x1, y1), Offset(x2, y2), 4f)
+                        drawCircle(Ink2, 4.dp.toPx(), Offset(x1, y1))
+                    }
+                    drawCircle(Ink2, 4.dp.toPx(), Offset(size.width.toFloat(), size.height - ((bucketed.last() - min) / spread * size.height)))
+                }
+                Spacer(Modifier.height(6.dp))
+                Text("${bucketed.size} day(s) with a reading in the last ${range.days} days", fontSize = 11.sp, color = Muted2)
             }
         }
     }
@@ -98,7 +147,9 @@ private fun TrendLine(points: List<Float>) {
 fun BpOverviewScreen(state: NirogState) {
     var records by remember { mutableStateOf<List<CloudDocument>?>(null) }
     DisposableEffect(Unit) {
-        val sub = state.repository.listenUserCollection("bpReadings", 30, orderByField = "createdAt", descending = true) { r ->
+        // 120, not 30 - a 90-day trend chart needs enough history for members
+        // logging BP most days.
+        val sub = state.repository.listenUserCollection("bpReadings", 120, orderByField = "createdAt", descending = true) { r ->
             records = if (r is CloudResult.Success) r.value else emptyList()
             if (r is CloudResult.Success) r.value.firstOrNull()?.let { d ->
                 val s = (d.values["systolic"] as? Number)?.toInt(); val di = (d.values["diastolic"] as? Number)?.toInt()
@@ -127,8 +178,12 @@ fun BpOverviewScreen(state: NirogState) {
                         else -> "This reading is within a typical range. Measure at a consistent time for the clearest trend."
                     }
                     MetricSummaryCard("Latest reading", "$s/$d", "mmHg", status)
-                    val trend = sorted.take(10).reversed().mapNotNull { (it.values["systolic"] as? Number)?.toFloat() }
-                    TrendLine(trend)
+                    val trendReadings = sorted.mapNotNull { rec ->
+                        val time = docTime(rec.values)?.time ?: return@mapNotNull null
+                        val sv = (rec.values["systolic"] as? Number)?.toFloat() ?: return@mapNotNull null
+                        time to sv
+                    }
+                    RangeTrendChart(trendReadings, "systolic")
                     Text("History", fontWeight = FontWeight.Bold, color = Ink2)
                     sorted.take(20).forEach { rec ->
                         val sv = (rec.values["systolic"] as? Number)?.toInt() ?: 0
@@ -148,7 +203,9 @@ fun SleepOverviewScreen(state: NirogState) {
     var records by remember { mutableStateOf<List<CloudDocument>?>(null) }
     var showAdd by remember { mutableStateOf(false) }
     DisposableEffect(Unit) {
-        val sub = state.repository.listenUserCollection("sleepLogs", 30, orderByField = "createdAt", descending = true) { r -> records = if (r is CloudResult.Success) r.value else emptyList() }
+        // 120, not 30 - a 90-day trend chart needs enough history for members
+        // logging sleep most nights.
+        val sub = state.repository.listenUserCollection("sleepLogs", 120, orderByField = "createdAt", descending = true) { r -> records = if (r is CloudResult.Success) r.value else emptyList() }
         onDispose { sub.cancel() }
     }
     val sorted = (records ?: emptyList()).sortedByDescending { docTime(it.values)?.time ?: 0 }
@@ -172,8 +229,12 @@ fun SleepOverviewScreen(state: NirogState) {
                         else -> "Logged. Aim for a consistent sleep and wake time for the steadiest rhythm."
                     }
                     MetricSummaryCard("Last night", "${hrs}h ${mins}m", "", sub)
-                    val trend = sorted.take(10).reversed().mapNotNull { durationHours(it.values)?.toFloat() }
-                    TrendLine(trend)
+                    val trendReadings = sorted.mapNotNull { rec ->
+                        val time = docTime(rec.values)?.time ?: return@mapNotNull null
+                        val hv = durationHours(rec.values)?.toFloat() ?: return@mapNotNull null
+                        time to hv
+                    }
+                    RangeTrendChart(trendReadings, "sleep")
                     Text("History", fontWeight = FontWeight.Bold, color = Ink2)
                     sorted.take(20).forEach { rec ->
                         val dh = durationHours(rec.values) ?: 0.0

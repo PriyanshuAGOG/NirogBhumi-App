@@ -29,6 +29,8 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.nirogbhumi.app.data.CloudResult
 import com.nirogbhumi.app.health.computeSleepGlucoseInsight
+import com.nirogbhumi.app.health.computeMedicationGlucoseInsight
+import com.nirogbhumi.app.health.computeMealTimingInsight
 import com.nirogbhumi.app.ui.NirogState
 import com.nirogbhumi.app.ui.SugarLog
 import com.nirogbhumi.app.ui.components.SectionLabel
@@ -427,7 +429,7 @@ fun TodayTab(state: NirogState) {
                         java.text.SimpleDateFormat("MMM d, h:mm a", java.util.Locale.getDefault()).format(it)
                     } ?: "Synced"
                     val status = if (value > 130) "High" else if (value < 80) "Low" else "Normal"
-                    SugarLog(index + 1, value, type, time, status)
+                    SugarLog(index + 1, value, type, time, status, measuredAtMillis = timestamp?.toDate()?.time ?: System.currentTimeMillis())
                 }
                 if (synced.isNotEmpty()) {
                     state.sugarLogs.clear()
@@ -572,6 +574,8 @@ fun TodayTab(state: NirogState) {
                 )
             }
         }
+
+        WeeklyScoreCard(state)
 
         FirstWeekChecklistCard(state, checkinStreak)
 
@@ -1119,6 +1123,58 @@ private fun ChecklistItemRow(label: String, done: Boolean, onClick: () -> Unit) 
 }
 
 /**
+ * One-line "how you're doing" rollup for the last 7 days - a plain-language
+ * headline instead of the raw numbers the bento cards below already show.
+ * Renders nothing until at least one day this week has something logged, so
+ * a brand-new member never sees a hollow judgment about a week that hasn't
+ * happened yet.
+ */
+@Composable
+private fun WeeklyScoreCard(state: NirogState) {
+    var glucoseReadings by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>>(emptyList()) }
+    var bpReadings by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>>(emptyList()) }
+    var sleepLogs by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>>(emptyList()) }
+
+    DisposableEffect(state.repository.userId) {
+        val glucoseSub = state.repository.listenUserCollection("glucoseReadings", limit = 30, orderByField = "measuredAt", descending = true) { result ->
+            if (result is CloudResult.Success) glucoseReadings = result.value
+        }
+        val bpSub = state.repository.listenUserCollection("bpReadings", limit = 30, orderByField = "createdAt", descending = true) { result ->
+            if (result is CloudResult.Success) bpReadings = result.value
+        }
+        val sleepSub = state.repository.listenUserCollection("sleepLogs", limit = 10, orderByField = "createdAt", descending = true) { result ->
+            if (result is CloudResult.Success) sleepLogs = result.value
+        }
+        onDispose { glucoseSub.cancel(); bpSub.cancel(); sleepSub.cancel() }
+    }
+
+    val nowMillis = remember { System.currentTimeMillis() }
+    val summary = remember(glucoseReadings, bpReadings, sleepLogs) {
+        com.nirogbhumi.app.health.computeWeeklySummary(glucoseReadings, bpReadings, sleepLogs, nowMillis)
+    } ?: return
+
+    val (bg, fg) = when (summary.tone) {
+        com.nirogbhumi.app.health.WeeklyTone.POSITIVE -> NirogColor.statusInRangeBg to NirogColor.statusInRange
+        com.nirogbhumi.app.health.WeeklyTone.CAUTION -> NirogColor.statusAttentionBg to NirogColor.statusAttention
+        com.nirogbhumi.app.health.WeeklyTone.NEUTRAL -> NirogColor.statusNeutralBg to NirogColor.statusNeutral
+    }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(width = 0.5.dp, color = NirogColor.outlineVariant.copy(alpha = 0.3f), shape = RoundedCornerShape(24.dp)),
+        colors = CardDefaults.cardColors(containerColor = bg),
+        shape = RoundedCornerShape(24.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(summary.headline, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = fg)
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(summary.detail, fontSize = 12.5.sp, color = Color(0xFF4B5750), lineHeight = 17.sp)
+        }
+    }
+}
+
+/**
  * Basic trend correlation insight: cross-references the member's own
  * glucoseReadings and sleepLogs (a fasting reading against sleep logged the
  * previous night) rather than showing a generic tip. Renders nothing at all
@@ -1130,6 +1186,7 @@ private fun ChecklistItemRow(label: String, done: Boolean, onClick: () -> Unit) 
 private fun SleepGlucoseInsightCard(state: NirogState) {
     var sleepLogs by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>>(emptyList()) }
     var glucoseReadings by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>>(emptyList()) }
+    var medicationLogs by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>>(emptyList()) }
 
     DisposableEffect(state.repository.userId) {
         val sleepSub = state.repository.listenUserCollection("sleepLogs", limit = 60, orderByField = "createdAt", descending = true) { result ->
@@ -1138,10 +1195,25 @@ private fun SleepGlucoseInsightCard(state: NirogState) {
         val glucoseSub = state.repository.listenUserCollection("glucoseReadings", limit = 60, orderByField = "measuredAt", descending = true) { result ->
             if (result is CloudResult.Success) glucoseReadings = result.value
         }
-        onDispose { sleepSub.cancel(); glucoseSub.cancel() }
+        val medicationSub = state.repository.listenUserCollection("medicationLogs", limit = 60, orderByField = "measuredAt", descending = true) { result ->
+            if (result is CloudResult.Success) medicationLogs = result.value
+        }
+        onDispose { sleepSub.cancel(); glucoseSub.cancel(); medicationSub.cancel() }
     }
 
-    val insight = remember(sleepLogs, glucoseReadings) { computeSleepGlucoseInsight(sleepLogs, glucoseReadings) } ?: return
+    // Today shows at most one pattern card, not three - insight_detail is
+    // where a member sees every correlation that's actually been found.
+    // Priority order is just the order they were built in, not a ranking.
+    val sleepInsight = remember(sleepLogs, glucoseReadings) { computeSleepGlucoseInsight(sleepLogs, glucoseReadings) }
+    val medicationInsight = remember(medicationLogs, glucoseReadings) { computeMedicationGlucoseInsight(medicationLogs, glucoseReadings) }
+    val mealInsight = remember(glucoseReadings) { computeMealTimingInsight(glucoseReadings) }
+
+    val summary = when {
+        sleepInsight != null -> "Your fasting sugar has averaged %.0f mg/dL after shorter nights (under 6h) vs %.0f mg/dL after longer ones, based on your own logs.".format(sleepInsight.shortSleepAvg, sleepInsight.longSleepAvg)
+        medicationInsight != null -> "On days you took your medication, fasting sugar averaged %.0f mg/dL, vs %.0f mg/dL on days it was missed.".format(medicationInsight.takenAvg, medicationInsight.missedAvg)
+        mealInsight != null -> "Your post-${mealInsight.mealLabel.lowercase()} sugar has averaged %.0f mg/dL, higher than after your other meals (%.0f mg/dL).".format(mealInsight.mealAvg, mealInsight.otherAvg)
+        else -> return
+    }
 
     Card(
         modifier = Modifier
@@ -1161,10 +1233,7 @@ private fun SleepGlucoseInsightCard(state: NirogState) {
             Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text("A pattern in your logs", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B2219))
-                Text(
-                    "Your fasting sugar has averaged %.0f mg/dL after shorter nights (under 6h) vs %.0f mg/dL after longer ones, based on your own logs.".format(insight.shortSleepAvg, insight.longSleepAvg),
-                    fontSize = 12.sp, color = Color(0xFF4B6450), lineHeight = 17.sp,
-                )
+                Text(summary, fontSize = 12.sp, color = Color(0xFF4B6450), lineHeight = 17.sp)
             }
         }
     }

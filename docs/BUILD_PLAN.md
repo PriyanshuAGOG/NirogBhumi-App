@@ -1035,3 +1035,41 @@ by the user. Work sequentially, CI-verified per slice, small commits.
       styled identically to the existing Health File card, so all three
       secondary tabs get equal contextual surfacing rather than just
       equal bottom-nav placement.
+29. [x] **Trend graphs, deeper correlations, and a weekly rollup** — three
+    more of the insights-focused backlog (doctor-visit PDF and the
+    Care+/search items are tracked separately):
+    - **Trend graphs on metric detail screens**: new shared
+      `RangeTrendChart` (`OverviewScreens.kt`, reused from `DetailsScreens.kt`
+      too) replaces three near-identical bespoke Canvas blocks with one
+      7/30/90-day range-toggle chart. Buckets raw readings into one point
+      per local calendar day (the latest reading that day) rather than
+      plotting every raw reading, since 90 days of readings would otherwise
+      be unreadable - days with nothing logged simply produce no point,
+      matching the same evenly-spaced-points simplification the app's other
+      hand-rolled charts already use (no new charting library). Needed the
+      BP/Sleep/Sugar Firestore listeners bumped from a 30-doc cap to
+      120-180, and a new `measuredAtMillis` field on the in-memory
+      `SugarLog` (defaulted to "now" so the two optimistic quick-log call
+      sites didn't need touching - only the Firestore-sync call sites pass
+      the reading's real timestamp).
+    - **Deeper correlation insights**: extended `TrendInsights.kt` with two
+      more conservative pattern-matchers alongside the existing sleep↔sugar
+      one - `computeMedicationGlucoseInsight` (same-day medication taken/
+      missed vs. fasting sugar) and `computeMealTimingInsight` (buckets
+      post-meal readings by hour-of-day into breakfast/lunch/dinner windows,
+      since there's no explicit "which meal" field, only a timestamp).
+      Both use the same bar as the original: null unless both sides of the
+      comparison have enough data and the difference is large enough to be
+      worth surfacing, never a fabricated pattern from noise. Today's
+      pattern card now shows whichever one of the three is available (never
+      more than one, to stay minimal); `insight_detail` shows all three,
+      each with its own "not enough data yet" fallback.
+    - **One-line weekly score**: new `computeWeeklySummary` turns the last
+      7 days of glucose/BP/sleep into a plain-language headline ("A great
+      week" / "A steady week" / "A tougher week" / "Building your rhythm")
+      plus a one-line factual detail - framed around logging consistency
+      and typical-range percentages, deliberately not a clinical verdict.
+      Returns null only when nothing at all was logged that week, so a
+      brand-new member never sees a hollow judgment about a week that
+      hasn't happened. Rendered as `WeeklyScoreCard` right below the
+      streak chip on Today, above the first-week checklist.
