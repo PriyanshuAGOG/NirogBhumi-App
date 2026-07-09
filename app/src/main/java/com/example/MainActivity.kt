@@ -45,6 +45,7 @@ private const val IS_PRODUCTION_APK = true
 private val DEEP_LINK_ROUTES = setOf(
   "dashboard", "weekly_report", "consultation_detail", "active_journey",
   "order_detail", "expert_notes", "program_calendar", "announcements",
+  "daily_checkin",
 )
 private fun sanitizedRoute(raw: String?): String = raw?.takeIf { it in DEEP_LINK_ROUTES } ?: ""
 
@@ -62,7 +63,7 @@ class MainActivity : ComponentActivity() {
         .addOnFailureListener { /* not signed in as a tester yet, or no newer release - nothing to show */ }
     }
     nirogState.pendingDeepLink = sanitizedRoute(intent.getStringExtra("route"))
-    applyQuickLogWidgetAction(intent)
+    applyQuickLogWidgetAction(intent, coldStart = true)
     val tourSeen = getSharedPreferences("nirog_prefs", MODE_PRIVATE).getBoolean("onboarding_tour_seen", false)
     nirogState.shouldShowTour = !tourSeen
     enableEdgeToEdge()
@@ -277,7 +278,7 @@ class MainActivity : ComponentActivity() {
       nirogState.pendingDeepLink = it
       nirogState.currentScreen = it
     }
-    applyQuickLogWidgetAction(intent)
+    applyQuickLogWidgetAction(intent, coldStart = false)
   }
 
   // The home-screen widget's two buttons launch this same Activity with one
@@ -285,12 +286,27 @@ class MainActivity : ComponentActivity() {
   // straight to an existing quick-log entry point rather than the widget
   // trying to capture a precise health value itself with no way to review
   // or correct it before saving.
-  private fun applyQuickLogWidgetAction(intent: Intent) {
+  //
+  // Cold start must NOT jump screens directly: currentScreen is still
+  // "splash" and the auth/profile routing hasn't run, so navigating now
+  // would land on a member screen with nothing loaded (and, for a signed-
+  // out device, skip sign-in entirely). Instead the target goes through
+  // pendingDeepLink, which SplashScreen's routeAfterAuthSuccess already
+  // honors after auth completes. A warm app (onNewIntent - the widget
+  // intent carries CLEAR_TOP|SINGLE_TOP so the running instance receives
+  // it instead of the system stacking a fresh one with fresh state) is
+  // already past auth, so there it navigates immediately.
+  private fun applyQuickLogWidgetAction(intent: Intent, coldStart: Boolean) {
     when (intent.action) {
-      com.nirogbhumi.app.widget.ACTION_OPEN_QUICK_LOG_SUGAR -> nirogState.isQuickLogFastingOpen = true
+      com.nirogbhumi.app.widget.ACTION_OPEN_QUICK_LOG_SUGAR -> {
+        nirogState.isQuickLogFastingOpen = true
+        if (coldStart) nirogState.pendingDeepLink = "dashboard"
+        else nirogState.currentScreen = "dashboard"
+      }
       com.nirogbhumi.app.widget.ACTION_OPEN_QUICK_LOG_BP -> {
         nirogState.checkinStartStep = 1
-        nirogState.currentScreen = "daily_checkin"
+        if (coldStart) nirogState.pendingDeepLink = "daily_checkin"
+        else nirogState.currentScreen = "daily_checkin"
       }
     }
   }

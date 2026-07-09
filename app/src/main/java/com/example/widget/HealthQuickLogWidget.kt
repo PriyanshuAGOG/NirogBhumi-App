@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
@@ -97,59 +98,70 @@ class HealthQuickLogWidget : GlanceAppWidget() {
                     .background(ColorProvider(Paper))
                     .cornerRadius(24.dp)
                     .padding(16.dp)
+                    // The whole surface opens the app - previously only the two
+                    // small buttons were tappable and everything else was a dead
+                    // zone, which reads as "the widget is broken" the moment
+                    // someone taps the big number instead of a button. The two
+                    // buttons below keep their own more-specific actions (a
+                    // child's click wins over this parent one).
+                    .clickable(actionStartActivity(quickLogIntent(context, null)))
             ) {
                 Row(modifier = GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Box(
                         modifier = GlanceModifier
                             .background(ColorProvider(Forest))
                             .cornerRadius(8.dp)
-                            .width(22.dp)
-                            .height(22.dp),
+                            .width(24.dp)
+                            .height(24.dp),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text("N", style = TextStyle(fontWeight = FontWeight.Bold, color = ColorProvider(Color.White)))
+                        Text("N", style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Bold, color = ColorProvider(Color.White)))
                     }
                     Spacer(modifier = GlanceModifier.width(8.dp))
                     Text(
                         "Nirog Bhumi",
-                        style = TextStyle(fontWeight = FontWeight.Bold, color = ColorProvider(InkSecondary)),
+                        style = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Bold, color = ColorProvider(InkSecondary)),
                         modifier = GlanceModifier.defaultWeight(),
                     )
-                    Text("QUICK LOG", style = TextStyle(color = ColorProvider(InkMuted)))
+                    Text("QUICK LOG", style = TextStyle(fontSize = 9.sp, fontWeight = FontWeight.Medium, color = ColorProvider(InkMuted)))
                 }
-                Spacer(modifier = GlanceModifier.height(10.dp))
+                Spacer(modifier = GlanceModifier.height(12.dp))
                 HairlineDivider()
-                Spacer(modifier = GlanceModifier.height(10.dp))
+                Spacer(modifier = GlanceModifier.height(12.dp))
 
-                Text("FASTING SUGAR", style = TextStyle(fontWeight = FontWeight.Bold, color = ColorProvider(InkMuted)))
-                Spacer(modifier = GlanceModifier.height(4.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("FASTING SUGAR", style = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Bold, color = ColorProvider(InkMuted)))
+                Spacer(modifier = GlanceModifier.height(2.dp))
+                Row(verticalAlignment = Alignment.Bottom) {
                     Text(
                         if (lastValue != null) "$lastValue" else "--",
-                        style = TextStyle(fontWeight = FontWeight.Bold, color = ColorProvider(if (lastValue != null) statusColor(lastStatus) else InkPrimary)),
+                        style = TextStyle(fontSize = 34.sp, fontWeight = FontWeight.Bold, color = ColorProvider(if (lastValue != null) statusColor(lastStatus) else InkPrimary)),
                     )
-                    Spacer(modifier = GlanceModifier.width(4.dp))
-                    Text(if (lastValue != null) "mg/dL" else "no reading yet", style = TextStyle(color = ColorProvider(InkMuted)))
+                    Spacer(modifier = GlanceModifier.width(6.dp))
+                    Column {
+                        Text(
+                            if (lastValue != null) "mg/dL" else "no reading yet",
+                            style = TextStyle(fontSize = 12.sp, color = ColorProvider(InkMuted)),
+                        )
+                        Spacer(modifier = GlanceModifier.height(4.dp))
+                    }
                 }
-                Spacer(modifier = GlanceModifier.height(4.dp))
+                Spacer(modifier = GlanceModifier.height(6.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (lastValue != null && lastStatus != null) {
                         Box(
                             modifier = GlanceModifier
                                 .background(ColorProvider(statusColor(lastStatus).copy(alpha = 0.14f)))
                                 .cornerRadius(8.dp)
-                                .padding(horizontal = 8.dp, vertical = 2.dp),
+                                .padding(horizontal = 8.dp, vertical = 3.dp),
                         ) {
-                            Text(lastStatus, style = TextStyle(fontWeight = FontWeight.Bold, color = ColorProvider(statusColor(lastStatus))))
+                            Text(lastStatus, style = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Bold, color = ColorProvider(statusColor(lastStatus))))
                         }
-                        Spacer(modifier = GlanceModifier.width(6.dp))
+                        Spacer(modifier = GlanceModifier.width(8.dp))
                     }
-                    Text(relativeLabel(loggedAt), style = TextStyle(color = ColorProvider(InkMuted)))
+                    Text(relativeLabel(loggedAt), style = TextStyle(fontSize = 11.sp, color = ColorProvider(InkMuted)))
                 }
 
                 Spacer(modifier = GlanceModifier.height(14.dp))
-                HairlineDivider()
-                Spacer(modifier = GlanceModifier.height(10.dp))
 
                 Row(modifier = GlanceModifier.fillMaxWidth()) {
                     QuickLogAction(
@@ -158,7 +170,7 @@ class HealthQuickLogWidget : GlanceAppWidget() {
                         modifier = GlanceModifier.defaultWeight(),
                         onClick = actionStartActivity(quickLogIntent(context, ACTION_OPEN_QUICK_LOG_SUGAR)),
                     )
-                    Spacer(modifier = GlanceModifier.width(8.dp))
+                    Spacer(modifier = GlanceModifier.width(10.dp))
                     QuickLogAction(
                         label = "Log BP",
                         primary = false,
@@ -182,21 +194,27 @@ private fun QuickLogAction(label: String, primary: Boolean, modifier: GlanceModi
         modifier = modifier
             .background(ColorProvider(if (primary) Forest else CardWhite))
             .cornerRadius(14.dp)
-            .padding(vertical = 11.dp)
+            .padding(vertical = 12.dp)
             .clickable(onClick),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             label,
-            style = TextStyle(fontWeight = FontWeight.Bold, color = ColorProvider(if (primary) Color.White else ForestDeep)),
+            style = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Bold, color = ColorProvider(if (primary) Color.White else ForestDeep)),
         )
     }
 }
 
-private fun quickLogIntent(context: Context, action: String): Intent =
+// CLEAR_TOP + SINGLE_TOP matter as much as NEW_TASK here: without them a tap
+// while the app is already running makes the system stack a SECOND
+// MainActivity instance (launchMode is standard) with its own fresh
+// NirogState - re-splash, re-routing, and the tapped action applied to a
+// state object the user never sees settle. With them, the running instance
+// receives the tap in onNewIntent and reacts instantly.
+private fun quickLogIntent(context: Context, action: String?): Intent =
     Intent(context, MainActivity::class.java).apply {
-        this.action = action
-        flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        if (action != null) this.action = action
+        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
     }
 
 private fun relativeLabel(loggedAtMillis: Long?): String {

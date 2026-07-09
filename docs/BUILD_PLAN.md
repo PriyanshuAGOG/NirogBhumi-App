@@ -1167,3 +1167,34 @@ by the user. Work sequentially, CI-verified per slice, small commits.
     tapping a button that silently does nothing. The launcher still shows
     its own confirmation dialog either way; this can only request pinning,
     never place a widget without the user's explicit action.
+34. [x] **Widget round 3 - taps did nothing + still looked flat** (user
+    report). Four root causes found and fixed together:
+    - **Vertical clipping**: the provider XML declared `targetCellHeight=2`
+      (~120dp) but the composed content needs ~200dp - most launchers
+      clipped the bottom of the widget, cutting into (or entirely
+      swallowing) the two action buttons' hit areas. Now 3×3 cells with
+      honest min/resize bounds. Note: an already-placed widget keeps its
+      old user-set size after an app update - it needs a re-add (or a
+      long-press → resize taller) to get the full layout back.
+    - **Dead zone everywhere except the buttons**: only the two small
+      buttons were tappable; tapping the big number or header did nothing,
+      which reads as "broken" instantly. The whole widget surface now
+      opens the app (a plain `MainActivity` launch); the buttons keep
+      their more-specific actions - a child's click wins over the parent's.
+    - **Warm-tap stacking**: the launch Intent only carried `NEW_TASK`, so
+      tapping while the app was already running made the system stack a
+      second `MainActivity` instance with its own fresh `NirogState`
+      (re-splash, re-routing, action applied to a state object that then
+      gets re-initialized). Added `CLEAR_TOP|SINGLE_TOP` so the running
+      instance receives the tap in `onNewIntent` and reacts instantly.
+    - **Cold-start auth bypass**: the BP action used to set
+      `currentScreen = "daily_checkin"` directly from `onCreate`, skipping
+      splash/auth/profile routing entirely. Widget actions on cold start
+      now go through `pendingDeepLink` (with `daily_checkin` added to the
+      route allowlist), which `routeAfterAuthSuccess` already honors after
+      auth completes; only a warm app navigates immediately.
+    Visually: every Text previously rendered at the ~14sp default because
+    no `fontSize` was ever set - the whole widget was one flat text size.
+    Now a real type scale (34sp hero value, 13sp title, 9-11sp labels/
+    meta) plus tuned spacing, which is most of what "premium" reads as at
+    a glance.

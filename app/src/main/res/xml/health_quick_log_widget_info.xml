@@ -1,9 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Sizing note: the composed content (header + hero value + status pill +
+     two action buttons) needs ~200dp of height - the original 2-cell target
+     clipped the bottom of the widget on most launchers, cutting into the
+     action buttons' hit area. 3 cells tall / 3 wide is the honest minimum
+     for this layout. -->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
-    android:minWidth="180dp"
-    android:minHeight="100dp"
+    android:minWidth="200dp"
+    android:minHeight="170dp"
     android:targetCellWidth="3"
-    android:targetCellHeight="2"
+    android:targetCellHeight="3"
+    android:minResizeWidth="180dp"
+    android:minResizeHeight="150dp"
     android:updatePeriodMillis="0"
     android:initialLayout="@layout/health_widget_loading"
     android:resizeMode="horizontal|vertical"
