@@ -877,23 +877,24 @@ by the user. Work sequentially, CI-verified per slice, small commits.
         own. Scoped to `programStaff(programId)`, matching the existing
         pattern (each code doc already carries a `programId` field).
       - Added rules-tests for all four.
-    - Two further Critical findings surfaced by this round are **not**
-      fixed yet, deliberately - both reverse a previously deliberate,
-      *tested* design decision rather than closing an oversight, so they
-      need the owner's explicit call rather than a unilateral change:
-      any `coach` can currently read (a) every platform user's profile
-      doc (`users/{uid}`'s `staff()`-wide read, exploitable today via the
-      shipped Members/Dashboard/Users console pages, not just devtools)
-      and (b) any member's full health-log history (glucose/BP/sleep/
-      meds/labs) regardless of program assignment - both are explicitly
-      asserted as intentional in existing rules-tests
-      (`firestore.rules.test.mjs`'s `'lets any staff (coach or admin)
-      read - not yet program-scoped, by design'` and the `coachNotes`
-      "documented, not per-program scoped" tests). The code's own
-      comments already propose the fix (chain member uid ->
-      `activeProgramId` -> that program's `coachId`) - implementing it
-      is a straightforward rules change, but doing so silently would
-      reverse a documented product tradeoff without sign-off.
+    - Two further Critical findings surfaced by this round were put to
+      the owner rather than fixed unilaterally, since both would reverse
+      a previously deliberate, *tested* design decision rather than close
+      an oversight: any `coach` can currently read (a) every platform
+      user's profile doc (`users/{uid}`'s `staff()`-wide read, exploitable
+      today via the shipped Members/Dashboard/Users console pages, not
+      just devtools) and (b) any member's full health-log history
+      (glucose/BP/sleep/meds/labs) plus private `coachNotes`, regardless
+      of program assignment - both already explicitly asserted as
+      intentional in existing rules-tests (`firestore.rules.test.mjs`'s
+      `'lets any staff (coach or admin) read - not yet program-scoped, by
+      design'` and the `coachNotes` "documented, not per-program scoped"
+      tests). **Owner decision: leave both as-is** - confirmed intentional,
+      not a bug, presumably to keep cross-program/emergency-coverage
+      visibility simple for coaches. Not changing these. The code's own
+      comments still document the alternative (chain member uid ->
+      `activeProgramId` -> that program's `coachId`) if this is ever
+      revisited.
     - Also surfaced, not yet actioned (needs an owner decision/action,
       not a code fix from this sandbox): Firebase App Check is installed
       client-side (`NirogBhumiApplication.kt`, Play Integrity in release,
