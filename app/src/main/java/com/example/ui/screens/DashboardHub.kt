@@ -852,10 +852,10 @@ fun TodayTab(state: NirogState) {
                         modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Icon(Icons.Outlined.Insights, contentDescription = null, tint = NirogColor.forestSofter, modifier = Modifier.size(28.dp))
-                        Spacer(modifier = Modifier.height(8.dp))
+                        PreviewRhythmChart(modifier = Modifier.fillMaxWidth())
+                        Spacer(modifier = Modifier.height(10.dp))
                         Text(
-                            "Start logging today to see your weekly rhythm here",
+                            "This is what your weekly rhythm will look like - start logging today to make it real.",
                             fontSize = 12.sp,
                             color = NirogColor.outline,
                             textAlign = TextAlign.Center
@@ -953,6 +953,73 @@ fun TodayTab(state: NirogState) {
         }
 
         Spacer(modifier = Modifier.height(24.dp))
+    }
+}
+
+// Fixed, deliberately not randomized - the same shape every time a new
+// member sees it, since the point is showing "what this becomes," not
+// simulating variety. Values are a plausible fasting/post-meal week, not
+// flagged-range numbers, so a brand-new member never mistakes a shown
+// "134" or "96" for a real reading in a moment of health anxiety - the
+// EXAMPLE badge and muted (never NirogColor.forest-toned) palette are the
+// same defense-in-depth idea applied visually.
+private val SAMPLE_RHYTHM_VALUES = listOf(112, 128, 96, 134, 108, 121, 102)
+private val SAMPLE_RHYTHM_LABELS = listOf("Fast", "Post", "Fast", "Post", "Fast", "Post", "Fast")
+
+/**
+ * Illustrative preview of the real sparkline below (same bar-chart shape,
+ * same layout) so a brand-new member's Weekly Rhythm and Insights cards show
+ * what logging unlocks instead of a bare "nothing here yet" - deliberately
+ * muted/grayscale rather than the real chart's forest-green palette, plus an
+ * EXAMPLE badge, so it's never mistakable for the member's own data.
+ */
+@Composable
+private fun PreviewRhythmChart(modifier: Modifier = Modifier) {
+    Box(modifier = modifier) {
+        Column {
+            Canvas(modifier = Modifier.fillMaxWidth().height(100.dp)) {
+                val spacing = size.width / SAMPLE_RHYTHM_VALUES.size
+                val barWidth = 14.dp.toPx()
+                val maxValue = SAMPLE_RHYTHM_VALUES.max()
+                val totalHeight = size.height - 30.dp.toPx()
+                SAMPLE_RHYTHM_VALUES.forEachIndexed { index, value ->
+                    val x = index * spacing + (spacing / 2) - (barWidth / 2)
+                    val barHeight = totalHeight * (value.toFloat() / maxValue)
+                    val y = totalHeight - barHeight
+                    drawRoundRect(
+                        color = NirogColor.outlineVariant.copy(alpha = 0.25f),
+                        topLeft = androidx.compose.ui.geometry.Offset(x, 0f),
+                        size = androidx.compose.ui.geometry.Size(barWidth, totalHeight),
+                        cornerRadius = CornerRadius(4.dp.toPx(), 4.dp.toPx())
+                    )
+                    drawRoundRect(
+                        color = NirogColor.outline.copy(alpha = 0.4f),
+                        topLeft = androidx.compose.ui.geometry.Offset(x, y),
+                        size = androidx.compose.ui.geometry.Size(barWidth, barHeight),
+                        cornerRadius = CornerRadius(4.dp.toPx(), 4.dp.toPx())
+                    )
+                }
+            }
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                SAMPLE_RHYTHM_LABELS.forEach { label ->
+                    Text(label, fontSize = 10.sp, color = NirogColor.outline.copy(alpha = 0.6f), modifier = Modifier.width(36.dp), textAlign = TextAlign.Center)
+                }
+            }
+        }
+        Surface(
+            modifier = Modifier.align(Alignment.TopEnd),
+            color = NirogColor.outlineVariant.copy(alpha = 0.35f),
+            shape = RoundedCornerShape(6.dp),
+        ) {
+            Text(
+                "EXAMPLE",
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Bold,
+                color = NirogColor.outline,
+                letterSpacing = 0.6.sp,
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+            )
+        }
     }
 }
 
@@ -1553,8 +1620,8 @@ fun InsightsTab(state: NirogState) {
                     modifier = Modifier.fillMaxWidth().padding(28.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Icon(Icons.Outlined.Insights, contentDescription = null, tint = NirogColor.forestSofter, modifier = Modifier.size(36.dp))
-                    Spacer(modifier = Modifier.height(12.dp))
+                    PreviewRhythmChart(modifier = Modifier.fillMaxWidth())
+                    Spacer(modifier = Modifier.height(16.dp))
                     Text(
                         "No insights yet",
                         fontWeight = FontWeight.Bold,

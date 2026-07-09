@@ -956,3 +956,13 @@ by the user. Work sequentially, CI-verified per slice, small commits.
       tappable, jumping back to that exact step (`editingFromSummary`)
       and correcting the same document instead of creating a duplicate
       one when re-saved.
+    - **Populated-preview empty states**: new shared `PreviewRhythmChart`
+      composable (fixed, non-randomized sample values, deliberately muted/
+      grayscale rather than the real chart's forest-green palette, plus an
+      "EXAMPLE" badge overlay) replaces the plain icon+text placeholder in
+      both the Today tab's Weekly Rhythm card and the Insights tab's
+      "No insights yet" card - shows what logging unlocks instead of a
+      bare "nothing here yet," while staying visually unmistakable from a
+      member's own real readings (a real concern for a diabetes app -
+      never showing a fabricated-but-plausible-looking glucose number
+      undistinguished from a genuine one).
