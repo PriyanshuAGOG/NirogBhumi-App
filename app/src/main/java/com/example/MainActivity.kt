@@ -667,7 +667,7 @@ fun QuickLogFastingOverlay(state: NirogState) {
                                     state.cloudMessage = "Synced securely"
                                     confirming = true
                                     widgetScope.launch {
-                                        com.nirogbhumi.app.widget.updateHealthQuickLogWidget(context, state.quickLogFastingValue)
+                                        com.nirogbhumi.app.widget.updateHealthQuickLogWidget(context, state.quickLogFastingValue, status)
                                     }
                                 } else if (result is com.nirogbhumi.app.data.CloudResult.Failure) {
                                     state.cloudMessage = result.message

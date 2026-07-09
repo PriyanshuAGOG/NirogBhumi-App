@@ -326,7 +326,7 @@ fun DailyCheckInScreen(state: NirogState) {
                                             saving = false
                                             if (r is CloudResult.Success) {
                                                 sugarDocId = r.value; sugarResult = "$sugarType $v mg/dL"; advance()
-                                                widgetScope.launch { com.nirogbhumi.app.widget.updateHealthQuickLogWidget(context, v) }
+                                                widgetScope.launch { com.nirogbhumi.app.widget.updateHealthQuickLogWidget(context, v, status) }
                                             } else error = (r as CloudResult.Failure).message
                                         }
                                     } else {
@@ -336,7 +336,7 @@ fun DailyCheckInScreen(state: NirogState) {
                                             saving = false
                                             if (r is CloudResult.Success) {
                                                 sugarResult = "$sugarType $v mg/dL"; advance()
-                                                widgetScope.launch { com.nirogbhumi.app.widget.updateHealthQuickLogWidget(context, v) }
+                                                widgetScope.launch { com.nirogbhumi.app.widget.updateHealthQuickLogWidget(context, v, status) }
                                             } else error = (r as CloudResult.Failure).message
                                         }
                                     }

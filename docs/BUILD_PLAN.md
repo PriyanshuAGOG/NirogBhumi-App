@@ -1139,3 +1139,30 @@ by the user. Work sequentially, CI-verified per slice, small commits.
     real timestamp instead of just however many docs the old, smaller
     limit happened to return - a latent inaccuracy that would have gotten
     worse, not better, if left in place after the limit bump.
+33. [x] **Widget redesign + in-app "add widget" flow** (user follow-up after
+    seeing the first version of the home-screen widget): the original
+    widget worked but looked plain. Redesigned `HealthQuickLogWidget` with
+    a branded header row, a status-color-coded value (reusing the exact
+    High/Normal/Low palette `SugarLogHistoryRow` already uses in-app, so a
+    reading looks the same in the widget as it does inside the app), a
+    status pill badge, hairline dividers, and a primary/secondary button
+    pair instead of two identical green buttons. Layout responds to the
+    widget's actual placed size via `LocalSize.current` - a narrow 2-cell
+    placement collapses the branding row and stacks the two actions
+    instead of a cramped two-column row. `updateHealthQuickLogWidget` now
+    also takes the already-computed status string from each caller
+    (`QuickLogFastingOverlay`, `CheckInFlow`'s sugar step) rather than
+    recomputing thresholds a third way inside the widget module.
+
+    Widget discovery was previously "know to long-press your home screen
+    and find it in the widget picker" - added `requestPinQuickLogWidget`
+    (`AppWidgetManager.requestPinAppWidget`, API 26+) so the app can ask
+    the launcher to offer pinning it directly, surfaced two places: a
+    dismissible card on `OnboardingCompleteScreen` (the last screen before
+    a new member reaches the dashboard) and a permanent "Add home screen
+    widget" row in Profile's Account settings for anyone who dismissed it
+    or wants to add it again later. `isPinWidgetSupported` gates both -
+    older/unsupported launchers just don't see the offer rather than
+    tapping a button that silently does nothing. The launcher still shows
+    its own confirmation dialog either way; this can only request pinning,
+    never place a widget without the user's explicit action.

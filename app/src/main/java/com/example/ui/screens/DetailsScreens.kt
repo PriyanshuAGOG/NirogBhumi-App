@@ -1317,6 +1317,12 @@ fun ProfileScreen(state: NirogState) {
             SettingsRow(Icons.Filled.Person, "Personal details") { state.currentScreen = "profile_edit" }
             SettingsRow(Icons.Filled.FamilyRestroom, "Family profiles") { state.currentScreen = "family_profiles" }
             SettingsRow(Icons.Filled.Devices, "Devices & sync") { state.currentScreen = "device_hub" }
+            if (com.nirogbhumi.app.widget.isPinWidgetSupported(context)) {
+                SettingsRow(Icons.Filled.Widgets, "Add home screen widget", showDivider = false) {
+                    val sent = com.nirogbhumi.app.widget.requestPinQuickLogWidget(context)
+                    state.cloudMessage = if (sent) "Check your home screen to place the widget." else "Couldn't start the widget request - try long-pressing your home screen instead."
+                }
+            }
         }
 
         SettingsSection(title = "Activity") {

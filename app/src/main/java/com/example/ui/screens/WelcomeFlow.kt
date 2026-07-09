@@ -2197,6 +2197,15 @@ fun ProgramCodeOptionalScreen(state: NirogState) {
 @Composable
 fun OnboardingCompleteScreen(state: NirogState) {
     var isSaving by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    // Widget adoption is otherwise entirely undiscoverable unless a member
+    // already knows to long-press their home screen - offering it here,
+    // right before they land in the app for the first time, means they at
+    // least know it exists even if they dismiss it. requestPinAppWidget
+    // still shows the launcher's own confirmation; this can't silently
+    // place anything.
+    var showWidgetOffer by remember { mutableStateOf(com.nirogbhumi.app.widget.isPinWidgetSupported(context)) }
+    var widgetRequestSent by remember { mutableStateOf(false) }
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -2260,6 +2269,41 @@ fun OnboardingCompleteScreen(state: NirogState) {
                                 .align(Alignment.CenterHorizontally)
                         ) {
                             Text("Active Lifestyle Program Enabled", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+
+            if (showWidgetOffer) {
+                Spacer(modifier = Modifier.height(16.dp))
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFEBF3EC)),
+                    border = BorderStroke(1.dp, DeepGreen.copy(alpha = 0.2f)),
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.fillMaxWidth(0.9f)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text(
+                            "One-tap logging from your home screen",
+                            fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Ink,
+                        )
+                        Text(
+                            "Add the Quick Log widget now so you can log sugar or BP without opening the app.",
+                            fontSize = 12.5.sp, color = Ink.copy(alpha = 0.65f), lineHeight = 17.sp,
+                        )
+                        if (widgetRequestSent) {
+                            Text("Check your home screen to place it.", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = DeepGreen)
+                        } else {
+                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Button(
+                                    onClick = { widgetRequestSent = com.nirogbhumi.app.widget.requestPinQuickLogWidget(context) },
+                                    colors = ButtonDefaults.buttonColors(containerColor = DeepGreen),
+                                    shape = RoundedCornerShape(20.dp),
+                                ) { Text("Add widget", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp) }
+                                TextButton(onClick = { showWidgetOffer = false }) {
+                                    Text("Maybe later", color = Ink.copy(alpha = 0.6f), fontSize = 13.sp)
+                                }
+                            }
                         }
                     }
                 }
