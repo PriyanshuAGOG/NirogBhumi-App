@@ -1121,3 +1121,21 @@ by the user. Work sequentially, CI-verified per slice, small commits.
       the master doc and see "Seen by N of M" inline - a coach previewing
       their own broadcast is explicitly excluded from inflating their own
       seen count.
+32. [x] **Doctor-visit-ready PDF summary**: `HealthFileScreen` already had a
+    real, working PDF generator (`buildAndSaveHealthFilePdf`, no external
+    libs) with a Share action - but it was a single current-snapshot
+    ("latest reading") summary, not an actual weekly/monthly report.
+    Added a "Doctor-visit report" card with a Weekly/Monthly toggle and a
+    new `computeHealthFilePeriodReport` (days logged, sugar avg + %-in-
+    range, BP reading count + how many ran high, weight change start-to-
+    end) scoped to the selected period, rendered both on-screen and as a
+    new section in the generated PDF - distinct from the raw JSON data
+    export already reachable from Privacy & Consent (`requestDataExport`),
+    which is a machine-readable full account dump for GDPR-style requests,
+    not something meant to be handed to a doctor. Bumped the screen's
+    Firestore fetch limits (30/10/5 → 90/60/30) so a 30-day report has
+    enough history to actually cover the period, and while doing that also
+    fixed the existing "Vitals summary (last 30 days)" card to filter by
+    real timestamp instead of just however many docs the old, smaller
+    limit happened to return - a latent inaccuracy that would have gotten
+    worse, not better, if left in place after the limit bump.

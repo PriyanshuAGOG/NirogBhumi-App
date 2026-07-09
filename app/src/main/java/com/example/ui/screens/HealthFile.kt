@@ -6,6 +6,7 @@ import android.graphics.Paint
 import android.graphics.pdf.PdfDocument
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -81,21 +82,42 @@ fun HealthFileScreen(state: NirogState) {
   var shareLink by remember { mutableStateOf<String?>(null) }
   var linkExpiresInDays by remember { mutableStateOf<Int?>(null) }
   var linkError by remember { mutableStateOf<String?>(null) }
+  // Doctor-visit-ready weekly/monthly report - distinct from the raw JSON
+  // data export (Privacy & Consent's "export my data" request) in that this
+  // is a short, human-readable period summary meant to be printed or handed
+  // over, not a machine-readable data dump.
+  var reportPeriodDays by remember { mutableStateOf(7) }
 
   DisposableEffect(Unit) {
     val subs = listOf(
-      state.repository.listenUserCollection("glucoseReadings", 30, orderByField = "measuredAt", descending = true) { r -> if (r is CloudResult.Success) recentSugar = r.value.map { it.values } },
-      state.repository.listenUserCollection("bpReadings", 10, orderByField = "createdAt", descending = true) { r -> if (r is CloudResult.Success) recentBp = r.value.map { it.values } },
-      state.repository.listenUserCollection("weightLogs", 5, orderByField = "createdAt", descending = true) { r -> if (r is CloudResult.Success) recentWeight = r.value.map { it.values } },
+      // 60/60/30, not 30/10/5 - a 30-day report needs enough history in
+      // each collection to actually cover the period, not just the
+      // snapshot-style "last 30 sugar / last 10 BP" the page above shows.
+      state.repository.listenUserCollection("glucoseReadings", 90, orderByField = "measuredAt", descending = true) { r -> if (r is CloudResult.Success) recentSugar = r.value.map { it.values } },
+      state.repository.listenUserCollection("bpReadings", 60, orderByField = "createdAt", descending = true) { r -> if (r is CloudResult.Success) recentBp = r.value.map { it.values } },
+      state.repository.listenUserCollection("weightLogs", 30, orderByField = "createdAt", descending = true) { r -> if (r is CloudResult.Success) recentWeight = r.value.map { it.values } },
       state.repository.listenUserCollection("labReports", 10, orderByField = "createdAt", descending = true) { r -> if (r is CloudResult.Success) labReports = r.value.map { it.values } },
     )
     onDispose { subs.forEach { it.cancel() } }
   }
 
-  val sugarValues = recentSugar.mapNotNull { (it["value"] as? Number)?.toDouble() }.takeIf { it.isNotEmpty() }
+  fun docMillis(values: Map<String, Any?>): Long? =
+    ((values["measuredAt"] as? Timestamp) ?: (values["createdAt"] as? Timestamp))?.toDate()?.time
+
+  // Fetch limits above were bumped from 30/10/5 to cover a real 30-day
+  // window - filtering by actual timestamp here (rather than just "however
+  // many docs got fetched") keeps this card's "(last 30 days)" label
+  // honest for anyone logging more than once a day.
+  val cutoff30d = remember { System.currentTimeMillis() - 30L * 86_400_000L }
+  val sugarValues = recentSugar.filter { (docMillis(it) ?: 0L) >= cutoff30d }
+    .mapNotNull { (it["value"] as? Number)?.toDouble() }.takeIf { it.isNotEmpty() }
   val sugarAvg30d = sugarValues?.let { it.sum() / it.size }
   val latestBp = recentBp.firstOrNull()
   val latestWeight = recentWeight.firstOrNull()
+
+  val periodReport = remember(recentSugar, recentBp, recentWeight, reportPeriodDays) {
+    computeHealthFilePeriodReport(recentSugar, recentBp, recentWeight, reportPeriodDays, ::docMillis)
+  }
 
   Column(Modifier.fillMaxSize().background(NirogColor.surface)) {
     Row(
@@ -163,6 +185,30 @@ fun HealthFileScreen(state: NirogState) {
         }
       }
 
+      Spacer(Modifier.size(NirogSpace.lg))
+      NirogCard {
+        SectionLabel("Doctor-visit report")
+        Spacer(Modifier.size(NirogSpace.sm))
+        Text(
+          "A short, printable summary for your ${if (reportPeriodDays == 7) "week" else "month"} - separate from the raw data export in Privacy settings.",
+          style = NirogType.caption, color = NirogColor.inkMuted,
+        )
+        Spacer(Modifier.size(NirogSpace.sm))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+          ReportPeriodChip("Weekly", reportPeriodDays == 7) { reportPeriodDays = 7 }
+          ReportPeriodChip("Monthly", reportPeriodDays == 30) { reportPeriodDays = 30 }
+        }
+        Spacer(Modifier.size(NirogSpace.sm))
+        if (periodReport.loggedDays == 0) {
+          Text("Nothing logged in this period yet.", style = NirogType.body, color = NirogColor.inkMuted)
+        } else {
+          VitalRow("Days logged", "${periodReport.loggedDays} of $reportPeriodDays")
+          periodReport.sugarSummary?.let { VitalRow("Sugar", it) }
+          periodReport.bpSummary?.let { VitalRow("Blood pressure", it) }
+          periodReport.weightSummary?.let { VitalRow("Weight change", it) }
+        }
+      }
+
       Spacer(Modifier.size(NirogSpace.xl))
       if (shareError != null) {
         Box(
@@ -202,6 +248,13 @@ fun HealthFileScreen(state: NirogState) {
         bpLine = latestBp?.let { "Latest blood pressure: ${it["systolic"]}/${it["diastolic"]} mmHg" } ?: "Blood pressure: not logged yet",
         weightLine = latestWeight?.let { "Latest weight: ${(it["valueKg"] as? Number)}kg" } ?: "Weight: not logged yet",
         labLines = labReports.map { (it["reportType"] as? String ?: "Lab report") },
+        periodLabel = if (reportPeriodDays == 7) "Weekly report (last 7 days)" else "Monthly report (last 30 days)",
+        periodLines = listOfNotNull(
+          "Days logged: ${periodReport.loggedDays} of $reportPeriodDays",
+          periodReport.sugarSummary?.let { "Sugar: $it" },
+          periodReport.bpSummary?.let { "Blood pressure: $it" },
+          periodReport.weightSummary?.let { "Weight change: $it" },
+        ).ifEmpty { listOf("Nothing logged in this period yet.") },
       )
 
       if (generating) {
@@ -364,6 +417,78 @@ private fun VitalRow(label: String, value: String) {
   }
 }
 
+@Composable
+private fun ReportPeriodChip(label: String, selected: Boolean, onClick: () -> Unit) {
+  Box(
+    Modifier
+      .clip(RoundedCornerShape(50))
+      .background(if (selected) NirogColor.forest else NirogColor.surfaceSunken)
+      .clickable(onClick = onClick)
+      .padding(horizontal = 16.dp, vertical = 8.dp),
+  ) {
+    Text(label, style = NirogType.caption, color = if (selected) NirogColor.onAccent else NirogColor.inkSecondary)
+  }
+}
+
+private data class HealthFilePeriodReport(
+  val loggedDays: Int,
+  val sugarSummary: String?,
+  val bpSummary: String?,
+  val weightSummary: String?,
+)
+
+/**
+ * Doctor-visit report data: a short, human-readable summary of the last N
+ * days, distinct from the raw JSON data export (that's a machine-readable
+ * dump of everything, gated behind Privacy & Consent's account-level export
+ * request - this is meant to be printed or read at a glance). Returns a
+ * loggedDays of 0 (and null summaries) rather than fabricating a "quiet
+ * period" narrative when there's genuinely nothing to report.
+ */
+private fun computeHealthFilePeriodReport(
+  sugar: List<Map<String, Any?>>,
+  bp: List<Map<String, Any?>>,
+  weight: List<Map<String, Any?>>,
+  periodDays: Int,
+  docMillis: (Map<String, Any?>) -> Long?,
+): HealthFilePeriodReport {
+  val cutoff = System.currentTimeMillis() - periodDays.toLong() * 86_400_000L
+  val periodSugar = sugar.filter { (docMillis(it) ?: 0L) >= cutoff && it["readingType"] != "hba1c" }
+  val periodBp = bp.filter { (docMillis(it) ?: 0L) >= cutoff }
+  val periodWeight = weight.filter { (docMillis(it) ?: 0L) >= cutoff }.sortedBy { docMillis(it) ?: 0L }
+
+  val loggedDays = (periodSugar.mapNotNull(docMillis) + periodBp.mapNotNull(docMillis) + periodWeight.mapNotNull(docMillis))
+    .map { it / 86_400_000L }
+    .toSet()
+    .size
+
+  val sugarValues = periodSugar.mapNotNull { (it["value"] as? Number)?.toDouble() }
+  val sugarSummary = if (sugarValues.isEmpty()) null else {
+    val normalPercent = sugarValues.count { it in 80.0..130.0 } * 100 / sugarValues.size
+    "avg %.0f mg/dL across %d reading(s), %d%% in typical range".format(sugarValues.average(), sugarValues.size, normalPercent)
+  }
+
+  val bpFlagged = periodBp.count { doc ->
+    val s = (doc["systolic"] as? Number)?.toInt() ?: 0
+    val d = (doc["diastolic"] as? Number)?.toInt() ?: 0
+    s >= 140 || d >= 90
+  }
+  val bpSummary = if (periodBp.isEmpty()) null else
+    "${periodBp.size} reading(s)" + if (bpFlagged > 0) ", $bpFlagged on the higher side" else ""
+
+  val weightSummary = if (periodWeight.size < 2) null else {
+    val first = (periodWeight.first()["valueKg"] as? Number)?.toDouble()
+    val last = (periodWeight.last()["valueKg"] as? Number)?.toDouble()
+    if (first == null || last == null) null else {
+      val delta = last - first
+      val sign = if (delta > 0) "+" else ""
+      "%.1fkg to %.1fkg (%s%.1fkg)".format(first, last, sign, delta)
+    }
+  }
+
+  return HealthFilePeriodReport(loggedDays, sugarSummary, bpSummary, weightSummary)
+}
+
 /** Builds a simple, real PDF (no external libs) from the member's own data and returns a shareable content Uri. */
 private fun buildAndSaveHealthFilePdf(
   context: android.content.Context,
@@ -374,6 +499,8 @@ private fun buildAndSaveHealthFilePdf(
   bpLine: String,
   weightLine: String,
   labLines: List<String>,
+  periodLabel: String,
+  periodLines: List<String>,
 ): Result<android.net.Uri> {
   return runCatching {
     val document = PdfDocument()
@@ -397,6 +524,10 @@ private fun buildAndSaveHealthFilePdf(
     canvas.drawText(sugarLine, 40f, y, bodyPaint); y += 16f
     canvas.drawText(bpLine, 40f, y, bodyPaint); y += 16f
     canvas.drawText(weightLine, 40f, y, bodyPaint); y += 30f
+
+    canvas.drawText(periodLabel, 40f, y, headingPaint); y += 18f
+    periodLines.forEach { canvas.drawText(it, 40f, y, bodyPaint); y += 16f }
+    y += 14f
 
     canvas.drawText("Lab reports", 40f, y, headingPaint); y += 18f
     if (labLines.isEmpty()) {
