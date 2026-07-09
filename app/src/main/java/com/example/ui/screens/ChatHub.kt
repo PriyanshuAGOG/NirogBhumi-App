@@ -16,6 +16,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.Forum
+import androidx.compose.material.icons.filled.SupportAgent
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -151,6 +152,15 @@ fun ChatHubScreen(state: NirogState) {
         subtitle = "Chat with everyone in your batch",
         unread = unreadGeneral,
         onClick = { state.currentScreen = "program_chat" },
+      )
+      Spacer(Modifier.size(NirogSpace.md))
+      RoomRow(
+        icon = Icons.Filled.SupportAgent,
+        tint = NirogColor.forest,
+        tintBg = NirogColor.surfaceSunken,
+        title = "Ask your coach",
+        subtitle = "Private questions · only your coach sees these",
+        onClick = { state.currentScreen = "coach_inbox" },
       )
 
       Spacer(Modifier.size(NirogSpace.lg))

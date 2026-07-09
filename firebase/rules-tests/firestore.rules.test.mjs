@@ -133,6 +133,62 @@ describe('programMembers self-update (unread badge read markers)', () => {
   });
 });
 
+describe('coachInboxMessages (private ask-your-coach threads)', () => {
+  beforeEach(async () => {
+    await seed(async (db) => {
+      await setDoc(doc(db, 'programs/progA'), { name: 'Program A', coachId: 'coach-a' });
+      await setDoc(doc(db, 'users/mem1'), { userId: 'mem1', activeProgramId: 'progA', programActive: true });
+      await setDoc(doc(db, 'users/mem2'), { userId: 'mem2', activeProgramId: 'progA', programActive: true });
+      await setDoc(doc(db, 'coachInboxMessages/q1'), {
+        programId: 'progA', memberUid: 'mem1', fromUid: 'mem1',
+        senderName: 'Member One', senderRole: 'member', text: 'Is walking after dinner okay?',
+        createdAt: serverTimestamp(),
+      });
+    });
+  });
+
+  it('lets a member post a question to their own thread', async () => {
+    await assertSucceeds(setDoc(doc(member('mem1'), 'coachInboxMessages/q2'), {
+      programId: 'progA', memberUid: 'mem1', fromUid: 'mem1',
+      senderName: 'Member One', senderRole: 'member', text: 'Another question',
+      createdAt: serverTimestamp(),
+    }));
+  });
+
+  it("denies a member posting into another member's thread", async () => {
+    await assertFails(setDoc(doc(member('mem2'), 'coachInboxMessages/q3'), {
+      programId: 'progA', memberUid: 'mem1', fromUid: 'mem2',
+      senderName: 'Member Two', senderRole: 'member', text: 'Snooping in',
+      createdAt: serverTimestamp(),
+    }));
+  });
+
+  it('lets a member read their own thread', async () => {
+    await assertSucceeds(getDoc(doc(member('mem1'), 'coachInboxMessages/q1')));
+  });
+
+  it("denies a batchmate reading another member's thread", async () => {
+    await assertFails(getDoc(doc(member('mem2'), 'coachInboxMessages/q1')));
+  });
+
+  it("lets the program's coach read and reply to a member thread", async () => {
+    await assertSucceeds(getDoc(doc(coach('coach-a'), 'coachInboxMessages/q1')));
+    await assertSucceeds(setDoc(doc(coach('coach-a'), 'coachInboxMessages/r1'), {
+      programId: 'progA', memberUid: 'mem1', fromUid: 'coach-a',
+      senderName: 'Coach A', senderRole: 'coach', text: 'Yes, 15 minutes is great.',
+      createdAt: serverTimestamp(),
+    }));
+  });
+
+  it("denies an unassigned coach reading another program's threads", async () => {
+    await assertFails(getDoc(doc(coach('coach-b'), 'coachInboxMessages/q1')));
+  });
+
+  it('denies editing a sent message (immutable thread)', async () => {
+    await assertFails(updateDoc(doc(member('mem1'), 'coachInboxMessages/q1'), { text: 'edited' }));
+  });
+});
+
 describe('programChatMessages reactions-only update', () => {
   beforeEach(async () => {
     await seed(async (db) => {

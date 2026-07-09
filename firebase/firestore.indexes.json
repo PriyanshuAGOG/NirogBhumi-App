@@ -23,7 +23,9 @@
     { "collectionGroup": "coachNotes", "queryScope": "COLLECTION", "fields": [{"fieldPath":"targetUid","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}] },
     { "collectionGroup": "dataExportRequests", "queryScope": "COLLECTION", "fields": [{"fieldPath":"userId","order":"ASCENDING"},{"fieldPath":"createdAt","order":"ASCENDING"}] },
     { "collectionGroup": "deletionRequests", "queryScope": "COLLECTION", "fields": [{"fieldPath":"userId","order":"ASCENDING"},{"fieldPath":"createdAt","order":"ASCENDING"}] },
-    { "collectionGroup": "medicationLogs", "queryScope": "COLLECTION", "fields": [{"fieldPath":"userId","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}] }
+    { "collectionGroup": "medicationLogs", "queryScope": "COLLECTION", "fields": [{"fieldPath":"userId","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}] },
+    { "collectionGroup": "coachInboxMessages", "queryScope": "COLLECTION", "fields": [{"fieldPath":"programId","order":"ASCENDING"},{"fieldPath":"memberUid","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}] },
+    { "collectionGroup": "coachInboxMessages", "queryScope": "COLLECTION", "fields": [{"fieldPath":"programId","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}] }
   ],
   "fieldOverrides": []
 }

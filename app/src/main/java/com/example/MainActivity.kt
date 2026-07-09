@@ -381,6 +381,7 @@ fun ActiveScreenContent(state: NirogState) {
       "announcements" -> AnnouncementsScreen(state)
       "program_chat" -> ProgramChatScreen(state)
       "chat_hub" -> ChatHubScreen(state)
+      "coach_inbox" -> CoachInboxScreen(state)
 
       // Metrics Detailed screens
       "sugar_detail" -> BloodSugarDetailScreen(state)

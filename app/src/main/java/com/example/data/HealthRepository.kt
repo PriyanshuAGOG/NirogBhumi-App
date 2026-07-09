@@ -116,6 +116,17 @@ interface HealthRepository {
     // pinned=false clears pinnedBy/pinnedAt too, so an old pin can't linger with stale attribution.
     fun togglePinMessage(messageId: String, programId: String, pinned: Boolean, done: (CloudResult<Unit>) -> Unit)
 
+    // Async "ask your coach" inbox - one private two-way thread per member per
+    // program (coachInboxMessages), distinct from the live group chat. A member
+    // passes their own uid as memberUid; staff pass the member they're replying
+    // to. Rules keep each thread invisible to every other member.
+    fun listenCoachInboxThread(programId: String, memberUid: String, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription
+    // Coach-side thread list: recent messages across every thread in one
+    // program, grouped by memberUid client-side. Members can't use this -
+    // rules deny them reading anything beyond their own thread.
+    fun listenCoachInboxForProgram(programId: String, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription
+    fun sendCoachInboxMessage(programId: String, memberUid: String, text: String, senderName: String, senderRole: String, done: (CloudResult<Unit>) -> Unit)
+
     // Batch Pulse: today's PII-free "N of M checked in" + collective walking
     // minutes for the caller's program. Written only by Cloud Functions.
     fun listenBatchPulse(programId: String, update: (CloudResult<CloudDocument?>) -> Unit): CloudSubscription
@@ -557,6 +568,54 @@ class FirebaseHealthRepository : HealthRepository {
         database.collection("programChatMessages").document(messageId).update(values)
             .addOnSuccessListener { done(CloudResult.Success(Unit)) }
             .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Could not update pin", it)) }
+    }
+
+    override fun listenCoachInboxThread(programId: String, memberUid: String, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription {
+        val update = reporting("listenCoachInboxThread", update)
+        val database = db ?: run { update(CloudResult.Failure("Firebase is not configured")); return CloudSubscription {} }
+        val registration = database.collection("coachInboxMessages")
+            .whereEqualTo("programId", programId)
+            .whereEqualTo("memberUid", memberUid)
+            .orderBy("createdAt", com.google.firebase.firestore.Query.Direction.DESCENDING)
+            .limit(100)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) update(CloudResult.Failure(error.message ?: "Could not load your questions", error))
+                else update(CloudResult.Success(snapshot?.documents.orEmpty().map { CloudDocument(it.id, it.data.orEmpty()) }))
+            }
+        return CloudSubscription { registration.remove() }
+    }
+
+    override fun listenCoachInboxForProgram(programId: String, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription {
+        val update = reporting("listenCoachInboxForProgram", update)
+        val database = db ?: run { update(CloudResult.Failure("Firebase is not configured")); return CloudSubscription {} }
+        val registration = database.collection("coachInboxMessages")
+            .whereEqualTo("programId", programId)
+            .orderBy("createdAt", com.google.firebase.firestore.Query.Direction.DESCENDING)
+            .limit(200)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) update(CloudResult.Failure(error.message ?: "Could not load the inbox", error))
+                else update(CloudResult.Success(snapshot?.documents.orEmpty().map { CloudDocument(it.id, it.data.orEmpty()) }))
+            }
+        return CloudSubscription { registration.remove() }
+    }
+
+    override fun sendCoachInboxMessage(programId: String, memberUid: String, text: String, senderName: String, senderRole: String, done: (CloudResult<Unit>) -> Unit) {
+        val done = reporting("sendCoachInboxMessage", done)
+        val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
+        val database = db ?: return done(CloudResult.Failure("Firebase is not configured"))
+        if (text.isBlank()) return done(CloudResult.Failure("Message cannot be empty"))
+        database.collection("coachInboxMessages").add(
+            mapOf(
+                "programId" to programId,
+                "memberUid" to memberUid,
+                "fromUid" to uid,
+                "senderName" to senderName,
+                "senderRole" to senderRole,
+                "text" to text.trim().take(2000),
+                "createdAt" to FieldValue.serverTimestamp(),
+            )
+        ).addOnSuccessListener { done(CloudResult.Success(Unit)) }
+            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Question could not be sent", it)) }
     }
 
     override fun reportChatMessage(messageId: String, programId: String, reportedText: String, reportedUserId: String, done: (CloudResult<Unit>) -> Unit) {

@@ -1198,3 +1198,28 @@ by the user. Work sequentially, CI-verified per slice, small commits.
     Now a real type scale (34sp hero value, 13sp title, 9-11sp labels/
     meta) plus tuned spacing, which is most of what "premium" reads as at
     a glance.
+35. [x] **Async "ask your coach" inbox** (`coachInboxMessages`): a private
+    two-way thread per (program, member) pair for non-urgent questions -
+    deliberately separate from the live group chat (where a personal
+    question sits in front of the whole batch) and from consultations
+    (scheduled sessions). Deliberately NOT built on the dormant
+    `coachMessages` collection: its rule shape is one-directional
+    coach→member notes with no member create path, and repurposing it
+    would have meant loosening an existing rule instead of adding a
+    purpose-built one. Schema: `programId`, `memberUid` (whose thread),
+    `fromUid` (who wrote it), `senderName`, `senderRole` ("member"/
+    "coach"), `text`, `createdAt`. Rules: a member reads/writes only
+    their own thread (`memberUid == auth.uid` + `ownProgram()`), program
+    staff read/reply to any thread in their own program only
+    (`programStaff()`), and messages are immutable once sent - 7 new
+    rules tests cover the full matrix including the
+    batchmate-reading-another-thread and unassigned-coach cases. Two new
+    composite indexes (programId+memberUid+createdAt for a thread,
+    programId+createdAt for the staff list). Android:
+    `CoachInboxScreen` (new `CoachInbox.kt`) renders as the member's own
+    thread, or - for `canManageProgram` staff - as a thread list grouped
+    client-side from the same collection (thread title comes from the
+    member's own messages, never a staff reply's name), reached via a
+    third "Ask your coach" room in Chat Hub. Repository functions follow
+    the existing `listenProgramChat`/`sendProgramChatMessage`
+    CloudResult-callback conventions.

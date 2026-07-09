@@ -274,6 +274,25 @@ service cloud.firestore {
       allow create: if programStaff(request.resource.data.programId) && request.resource.data.fromUid == request.auth.uid;
       allow update, delete: if programStaff(resource.data.programId);
     }
+    // Async "ask your coach" inbox - a private two-way thread per (program,
+    // member) pair, separate from the group programChatMessages and from the
+    // one-directional coachMessages notes above. memberUid is whose thread a
+    // message belongs to; fromUid is who actually wrote it (the member, or
+    // that program's staff replying). A member only ever sees their own
+    // thread - never another member's questions - while program staff see
+    // every thread in their own program only. Immutable once sent (no edit/
+    // delete), matching the audit posture of the group chat.
+    match /coachInboxMessages/{id} {
+      allow read: if programStaff(resource.data.programId)
+        || (signedIn() && resource.data.memberUid == request.auth.uid);
+      allow create: if signedIn()
+        && request.resource.data.fromUid == request.auth.uid
+        && (
+          (request.resource.data.memberUid == request.auth.uid && ownProgram(request.resource.data.programId))
+          || programStaff(request.resource.data.programId)
+        );
+      allow update, delete: if false;
+    }
     // Coach-only case notes on a member, for consultation prep. Members never
     // see these - staff-only end to end. Deliberately not scoped to
     // programStaff() like the collections above: that would need chaining
