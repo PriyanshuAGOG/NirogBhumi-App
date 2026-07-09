@@ -1146,13 +1146,14 @@ by the user. Work sequentially, CI-verified per slice, small commits.
     High/Normal/Low palette `SugarLogHistoryRow` already uses in-app, so a
     reading looks the same in the widget as it does inside the app), a
     status pill badge, hairline dividers, and a primary/secondary button
-    pair instead of two identical green buttons. Layout responds to the
-    widget's actual placed size via `LocalSize.current` - a narrow 2-cell
-    placement collapses the branding row and stacks the two actions
-    instead of a cramped two-column row. `updateHealthQuickLogWidget` now
-    also takes the already-computed status string from each caller
+    pair instead of two identical green buttons. `updateHealthQuickLogWidget`
+    now also takes the already-computed status string from each caller
     (`QuickLogFastingOverlay`, `CheckInFlow`'s sugar step) rather than
-    recomputing thresholds a third way inside the widget module.
+    recomputing thresholds a third way inside the widget module. (A
+    `LocalSize`-based responsive layout for narrow placements was attempted
+    but reverted after CI caught an unresolved import for this Glance
+    version - not worth a second guess for a nice-to-have; the fixed
+    layout still looks right at the widget's minimum declared size.)
 
     Widget discovery was previously "know to long-press your home screen
     and find it in the widget picker" - added `requestPinQuickLogWidget`

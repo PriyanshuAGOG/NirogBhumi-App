@@ -16,7 +16,6 @@ import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
-import androidx.glance.appwidget.LocalSize
 import androidx.glance.appwidget.action.actionStartActivity
 import androidx.glance.appwidget.cornerRadius
 import androidx.glance.appwidget.provideContent
@@ -81,10 +80,6 @@ private fun statusColor(status: String?): Color = when (status) {
  * entry points, instead of pretending a home-screen tile could safely
  * capture a precise health value itself with no numeric keypad and no way
  * to see or correct a fat-fingered tap before it's saved.
- *
- * Layout responds to the widget's actual placed size (LocalSize.current):
- * a narrow 2-cell placement collapses the branding row and stacks the two
- * actions instead of trying to cram a two-column row into too little width.
  */
 class HealthQuickLogWidget : GlanceAppWidget() {
     override val stateDefinition = PreferencesGlanceStateDefinition
@@ -95,39 +90,36 @@ class HealthQuickLogWidget : GlanceAppWidget() {
             val lastValue = prefs[LAST_VALUE_KEY]
             val lastStatus = prefs[LAST_STATUS_KEY]
             val loggedAt = prefs[LAST_LOGGED_AT_KEY]
-            val compact = LocalSize.current.width < 180.dp
 
             Column(
                 modifier = GlanceModifier
                     .fillMaxSize()
                     .background(ColorProvider(Paper))
                     .cornerRadius(24.dp)
-                    .padding(if (compact) 12.dp else 16.dp)
+                    .padding(16.dp)
             ) {
-                if (!compact) {
-                    Row(modifier = GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = GlanceModifier
-                                .background(ColorProvider(Forest))
-                                .cornerRadius(8.dp)
-                                .width(22.dp)
-                                .height(22.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text("N", style = TextStyle(fontWeight = FontWeight.Bold, color = ColorProvider(Color.White)))
-                        }
-                        Spacer(modifier = GlanceModifier.width(8.dp))
-                        Text(
-                            "Nirog Bhumi",
-                            style = TextStyle(fontWeight = FontWeight.Bold, color = ColorProvider(InkSecondary)),
-                            modifier = GlanceModifier.defaultWeight(),
-                        )
-                        Text("QUICK LOG", style = TextStyle(color = ColorProvider(InkMuted)))
+                Row(modifier = GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = GlanceModifier
+                            .background(ColorProvider(Forest))
+                            .cornerRadius(8.dp)
+                            .width(22.dp)
+                            .height(22.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text("N", style = TextStyle(fontWeight = FontWeight.Bold, color = ColorProvider(Color.White)))
                     }
-                    Spacer(modifier = GlanceModifier.height(10.dp))
-                    HairlineDivider()
-                    Spacer(modifier = GlanceModifier.height(10.dp))
+                    Spacer(modifier = GlanceModifier.width(8.dp))
+                    Text(
+                        "Nirog Bhumi",
+                        style = TextStyle(fontWeight = FontWeight.Bold, color = ColorProvider(InkSecondary)),
+                        modifier = GlanceModifier.defaultWeight(),
+                    )
+                    Text("QUICK LOG", style = TextStyle(color = ColorProvider(InkMuted)))
                 }
+                Spacer(modifier = GlanceModifier.height(10.dp))
+                HairlineDivider()
+                Spacer(modifier = GlanceModifier.height(10.dp))
 
                 Text("FASTING SUGAR", style = TextStyle(fontWeight = FontWeight.Bold, color = ColorProvider(InkMuted)))
                 Spacer(modifier = GlanceModifier.height(4.dp))
@@ -155,29 +147,24 @@ class HealthQuickLogWidget : GlanceAppWidget() {
                     Text(relativeLabel(loggedAt), style = TextStyle(color = ColorProvider(InkMuted)))
                 }
 
-                Spacer(modifier = GlanceModifier.height(if (compact) 8.dp else 14.dp))
+                Spacer(modifier = GlanceModifier.height(14.dp))
                 HairlineDivider()
                 Spacer(modifier = GlanceModifier.height(10.dp))
 
-                val actions = @androidx.compose.runtime.Composable {
+                Row(modifier = GlanceModifier.fillMaxWidth()) {
                     QuickLogAction(
                         label = "Log sugar",
                         primary = true,
                         modifier = GlanceModifier.defaultWeight(),
                         onClick = actionStartActivity(quickLogIntent(context, ACTION_OPEN_QUICK_LOG_SUGAR)),
                     )
-                    Spacer(modifier = if (compact) GlanceModifier.height(8.dp) else GlanceModifier.width(8.dp))
+                    Spacer(modifier = GlanceModifier.width(8.dp))
                     QuickLogAction(
                         label = "Log BP",
                         primary = false,
                         modifier = GlanceModifier.defaultWeight(),
                         onClick = actionStartActivity(quickLogIntent(context, ACTION_OPEN_QUICK_LOG_BP)),
                     )
-                }
-                if (compact) {
-                    Column(modifier = GlanceModifier.fillMaxWidth()) { actions() }
-                } else {
-                    Row(modifier = GlanceModifier.fillMaxWidth()) { actions() }
                 }
             }
         }
