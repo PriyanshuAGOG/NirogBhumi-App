@@ -192,7 +192,16 @@ service cloud.firestore {
     }
     match /expertAssignments/{id} { allow read: if admin() || (expert() && resource.data.expertId == request.auth.uid); allow write: if admin(); }
     match /{collection}/{id} {
-      allow create: if collection in ['dataExportRequests','deletionRequests'] && validCreate();
+      // Client-side create used to only check validCreate() (ownership +
+      // server timestamp) - no awareness of requestDataExport's 60-minute
+      // cooldown or any limit at all on requestAccountDeletion, so a script
+      // could skip both callables entirely and write either collection
+      // directly, unthrottled (each dataExportRequests doc alone triggers
+      // ~19 collection reads + a permanent Storage file write). Both
+      // callables already write via the Admin SDK, which always bypasses
+      // this rule regardless - so denying client creates outright costs
+      // the legitimate flow nothing and closes the direct-write bypass.
+      allow create: if false;
       allow read: if collection in ['dataExportRequests','deletionRequests'] && (ownsResource() || admin());
       allow update: if admin();
     }
@@ -206,10 +215,13 @@ service cloud.firestore {
     // user) - the caller can only ever report on their own behalf (never
     // forge another uid's report) and can never read reports back, so this
     // can't be abused as a side-channel to enumerate other users' errors.
-    // Staff triage and mark resolved from the admin console.
+    // The console's Error Reports page is admin-only in its route gating
+    // (App.tsx Protected adminOnly) - the rule matches that here instead of
+    // the broader staff(), so a coach can't bypass the UI and read/resolve
+    // platform-wide crash telemetry directly via the Firestore SDK.
     match /errorReports/{id} {
       allow create: if validCreate() && request.resource.data.resolved == false;
-      allow read, update: if staff();
+      allow read, update: if admin();
     }
     // Care+ program calendar. Members read events for the program they're
     // enrolled in; only admin or that program's assigned coach create/edit.
@@ -243,9 +255,15 @@ service cloud.firestore {
       allow read: if programStaff(resource.data.programId) || ownProgram(resource.data.programId);
       allow write: if false;
     }
-    // Program access codes - sensitive, staff-managed only.
+    // Program access codes - sensitive, and scoped like programs/
+    // programEvents above: admin always passes, a coach only for the
+    // program(s) they're actually assigned to (matches the programId field
+    // every code doc already carries) - a plain staff() here let any coach
+    // read or rewrite any other coach's program's join code, not just
+    // their own.
     match /programCodes/{id} {
-      allow read, write: if staff();
+      allow read, update, delete: if programStaff(resource.data.programId);
+      allow create: if programStaff(request.resource.data.programId);
     }
     // Private coach-to-member notes. The recipient may read their own; only
     // admin or that program's assigned coach can send.

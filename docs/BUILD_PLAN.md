@@ -850,3 +850,70 @@ by the user. Work sequentially, CI-verified per slice, small commits.
       web access couldn't verify the real current SHA to pin against, and
       guessing one wrong would break every future deploy outright, which
       is worse than the tag-pin status quo.
+    - Round 3 (end-to-end flow/abuse audit, not just single-file rule
+      review): fixed four real gaps, all zero-risk to the legitimate flow
+      since the callables they protect already write via the Admin SDK
+      (which bypasses rules regardless):
+      - `dataExportRequests`/`deletionRequests`: client `create` was only
+        gated by `validCreate()` (ownership + timestamp), with zero
+        awareness of `requestDataExport`'s 60-minute cooldown - a script
+        could skip the callable and write either collection directly,
+        unthrottled (each `dataExportRequests` doc alone triggers ~19
+        collection reads plus a permanent Storage file write via
+        `exportUserData`). Now `allow create: if false` on both - forces
+        every request through the callable. `requestAccountDeletion` had
+        *no* cooldown of its own even inside the callable (unlike its
+        sibling); given the matching cooldown now.
+      - `errorReports`: rule was `staff()` (any coach), but the console's
+        Error Reports page is labeled and route-gated admin-only
+        (`Protected adminOnly`) - a coach could bypass that UI gate and
+        read/resolve platform-wide crash telemetry directly via the
+        Firestore SDK. Tightened to `admin()` to match the page's actual
+        intent.
+      - `programCodes`: rule was `staff()` with no `programId` scoping,
+        unlike every sibling program-scoped collection (`programs`,
+        `programEvents`, `programMembers`) - any coach could read or
+        rewrite *any other coach's* program join code, not just their
+        own. Scoped to `programStaff(programId)`, matching the existing
+        pattern (each code doc already carries a `programId` field).
+      - Added rules-tests for all four.
+    - Two further Critical findings surfaced by this round are **not**
+      fixed yet, deliberately - both reverse a previously deliberate,
+      *tested* design decision rather than closing an oversight, so they
+      need the owner's explicit call rather than a unilateral change:
+      any `coach` can currently read (a) every platform user's profile
+      doc (`users/{uid}`'s `staff()`-wide read, exploitable today via the
+      shipped Members/Dashboard/Users console pages, not just devtools)
+      and (b) any member's full health-log history (glucose/BP/sleep/
+      meds/labs) regardless of program assignment - both are explicitly
+      asserted as intentional in existing rules-tests
+      (`firestore.rules.test.mjs`'s `'lets any staff (coach or admin)
+      read - not yet program-scoped, by design'` and the `coachNotes`
+      "documented, not per-program scoped" tests). The code's own
+      comments already propose the fix (chain member uid ->
+      `activeProgramId` -> that program's `coachId`) - implementing it
+      is a straightforward rules change, but doing so silently would
+      reverse a documented product tradeoff without sign-off.
+    - Also surfaced, not yet actioned (needs an owner decision/action,
+      not a code fix from this sandbox): Firebase App Check is installed
+      client-side (`NirogBhumiApplication.kt`, Play Integrity in release,
+      Debug provider in debug) but never enforced on any of the 17
+      callables or in `firestore.rules`/`storage.rules` - meaning any
+      script holding a valid Firebase Auth ID token from a disposable
+      account reaches the backend exactly as the real app would. This is
+      the single highest-leverage remaining fix, but flipping
+      `enforceAppCheck: true` on blind would break every existing tester's
+      app instantly unless their device's debug token is first registered
+      in Firebase Console's App Check allow-list (the debug provider's
+      own code comment already documents this exact prerequisite) - an
+      owner action, not something to guess at from here. Lower-priority,
+      same audit: `redeemProgramCode` has no attempt cooldown/lockout
+      (cost is trivial per attempt; real risk scales with program-code
+      entropy, not independently verifiable from this repo), and the
+      `sendPendingNotifications` 100-doc/15-minute shared queue can be
+      indirectly flooded by submitting fake critical-range glucose/BP
+      readings (each unconditionally queues a `critical_alert`), which
+      could measurably delay genuine critical alerts platform-wide under
+      sustained abuse - both flagged for a future round rather than
+      fixed here given the added complexity of a real fix (attempt
+      counters, anomaly detection) relative to this round's scope.

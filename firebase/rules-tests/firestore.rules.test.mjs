@@ -477,6 +477,71 @@ describe('users/{uid}/announcements fan-out copy (own-only, never client-writabl
   });
 });
 
+describe('dataExportRequests/deletionRequests (callable-only, never client-writable)', () => {
+  it('denies a member creating a dataExportRequests doc directly (must go through requestDataExport)', async () => {
+    await assertFails(setDoc(doc(member('mem1'), 'dataExportRequests/req1'), {
+      userId: 'mem1', status: 'requested', createdAt: serverTimestamp(),
+    }));
+  });
+
+  it('denies a member creating a deletionRequests doc directly (must go through requestAccountDeletion)', async () => {
+    await assertFails(setDoc(doc(member('mem1'), 'deletionRequests/req1'), {
+      userId: 'mem1', status: 'requested', createdAt: serverTimestamp(),
+    }));
+  });
+
+  it('still lets the owner read their own request once it exists', async () => {
+    await seed(async (db) => {
+      await setDoc(doc(db, 'dataExportRequests/req1'), { userId: 'mem1', status: 'requested' });
+    });
+    await assertSucceeds(getDoc(doc(member('mem1'), 'dataExportRequests/req1')));
+  });
+});
+
+describe('errorReports (admin-only, matching the console route gating)', () => {
+  beforeEach(async () => {
+    await seed(async (db) => {
+      await setDoc(doc(db, 'errorReports/err1'), { userId: 'mem1', message: 'boom', resolved: false });
+    });
+  });
+
+  it('denies a coach reading error telemetry', async () => {
+    await assertFails(getDoc(doc(coach('coach-a'), 'errorReports/err1')));
+  });
+
+  it('lets an admin read error telemetry', async () => {
+    await assertSucceeds(getDoc(doc(admin(), 'errorReports/err1')));
+  });
+});
+
+describe('programCodes (per-program staff scoping)', () => {
+  beforeEach(async () => {
+    await seed(async (db) => {
+      await setDoc(doc(db, 'programs/progA'), { name: 'Program A', coachId: 'coach-a' });
+      await setDoc(doc(db, 'programs/progB'), { name: 'Program B', coachId: 'coach-b' });
+      await setDoc(doc(db, 'programCodes/CODEA'), { code: 'CODEA', programId: 'progA', active: true });
+    });
+  });
+
+  it('lets the assigned coach read their own program code', async () => {
+    await assertSucceeds(getDoc(doc(coach('coach-a'), 'programCodes/CODEA')));
+  });
+
+  it('denies a different coach reading that code', async () => {
+    await assertFails(getDoc(doc(coach('coach-b'), 'programCodes/CODEA')));
+  });
+
+  it('denies a different coach creating a code for a program they do not own', async () => {
+    await assertFails(setDoc(doc(coach('coach-b'), 'programCodes/CODEB'), {
+      code: 'CODEB', programId: 'progA', active: true,
+    }));
+  });
+
+  it('lets admin read any program code', async () => {
+    await assertSucceeds(getDoc(doc(admin(), 'programCodes/CODEA')));
+  });
+});
+
 // Sanity check that the suite itself is wired up, independent of rules content.
 describe('test harness sanity', () => {
   it('ran at least one assertion', () => assert.ok(true));

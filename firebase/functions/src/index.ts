@@ -773,7 +773,15 @@ export const requestDataExport = onCall({ region }, async request => {
   await db.collection('dataExportRequests').add({ userId: auth.uid, status: 'requested', createdAt: FieldValue.serverTimestamp() }); return { accepted: true };
 });
 export const requestAccountDeletion = onCall({ region }, async request => {
-  const auth = requireUser(request); await db.collection('deletionRequests').add({ userId: auth.uid, status: 'requested', createdAt: FieldValue.serverTimestamp() }); return { accepted: true };
+  const auth = requireUser(request);
+  // Same cooldown as requestDataExport, for the same reason - one request is
+  // plenty for the legitimate flow, and this can no longer be skipped via a
+  // direct Firestore write (see the dataExportRequests/deletionRequests
+  // create rule), but the callable itself still had no limit of its own.
+  const cooldown = Timestamp.fromMillis(Date.now() - 60 * 60000);
+  const recent = await db.collection('deletionRequests').where('userId', '==', auth.uid).where('createdAt', '>=', cooldown).limit(1).get();
+  if (!recent.empty) throw new HttpsError('resource-exhausted', 'You can request this once per hour - please try again later.');
+  await db.collection('deletionRequests').add({ userId: auth.uid, status: 'requested', createdAt: FieldValue.serverTimestamp() }); return { accepted: true };
 });
 
 export const exportUserData = onDocumentCreated({ document: 'dataExportRequests/{requestId}', region }, async event => {
