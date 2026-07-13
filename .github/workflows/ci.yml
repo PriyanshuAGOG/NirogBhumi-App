@@ -44,6 +44,42 @@ jobs:
             app/build/outputs/apk/debug/*.apk
             app/build/reports/**
 
+  android-release:
+    name: Android release build (R8/minify)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Make Gradle wrapper executable
+        run: chmod +x gradlew
+      # The signed AAB that actually ships is only ever built inside
+      # upload-google-play.yml, which needs the owner's Play + keystore
+      # secrets - so before this job existed, nothing ever exercised the
+      # RELEASE build (R8 code-shrinking, resource shrinking, ProGuard
+      # rules) on a push. A missing keep rule or an R8-stripped class would
+      # surface only at upload time, or as a crash on a user's device.
+      # The release signing + google-services plugins are both conditional,
+      # so with no secrets present this produces an UNSIGNED bundle - which
+      # is exactly what's needed to prove the shipping artifact compiles,
+      # minifies, and its release unit tests pass on every push.
+      - name: Build unsigned release bundle (verify R8 + resource shrinking)
+        run: ./gradlew --no-daemon --max-workers=2 testReleaseUnitTest bundleRelease
+      - name: Upload release bundle and reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-release-unsigned-and-reports
+          if-no-files-found: ignore
+          path: |
+            app/build/outputs/bundle/release/*.aab
+            app/build/outputs/mapping/release/mapping.txt
+            app/build/reports/**
+
   functions:
     name: Firebase Functions type-check
     runs-on: ubuntu-latest
