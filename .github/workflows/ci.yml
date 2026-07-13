@@ -67,8 +67,12 @@ jobs:
       # so with no secrets present this produces an UNSIGNED bundle - which
       # is exactly what's needed to prove the shipping artifact compiles,
       # minifies, and its release unit tests pass on every push.
+      # Unit tests live in the shared src/test source set (no release-specific
+      # test source set), so the debug job's testDebugUnitTest already covers
+      # them - this job's job is purely to exercise the release artifact:
+      # R8 code-shrinking, resource shrinking, and ProGuard.
       - name: Build unsigned release bundle (verify R8 + resource shrinking)
-        run: ./gradlew --no-daemon --max-workers=2 testReleaseUnitTest bundleRelease
+        run: ./gradlew --no-daemon --max-workers=2 bundleRelease
       - name: Upload release bundle and reports
         if: always()
         uses: actions/upload-artifact@v7
