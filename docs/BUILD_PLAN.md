@@ -1223,3 +1223,44 @@ by the user. Work sequentially, CI-verified per slice, small commits.
     third "Ask your coach" room in Chat Hub. Repository functions follow
     the existing `listenProgramChat`/`sendProgramChatMessage`
     CloudResult-callback conventions.
+36. [x] **Play-launch readiness audit** — a full QA/security/policy pass
+    across the Android app, Cloud Functions, Firestore/Storage rules and
+    the admin console, ahead of a Play Store launch. Findings and fixes:
+    - **BLOCKER (Google Play policy): in-app self-update.** The app could
+      fetch a newer APK and hand it to the package installer. Google
+      Play's Device & Network Abuse policy forbids an app distributed
+      through Play from downloading executable code and self-updating
+      outside of Play. Self-update is really the *tester* sideload channel
+      (Firebase App Distribution debug builds), so it's now compiled out
+      of the release/Play build end to end: `UpdateManager.isEnabled`
+      (= `BuildConfig.DEBUG`) is the single gate; `checkNow()` /
+      `schedulePeriodicCheck()` no-op in release; MainActivity's
+      foreground update loop + the update dialog are `BuildConfig.DEBUG`-
+      gated; both "Check for updates" rows (Settings, Developer settings)
+      are hidden in release; and `REQUEST_INSTALL_PACKAGES` moved out of
+      the main manifest into a new `app/src/debug/AndroidManifest.xml`, so
+      it's absent from the Play AAB and never has to be declared on the
+      store listing.
+    - **HIGH (health-data confidentiality): cross-program coach reads.**
+      The health-log collection-group read and `coachNotes` rules were
+      `staff()`-wide, so *any* coach could read *every* member's glucose/
+      BP/sleep/medication/lab history and case notes platform-wide, not
+      just their own batch. Added `coachAssignedToUser(uid)` (member uid →
+      that user's `activeProgramId` → that program's `coachId` ==
+      `request.auth.uid`) and scoped both to `admin() ||
+      coachAssignedToUser(...)`. Member still reads own; admin reads any;
+      the expert-assigned path is preserved. Rules unit tests extended
+      with unassigned-coach-denied cases; full suite (95 tests) green.
+    - **LOW: `markAnnouncementSeen` had no recipient check** — any
+      signed-in caller could inflate the "Seen by N" count on any
+      announcement they could name by id. Now verifies the caller is in
+      the announcement's `recipientUids` before writing the seen marker /
+      incrementing the count.
+    - **Doc fix:** the `VoiceInput` comment wrongly attributed
+      `RECORD_AUDIO` to Health Connect; it's declared for chat voice notes.
+    Owner-blocked launch items are unchanged and tracked in
+    `docs/RELEASE_CHECKLIST.md` (private upload key + Play App Signing,
+    `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` secret, Data Safety + Health apps
+    declaration, Indian privacy/health-law review + hosting the legal
+    text, clinician sign-off on the sugar/BP caution thresholds, and the
+    store listing assets).
