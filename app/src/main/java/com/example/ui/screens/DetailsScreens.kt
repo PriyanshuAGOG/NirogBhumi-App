@@ -1337,27 +1337,34 @@ fun ProfileScreen(state: NirogState) {
 
         SettingsSection(title = "Support") {
             SettingsRow(Icons.Filled.HelpOutline, "Help & support") { state.currentScreen = "support" }
-            SettingsRow(Icons.Filled.Description, "Legal & policies") { state.currentScreen = "legal_center" }
-            SettingsRow(Icons.Filled.SystemUpdate, "Check for updates", showDivider = false) {
-                if (checkingUpdate) return@SettingsRow
-                checkingUpdate = true
-                val activity = context as? android.app.Activity
-                if (activity == null) {
-                    checkingUpdate = false
-                    updateCheckMessage = "Couldn't check for updates right now."
-                    return@SettingsRow
+            // "Check for updates" is the tester (Firebase App Distribution)
+            // channel only - shown in the debug build, hidden in the Play
+            // release where Google Play itself owns updates. Keeping the row
+            // out of the Play build (rather than letting it no-op) avoids
+            // Device & Network Abuse policy risk and a dead, confusing control.
+            SettingsRow(Icons.Filled.Description, "Legal & policies", showDivider = com.nirogbhumi.app.BuildConfig.DEBUG) { state.currentScreen = "legal_center" }
+            if (com.nirogbhumi.app.BuildConfig.DEBUG) {
+                SettingsRow(Icons.Filled.SystemUpdate, "Check for updates", showDivider = false) {
+                    if (checkingUpdate) return@SettingsRow
+                    checkingUpdate = true
+                    val activity = context as? android.app.Activity
+                    if (activity == null) {
+                        checkingUpdate = false
+                        updateCheckMessage = "Couldn't check for updates right now."
+                        return@SettingsRow
+                    }
+                    com.google.firebase.appdistribution.FirebaseAppDistribution.getInstance()
+                        .updateIfNewReleaseAvailable()
+                        .addOnSuccessListener {
+                            checkingUpdate = false
+                            updateCheckMessage = "You're on the latest build available to testers."
+                        }
+                        .addOnFailureListener { error ->
+                            checkingUpdate = false
+                            updateCheckMessage = "Update check failed: ${error.message ?: "unknown error"}. " +
+                                "If this is your first check, you may need to sign in as a tester in the browser tab that just opened."
+                        }
                 }
-                com.google.firebase.appdistribution.FirebaseAppDistribution.getInstance()
-                    .updateIfNewReleaseAvailable()
-                    .addOnSuccessListener {
-                        checkingUpdate = false
-                        updateCheckMessage = "You're on the latest build available to testers."
-                    }
-                    .addOnFailureListener { error ->
-                        checkingUpdate = false
-                        updateCheckMessage = "Update check failed: ${error.message ?: "unknown error"}. " +
-                            "If this is your first check, you may need to sign in as a tester in the browser tab that just opened."
-                    }
             }
         }
 
@@ -1514,40 +1521,45 @@ fun DeveloperSettingsScreen(state: NirogState) {
             }
         }
 
-        SettingsSection(title = "Updates") {
-            DeveloperInfoRow(
-                "Last checked",
-                if (lastCheckMillis > 0) android.text.format.DateUtils.getRelativeTimeSpanString(lastCheckMillis).toString() else "Never",
-            )
-            SettingsRow(
-                Icons.Filled.Refresh,
-                if (state.updateCheckBusy) "Checking…" else "Check for updates",
-                showDivider = state.availableUpdate != null || state.updateCheckError.isNotBlank(),
-            ) {
-                if (state.updateCheckBusy) return@SettingsRow
-                coroutineScope.launch {
-                    state.updateCheckBusy = true
-                    val result = com.nirogbhumi.app.update.UpdateManager.checkNow(context, currentVersionCode)
-                    state.updateCheckBusy = false
-                    lastCheckMillis = com.nirogbhumi.app.update.UpdatePrefs.lastCheckAtMillis(context)
-                    result.onSuccess { info ->
-                        state.updateCheckError = ""
-                        if (info != null) state.availableUpdate = info
-                    }.onFailure {
-                        state.updateCheckError = it.message ?: "Couldn't check for updates"
+        // The in-app self-update section is the tester (App Distribution)
+        // channel and is compiled out of the Play/release build - Play owns
+        // updates there, and UpdateManager.checkNow no-ops in release anyway.
+        if (com.nirogbhumi.app.BuildConfig.DEBUG) {
+            SettingsSection(title = "Updates") {
+                DeveloperInfoRow(
+                    "Last checked",
+                    if (lastCheckMillis > 0) android.text.format.DateUtils.getRelativeTimeSpanString(lastCheckMillis).toString() else "Never",
+                )
+                SettingsRow(
+                    Icons.Filled.Refresh,
+                    if (state.updateCheckBusy) "Checking…" else "Check for updates",
+                    showDivider = state.availableUpdate != null || state.updateCheckError.isNotBlank(),
+                ) {
+                    if (state.updateCheckBusy) return@SettingsRow
+                    coroutineScope.launch {
+                        state.updateCheckBusy = true
+                        val result = com.nirogbhumi.app.update.UpdateManager.checkNow(context, currentVersionCode)
+                        state.updateCheckBusy = false
+                        lastCheckMillis = com.nirogbhumi.app.update.UpdatePrefs.lastCheckAtMillis(context)
+                        result.onSuccess { info ->
+                            state.updateCheckError = ""
+                            if (info != null) state.availableUpdate = info
+                        }.onFailure {
+                            state.updateCheckError = it.message ?: "Couldn't check for updates"
+                        }
                     }
                 }
-            }
-            if (state.updateCheckError.isNotBlank()) {
-                Text(
-                    state.updateCheckError,
-                    fontSize = 12.sp,
-                    color = Color(0xFF8B2E2E),
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                )
-            } else if (state.availableUpdate != null) {
-                SettingsRow(Icons.Filled.Description, "View release notes", showDivider = false) {
-                    showReleaseNotes = true
+                if (state.updateCheckError.isNotBlank()) {
+                    Text(
+                        state.updateCheckError,
+                        fontSize = 12.sp,
+                        color = Color(0xFF8B2E2E),
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    )
+                } else if (state.availableUpdate != null) {
+                    SettingsRow(Icons.Filled.Description, "View release notes", showDivider = false) {
+                        showReleaseNotes = true
+                    }
                 }
             }
         }

@@ -328,7 +328,9 @@ fun ActiveScreenContent(state: NirogState) {
       })
     }
   }
-  UpdateLifecycleEffects(state)
+  // In-app self-update only runs in the tester (debug/App Distribution) build;
+  // the Play release relies on Play for updates (Device & Network Abuse policy).
+  if (BuildConfig.DEBUG) UpdateLifecycleEffects(state)
   // Single, high-leverage inset fix: every screen dispatched below used to
   // handle (or, in ~40 of 45 cases, simply not handle) its own status-bar/
   // nav-bar/keyboard insets individually, which is why headers looked "too
@@ -414,7 +416,10 @@ fun ActiveScreenContent(state: NirogState) {
       QuickLogFastingOverlay(state)
     }
 
-    state.availableUpdate?.let { info ->
+    // availableUpdate is only ever set by UpdateManager.checkNow, which no-ops
+    // in a Play/release build - so this dialog never surfaces there. The
+    // explicit BuildConfig.DEBUG guard makes that guarantee local and obvious.
+    if (BuildConfig.DEBUG) state.availableUpdate?.let { info ->
       val currentVersionCode = remember { currentVersionCode(context) }
       com.nirogbhumi.app.ui.components.UpdateDialog(
         info = info,

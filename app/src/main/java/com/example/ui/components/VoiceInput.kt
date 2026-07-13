@@ -11,8 +11,8 @@ import androidx.compose.ui.platform.LocalContext
 /**
  * Launches the system speech-recognition UI (Google's "Speak now" popup on
  * virtually every real device) and hands back the top transcript. Needs no
- * new manifest permission beyond the RECORD_AUDIO already declared for
- * Health Connect - ACTION_RECOGNIZE_SPEECH delegates the actual microphone
+ * new manifest permission beyond the RECORD_AUDIO already declared for chat
+ * voice notes - ACTION_RECOGNIZE_SPEECH delegates the actual microphone
  * access to the recognizer app itself, not this app's process.
  *
  * Returns a single lambda to call on tap. [onUnavailable] fires only when no

@@ -5,14 +5,13 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
-    <!-- Self-update system: without this, the ACTION_VIEW install intent for
-         a sideloaded APK is silently blocked by the OS on API 26+ (this is
-         the modern per-app-source replacement for the old, device-wide
-         "Unknown sources" toggle). The user still has to grant it once via
-         Settings (canRequestPackageInstalls() gates the flow), and still
-         taps through the system installer's own confirmation - this
-         permission alone does not enable fully silent installs. -->
-    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- REQUEST_INSTALL_PACKAGES is declared ONLY in the debug source set's
+         manifest (app/src/debug/AndroidManifest.xml), not here. It's needed
+         solely by the tester self-update flow (sideloaded Firebase App
+         Distribution APKs), which is compiled out of the release/Play build;
+         Google Play's Device & Network Abuse policy forbids self-updating
+         outside of Play, and this keeps the permission out of the Play AAB
+         entirely so the listing never has to declare it. -->
     <uses-permission android:name="android.permission.health.READ_STEPS" />
     <uses-permission android:name="android.permission.health.READ_SLEEP" />
     <uses-permission android:name="android.permission.health.READ_WEIGHT" />

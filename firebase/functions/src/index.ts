@@ -512,6 +512,16 @@ export const markAnnouncementSeen = onCall({ region }, async request => {
   await db.runTransaction(async tx => {
     const [announcementSnap, markerSnap] = await Promise.all([tx.get(announcementRef), tx.get(markerRef)]);
     if (!announcementSnap.exists || markerSnap.exists) return;
+    // Only an actual recipient may mark an announcement seen and bump its
+    // "Seen by N" count. recipientUids is always written on the announcement
+    // doc (createAnnouncement, regardless of channel), so it's the
+    // authoritative audience. Without this, any signed-in user who learned an
+    // announcementId could inflate the seenCount on an announcement never
+    // targeted to them (and plant a seenMarker under their uid).
+    const recipientUids = announcementSnap.get('recipientUids');
+    if (!Array.isArray(recipientUids) || !recipientUids.includes(auth.uid)) {
+      throw new HttpsError('permission-denied', 'You are not a recipient of this announcement');
+    }
     tx.set(markerRef, { seenAt: FieldValue.serverTimestamp() });
     tx.update(announcementRef, { seenCount: FieldValue.increment(1) });
   });
