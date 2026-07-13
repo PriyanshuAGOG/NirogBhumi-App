@@ -88,6 +88,15 @@ android {
     compose = true
     buildConfig = true
   }
+  lint {
+    // Don't auto-run lint-vital when assembling/bundling the release build.
+    // It roughly doubles the release build's time and memory (it OOM'd
+    // alongside R8), and lint is already covered elsewhere: lintDebug in the
+    // CI debug job, and an explicit lintRelease step in upload-google-play.yml
+    // right before the real signed bundle. This only disables the automatic
+    // pass wired into assembleRelease/bundleRelease, not those explicit tasks.
+    checkReleaseBuilds = false
+  }
   testOptions { unitTests { isIncludeAndroidResources = true } }
 }
 
