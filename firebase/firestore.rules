@@ -30,6 +30,21 @@ service cloud.firestore {
     // enrolled in a program - both checks read the caller's own profile document.
     function programMember() { return signedIn() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.programActive == true; }
     function ownProgram(programId) { return signedIn() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.activeProgramId == programId; }
+    // A coach may reach a specific member's health logs / case notes only for
+    // a member currently enrolled in a program that coach is assigned to:
+    // member uid -> that user's activeProgramId -> that program's coachId.
+    // Admins are checked separately (and always pass), so this is only ever
+    // evaluated for coaches. This resolves the previously-deferred "scope
+    // health-data reads to assigned members, not blanket staff()" note on
+    // the health-log and coachNotes rules below - before this, ANY coach
+    // could read EVERY member's diabetes/BP/medication history and lab
+    // scans platform-wide, not just their own batch. Now verified by rules
+    // unit tests (firestore.rules.test.mjs).
+    function coachAssignedToUser(uid) {
+      return coach() && uid is string
+        && get(/databases/$(database)/documents/users/$(uid)).data.get('activeProgramId', '') != ''
+        && get(/databases/$(database)/documents/programs/$(get(/databases/$(database)/documents/users/$(uid)).data.activeProgramId)).data.get('coachId', '') == request.auth.uid;
+    }
 
     match /users/{uid} {
       // Same enrollment/status fields the update rule below locks down must
@@ -86,14 +101,11 @@ service cloud.firestore {
       // Coaches get read-only access to their members' day-to-day logs (Care+
       // console health monitoring) alongside the member and the admin/expert
       // paths; only admin (not coach) may delete or edit another member's entry.
-      // Deliberately staff()-wide rather than programStaff()-scoped, unlike
-      // programs/programEvents/programMembers/announcements/coachMessages
-      // above: scoping this to "coach assigned to this member's program"
-      // would need chaining member uid -> activeProgramId -> that program's
-      // coachId, and health data read access is exactly where an untested
-      // rule bug would be worst - revisit alongside coachNotes once rules
-      // unit tests exist.
-      allow read: if collection in ['glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','labReports','dailyCheckins','checklistLogs','medicationLogs'] && (ownsResource() || staff() || assigned(resource.data.userId));
+      // Now scoped to the member's ASSIGNED coach (coachAssignedToUser),
+      // not blanket staff() - a coach can only read the health data of a
+      // member currently in their own batch. Admin still reads any; the
+      // member always reads their own; an assigned expert path is preserved.
+      allow read: if collection in ['glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','labReports','dailyCheckins','checklistLogs','medicationLogs'] && (ownsResource() || admin() || coachAssignedToUser(resource.data.userId) || assigned(resource.data.userId));
       allow delete: if collection in ['glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','labReports','dailyCheckins','checklistLogs','medicationLogs'] && (ownsResource() || admin() || assigned(resource.data.userId));
       allow update: if collection in ['glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','labReports','dailyCheckins','checklistLogs','medicationLogs'] && (admin() || (ownsResource() && ownsRequest() && preservesUserId()) || (assigned(resource.data.userId) && preservesUserId()));
     }
@@ -294,20 +306,17 @@ service cloud.firestore {
       allow update, delete: if false;
     }
     // Coach-only case notes on a member, for consultation prep. Members never
-    // see these - staff-only end to end. Deliberately not scoped to
-    // programStaff() like the collections above: that would need chaining
-    // two get() calls (member uid -> their activeProgramId -> that
-    // program's coachId) per note, and this is lower-stakes than a coach
-    // being able to broadcast/manage a batch they don't own. Revisit once
-    // rules unit tests exist to verify a chained check like that actually
-    // behaves as intended.
+    // see these. Now scoped to the member's assigned coach (or admin), same
+    // as the health-log rule above: a coach can only read/write case notes
+    // for a member in their own batch, not every member platform-wide.
     match /coachNotes/{id} {
-      allow read, delete: if staff();
-      allow create: if staff() && request.resource.data.authorId == request.auth.uid && request.resource.data.createdAt == request.time;
+      allow read, delete: if admin() || coachAssignedToUser(resource.data.targetUid);
+      allow create: if (admin() || coachAssignedToUser(request.resource.data.targetUid))
+        && request.resource.data.authorId == request.auth.uid && request.resource.data.createdAt == request.time;
       // Editing a note can't reassign who wrote it or which member it's
       // about - otherwise any staff member could rewrite authorship history
       // or quietly move a note onto a different member's file.
-      allow update: if staff()
+      allow update: if (admin() || coachAssignedToUser(resource.data.targetUid))
         && request.resource.data.authorId == resource.data.authorId
         && request.resource.data.targetUid == resource.data.targetUid;
     }
