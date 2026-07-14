@@ -9,6 +9,12 @@ import com.nirogbhumi.app.data.FirebaseHealthRepository
 import com.nirogbhumi.app.data.HealthRepository
 import com.nirogbhumi.app.data.CloudDocument
 
+// Version of the consent notice/policies the user agrees to. Stored on every
+// consent receipt and on users/{uid}.consent so we can prove what was agreed
+// to and, when this bumps after a material policy change, ask for fresh
+// consent (DPDP Act 2023). Bump this string when the notice materially changes.
+const val CONSENT_VERSION = "2025-07"
+
 // Data Models
 data class SugarLog(
     val id: Int,
@@ -74,6 +80,11 @@ class NirogState {
     var consentHealthData by mutableStateOf(false)
     var consentExpertReview by mutableStateOf(false)
     var consentMedicalDisclaimer by mutableStateOf(false)
+    // Optional, separate, off-by-default consents (DPDP Act: optional consent
+    // must be distinct from required consent and independently withdrawable).
+    // Toggled in Privacy & consent; hydrated from users/{uid}.consent on load.
+    var consentResearch by mutableStateOf(false)
+    var consentMarketing by mutableStateOf(false)
     var isTrackingForSelf by mutableStateOf(true) // true for Myself, false for Family Member
 
     // Profile Details

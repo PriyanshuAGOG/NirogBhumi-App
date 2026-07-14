@@ -646,6 +646,45 @@ describe('programCodes (per-program staff scoping)', () => {
   });
 });
 
+describe('consentReceipts (DPDP immutable consent record)', () => {
+  beforeEach(async () => {
+    await seed(async (db) => {
+      await setDoc(doc(db, 'users/mem1/consentReceipts/seed'), {
+        version: '2025-07', purposes: { healthData: true }, acceptedAt: serverTimestamp(),
+      });
+    });
+  });
+
+  it('lets the owner append a consent receipt stamped with the server time', async () => {
+    await assertSucceeds(setDoc(doc(member('mem1'), 'users/mem1/consentReceipts/r1'), {
+      version: '2025-07', purposes: { healthData: true, marketing: false }, acceptedAt: serverTimestamp(),
+    }));
+  });
+
+  it('rejects a back-dated (non-server-time) acceptedAt', async () => {
+    await assertFails(setDoc(doc(member('mem1'), 'users/mem1/consentReceipts/r2'), {
+      version: '2025-07', purposes: { healthData: true }, acceptedAt: new Date('2020-01-01'),
+    }));
+  });
+
+  it("forbids writing a receipt under another user's path", async () => {
+    await assertFails(setDoc(doc(member('mem2'), 'users/mem1/consentReceipts/r3'), {
+      version: '2025-07', purposes: { healthData: true }, acceptedAt: serverTimestamp(),
+    }));
+  });
+
+  it('lets the owner and an admin read receipts, but not another member', async () => {
+    await assertSucceeds(getDoc(doc(member('mem1'), 'users/mem1/consentReceipts/seed')));
+    await assertSucceeds(getDoc(doc(admin(), 'users/mem1/consentReceipts/seed')));
+    await assertFails(getDoc(doc(member('mem2'), 'users/mem1/consentReceipts/seed')));
+  });
+
+  it('is immutable - no update or delete', async () => {
+    await assertFails(updateDoc(doc(member('mem1'), 'users/mem1/consentReceipts/seed'), { version: 'hacked' }));
+    await assertFails(deleteDoc(doc(member('mem1'), 'users/mem1/consentReceipts/seed')));
+  });
+});
+
 // Sanity check that the suite itself is wired up, independent of rules content.
 describe('test harness sanity', () => {
   it('ran at least one assertion', () => assert.ok(true));

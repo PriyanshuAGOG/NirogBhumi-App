@@ -74,6 +74,15 @@ private fun applyProfileDocument(state: NirogState, document: com.google.firebas
     document.getString("onMedication")?.let { state.selectedOnMedication = it }
     document.getString("doctorSupervision")?.let { state.selectedDoctorSupervision = it }
     document.getBoolean("healthProfileCompleted")?.let { state.healthProfileCompleted = it }
+    // Consent state (required + optional) so Privacy & consent reflects what's
+    // actually on record across sessions, not just what was set this run.
+    (document.get("consent") as? Map<*, *>)?.let { consent ->
+        (consent["healthData"] as? Boolean)?.let { state.consentHealthData = it }
+        (consent["expertReview"] as? Boolean)?.let { state.consentExpertReview = it }
+        (consent["medicalDisclaimer"] as? Boolean)?.let { state.consentMedicalDisclaimer = it }
+        (consent["research"] as? Boolean)?.let { state.consentResearch = it }
+        (consent["marketing"] as? Boolean)?.let { state.consentMarketing = it }
+    }
     document.getString("photoUrl")?.let { state.photoUrl = it }
     document.getBoolean("programActive")?.let { state.isProgramActive = it }
     document.getString("activeProgramId")?.let { state.activeProgramId = it }
@@ -1376,6 +1385,15 @@ fun ConsentScreen(state: NirogState) {
                 Text("Read full policies and medical disclaimer", color = DeepGreen, fontWeight = FontWeight.SemiBold)
             }
 
+            // DPDP Act 2023 notice: the law requires that, at or before consent,
+            // we tell you your rights, how to withdraw, and how to complain.
+            Text(
+                "Under India's DPDP Act, 2023 you can access, correct, or delete your data and withdraw optional consent any time in Privacy & consent. Anonymized research and product updates are separate and off by default. Questions or complaints: grievance@nirogbhumi.com, or the Data Protection Board of India.",
+                color = Ink.copy(alpha = 0.6f),
+                fontSize = 12.sp,
+                lineHeight = 17.sp
+            )
+
             if (!(check1 && check2 && check3)) {
                 Text(
                     "Check all three items above to continue.",
@@ -1404,10 +1422,17 @@ fun ConsentScreen(state: NirogState) {
                     state.consentHealthData = check1
                     state.consentExpertReview = check2
                     state.consentMedicalDisclaimer = check3
-                    state.repository.saveProfile(mapOf("consent" to mapOf("healthData" to check1, "expertReview" to check2, "medicalDisclaimer" to check3, "version" to "1.0"))) { result ->
-                        isSaving = false
-                        if (result is com.nirogbhumi.app.data.CloudResult.Success) state.currentScreen = "setup_profile"
-                        else state.authError = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
+                    val purposes = mapOf("healthData" to check1, "expertReview" to check2, "medicalDisclaimer" to check3, "research" to false, "marketing" to false)
+                    state.repository.saveProfile(mapOf("consent" to (purposes + mapOf("version" to com.nirogbhumi.app.ui.CONSENT_VERSION, "acceptedAt" to com.google.firebase.firestore.FieldValue.serverTimestamp())))) { result ->
+                        if (result is com.nirogbhumi.app.data.CloudResult.Success) {
+                            // Immutable, timestamped, versioned consent record (DPDP Act).
+                            state.repository.recordConsentReceipt(purposes, com.nirogbhumi.app.ui.CONSENT_VERSION) {}
+                            isSaving = false
+                            state.currentScreen = "setup_profile"
+                        } else {
+                            isSaving = false
+                            state.authError = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
+                        }
                     }
                 },
                 enabled = check1 && check2 && check3 && !isSaving,

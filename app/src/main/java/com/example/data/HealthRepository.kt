@@ -29,6 +29,11 @@ interface HealthRepository {
     val isCloudConfigured: Boolean
     val userId: String?
     fun saveProfile(values: Map<String, Any?>, done: (CloudResult<Unit>) -> Unit)
+    // Writes an immutable, timestamped, versioned record of exactly what the
+    // user consented to - the "consent record" the DPDP Act 2023 expects a
+    // Data Fiduciary to keep. Append-only (users/{uid}/consentReceipts); the
+    // rules forbid updating or deleting a receipt once written.
+    fun recordConsentReceipt(purposes: Map<String, Boolean>, version: String, done: (CloudResult<Unit>) -> Unit)
     fun addHealthLog(collection: String, values: Map<String, Any?>, done: (CloudResult<String>) -> Unit)
     // Corrects a reading logged moments ago (a typo'd value, the wrong meal
     // context) without needing a full history screen - narrower than
@@ -215,6 +220,22 @@ class FirebaseHealthRepository : HealthRepository {
         db?.collection("users")?.document(uid)?.set(payload, SetOptions.merge())
             ?.addOnSuccessListener { done(CloudResult.Success(Unit)) }
             ?.addOnFailureListener { done(CloudResult.Failure(it.message ?: "Profile could not be saved", it)) }
+            ?: done(CloudResult.Failure("Firebase is not configured"))
+    }
+
+    override fun recordConsentReceipt(purposes: Map<String, Boolean>, version: String, done: (CloudResult<Unit>) -> Unit) {
+        val done = reporting("recordConsentReceipt", done)
+        val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
+        val payload = mapOf(
+            "purposes" to purposes,
+            "version" to version,
+            "acceptedAt" to FieldValue.serverTimestamp(),
+            "platform" to "android",
+            "appVersion" to com.nirogbhumi.app.BuildConfig.VERSION_NAME,
+        )
+        db?.collection("users")?.document(uid)?.collection("consentReceipts")?.add(payload)
+            ?.addOnSuccessListener { done(CloudResult.Success(Unit)) }
+            ?.addOnFailureListener { done(CloudResult.Failure(it.message ?: "Consent could not be recorded", it)) }
             ?: done(CloudResult.Failure("Firebase is not configured"))
     }
 

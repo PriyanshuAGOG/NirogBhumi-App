@@ -52,6 +52,7 @@ import com.nirogbhumi.app.health.computeSleepGlucoseInsight
 import com.nirogbhumi.app.health.computeMedicationGlucoseInsight
 import com.nirogbhumi.app.health.computeMealTimingInsight
 import com.nirogbhumi.app.ui.NirogState
+import com.nirogbhumi.app.ui.CONSENT_VERSION
 import com.nirogbhumi.app.ui.canManageProgram
 import com.nirogbhumi.app.ui.SugarLog
 import com.nirogbhumi.app.ui.components.NirogCard
@@ -2158,13 +2159,29 @@ fun FamilyProfilesScreen(state: NirogState) {
                             }
                         }
                     }
+                    // DPDP Act 2023 s.9: a child's (under-18) data may be processed
+                    // only with verifiable parental/guardian consent, and never for
+                    // tracking or targeted advertising. When the entered age is under
+                    // 18 we ask specifically for guardian consent and record it.
+                    val isMinor = age.toIntOrNull()?.let { it in 1..17 } == true
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { consented = !consented }) {
                         Checkbox(checked = consented, onCheckedChange = { consented = it }, colors = CheckboxDefaults.colors(checkedColor = Color(0xFF314936)))
-                        Text("I have permission to manage this profile", fontSize = 12.5.sp, color = Color(0xFF434842))
+                        Text(
+                            if (isMinor) "I am the parent or lawful guardian of this child and consent to managing their health data."
+                            else "I have permission to manage this profile",
+                            fontSize = 12.5.sp, color = Color(0xFF434842)
+                        )
+                    }
+                    if (isMinor) {
+                        Text(
+                            "For under-18 profiles we never use the data for tracking or advertising.",
+                            fontSize = 11.sp, color = Color(0xFF697169)
+                        )
                     }
                 }
             },
             confirmButton = {
+                val isMinor = age.toIntOrNull()?.let { it in 1..17 } == true
                 Button(
                     enabled = !saving && name.isNotBlank() && consented,
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF314936)),
@@ -2175,7 +2192,10 @@ fun FamilyProfilesScreen(state: NirogState) {
                             "relationship" to relationship.trim().ifBlank { null },
                             "age" to age.toIntOrNull(),
                             "city" to city.trim().ifBlank { null },
-                            "selection" to diabetesStatus
+                            "selection" to diabetesStatus,
+                            "isMinor" to isMinor,
+                            "guardianConsent" to true,
+                            "guardianConsentAt" to com.google.firebase.firestore.FieldValue.serverTimestamp()
                         )) { result ->
                             saving = false
                             if (result is com.nirogbhumi.app.data.CloudResult.Success) showAdd = false
@@ -2613,6 +2633,26 @@ fun DataControlsScreen(state: NirogState) {
 @Composable
 fun PrivacyConsentScreen(state: NirogState) {
     var togglingExpertReview by remember { mutableStateOf(false) }
+    var togglingResearch by remember { mutableStateOf(false) }
+    var togglingMarketing by remember { mutableStateOf(false) }
+
+    // Shared handler for an optional consent toggle: optimistic UI, persist the
+    // single field on users/{uid}.consent, and write an immutable consent
+    // receipt capturing the change (DPDP: consent - and its withdrawal - is
+    // recorded and dated). Reverts the UI if the write fails.
+    fun toggleOptionalConsent(key: String, next: Boolean, setBusy: (Boolean) -> Unit, current: Boolean, apply: (Boolean) -> Unit) {
+        setBusy(true)
+        apply(next)
+        state.repository.saveProfile(mapOf("consent" to mapOf(key to next, "version" to CONSENT_VERSION))) { result ->
+            setBusy(false)
+            if (result is com.nirogbhumi.app.data.CloudResult.Failure) {
+                apply(current)
+                state.cloudMessage = result.message
+            } else {
+                state.repository.recordConsentReceipt(mapOf(key to next), CONSENT_VERSION) {}
+            }
+        }
+    }
 
     Column(modifier = Modifier.fillMaxSize().background(Color(0xFFF8F6EF))) {
         DetailScreenHeader("Privacy & consent", onBack = { state.currentScreen = "profile" })
@@ -2663,6 +2703,22 @@ fun PrivacyConsentScreen(state: NirogState) {
                     description = "You understand this app doesn't replace medical advice. Withdraw by anonymizing your account.",
                     granted = state.consentMedicalDisclaimer,
                     kind = ConsentKind.Required
+                )
+                ConsentRow(
+                    title = "Anonymized research",
+                    description = "Let us use your health data - with your name and contact permanently removed - in aggregate research to improve the program. Never about one person.",
+                    granted = state.consentResearch,
+                    kind = ConsentKind.Optional,
+                    busy = togglingResearch,
+                    onToggle = { next -> toggleOptionalConsent("research", next, { togglingResearch = it }, state.consentResearch) { state.consentResearch = it } }
+                )
+                ConsentRow(
+                    title = "Product updates",
+                    description = "Occasional messages about new features and health tips. Off by default; turn off any time.",
+                    granted = state.consentMarketing,
+                    kind = ConsentKind.Optional,
+                    busy = togglingMarketing,
+                    onToggle = { next -> toggleOptionalConsent("marketing", next, { togglingMarketing = it }, state.consentMarketing) { state.consentMarketing = it } }
                 )
             }
 

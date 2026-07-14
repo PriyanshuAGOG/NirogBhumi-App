@@ -90,6 +90,18 @@ service cloud.firestore {
       allow read: if owner(uid);
       allow write: if false;
     }
+    // Immutable, timestamped consent records (DPDP Act 2023 "consent record").
+    // The owner appends a receipt each time they give/withdraw consent; it can
+    // never be updated or deleted, and acceptedAt must be the server time so
+    // the audit trail can't be back-dated. Owner and admin may read.
+    match /users/{uid}/consentReceipts/{id} {
+      allow read: if owner(uid) || admin();
+      allow create: if owner(uid)
+        && request.resource.data.acceptedAt == request.time
+        && request.resource.data.version is string
+        && request.resource.data.purposes is map;
+      allow update, delete: if false;
+    }
     match /profiles/{id} {
       allow create: if validCreate();
       allow read: if ownsResource() || admin() || assigned(resource.data.userId);
