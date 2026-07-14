@@ -9,12 +9,16 @@
 - Configure budget alerts, retention, backups, least-privilege IAM, staff custom claims, and audit-log monitoring.
 - Add Razorpay/UPI secrets through Firebase secret management; never commit them.
 
-## Health and privacy
+## Health and privacy (DPDP Act 2023 + Play)
 
 - Obtain Indian privacy/health-law review for the final legal text and consent records.
-- Publish Terms, Privacy Policy, Medical Disclaimer, Consent Notice, Data Deletion, Refund, Shipping, and Program Terms on the production domain.
-- Verify export and deletion fulfillment, incident response, staff access review, and vendor agreements.
-- Complete Google Play Data safety and Health apps declaration using the final SDK/data inventory.
+- The canonical legal pages now live as hosted static files in `console/public/legal/` (served at `<console-domain>/legal/...`). Replace every `[placeholder]` (operating entity, dates, retention periods, Grievance Officer) before publishing; ideally also publish at the primary domain. These cover Privacy Policy, Terms, Medical Disclaimer, Account Deletion, and the Grievance mechanism.
+- **Appoint a Grievance Officer** (DPDP s.13) and publish their name, working mailbox (e.g. `grievance@nirogbhumi.com`), and postal address in the legal pages and the in-app Legal Center.
+- Put the **hosted Privacy Policy URL** and the **hosted account-deletion URL** (`/legal/account-deletion.html`, reachable without installing the app) into the Play Console listing and Data Safety form — the deletion URL is a hard Play requirement.
+- Complete the Play **Data Safety** form and **Health apps declaration** using `docs/DATA_SAFETY_MAPPING.md`; confirm "no data shared for advertising".
+- Confirm `REQUEST_INSTALL_PACKAGES` is absent from the release AAB's merged manifest (it is in `src/debug` only).
+- Verify export and deletion fulfillment end-to-end in production, incident response, staff access review, and processor (DPA) agreements.
+- On any material policy change, bump `CONSENT_VERSION` (`NirogModels.kt`) together with the hosted pages. See `docs/DPDP_COMPLIANCE.md` for the full obligation map.
 
 ## Device acceptance
 

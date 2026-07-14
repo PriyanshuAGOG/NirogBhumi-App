@@ -2,6 +2,16 @@
 
 These are product-copy baselines, not legal advice. Publish only after review for the operating entity, jurisdiction, vendors, retention periods, grievance contact, and refund/shipping operations.
 
+> **The canonical, publishable versions now live as hosted HTML in
+> `console/public/legal/`** (privacy-policy, terms, medical-disclaimer,
+> account-deletion, grievance, index), written to align with India's DPDP
+> Act, 2023. They carry the DPDP additions this file predates — data-principal
+> rights, Grievance Officer + Data Protection Board escalation, children's-data
+> handling (s.9), consent withdrawal, retention, and breach notification. Keep
+> the drafts below in sync with those pages, or treat the hosted pages as the
+> source of truth. See `docs/DPDP_COMPLIANCE.md` for the obligation map and
+> `docs/DATA_SAFETY_MAPPING.md` for the Play Data Safety declaration.
+
 ## Medical disclaimer
 
 Nirog Bhumi is for education, lifestyle tracking, and wellness support only. It is not a substitute for medical advice, diagnosis, or treatment. Consult a doctor or qualified healthcare professional before changing medication, diet, exercise, or treatment. Seek emergency care when symptoms or readings indicate an urgent risk.

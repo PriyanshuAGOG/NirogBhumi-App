@@ -1264,3 +1264,39 @@ by the user. Work sequentially, CI-verified per slice, small commits.
     declaration, Indian privacy/health-law review + hosting the legal
     text, clinician sign-off on the sugar/BP caution thresholds, and the
     store listing assets).
+37. [x] **Release build verified in CI + R8 keep rules** — added an
+    `android-release` CI job that runs `bundleRelease` on every push, the
+    first thing to ever compile the shipping artifact. It caught two
+    latent release-only blockers (a debug-only `DebugAppCheckProviderFactory`
+    referenced from `main/` so the release AAB never compiled - fixed with
+    per-variant `installVariantAppCheckProvider` source sets; and an R8
+    OOM from a 1 GB Gradle heap - raised to 4 GB, dropped serial GC,
+    disabled the redundant release lint-vital). Wrote real `proguard-rules.pro`
+    (deobfuscatable Crashlytics traces, reflection attributes). All four CI
+    jobs green.
+38. [x] **DPDP Act 2023 + Play legal/consent readiness.**
+    - **Hosted legal pages** (`console/public/legal/`): privacy-policy,
+      terms, medical-disclaimer, account-deletion, grievance, index -
+      self-contained static HTML served at `/legal/...`. Gives Play the
+      publicly-reachable Privacy Policy URL and the account-deletion URL
+      (reachable without installing the app - a hard Play requirement).
+    - **Consent receipts**: `recordConsentReceipt()` writes immutable,
+      server-timestamped, versioned records to `users/{uid}/consentReceipts`
+      (rules append-only, `acceptedAt == request.time`; owner+admin read;
+      5 new rules tests, 100 total green). `CONSENT_VERSION` stamps every
+      receipt for future re-consent.
+    - **Granular consents**: optional 'Anonymized research' + 'Product
+      updates' consents, off by default, separately withdrawable in Privacy
+      & consent; consent hydrated from `users/{uid}.consent` across sessions.
+    - **Children's data (s.9)**: Add Family Member detects under-18 and
+      captures explicit guardian consent (`isMinor`/`guardianConsent`/
+      `guardianConsentAt`); no tracking/ads for children.
+    - **In-app notice**: onboarding consent screen + Legal Center now carry
+      DPDP rights, Grievance Officer contact, Data Protection Board
+      escalation, withdrawal, retention, children, and breach notice.
+    - **Docs**: `docs/DPDP_COMPLIANCE.md` (obligation map + owner actions),
+      `docs/DATA_SAFETY_MAPPING.md` (Play Data Safety declaration from the
+      real data inventory), updated `RELEASE_CHECKLIST.md` and
+      `LEGAL_DRAFTS.md`. Owner-only: appoint a Grievance Officer, finalize
+      entity/contacts/retention with counsel, host the pages, and fill the
+      Play Data Safety + Health declarations.
