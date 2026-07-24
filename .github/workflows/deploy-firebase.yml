@@ -68,4 +68,12 @@ jobs:
       - name: Deploy rules, indexes, storage, functions, and hosting
         env:
           PROJECT_ID: ${{ inputs.project_id || 'nirog-bhumi-app' }}
-        run: npx --yes firebase-tools@latest deploy --project "$PROJECT_ID" --only firestore,storage,functions,hosting --non-interactive
+        # --force: the project still has a stale function (onAnnouncementCreate,
+        # long since renamed to createAnnouncement) that no longer exists in
+        # source. Without --force, firebase deploy aborts in non-interactive
+        # mode rather than delete it - which marked EVERY deploy as failed even
+        # though rules/indexes/hosting had already released. --force lets it
+        # prune functions that were removed from source (only that stale one
+        # here; every current function is present in the source), so the
+        # functions step - and the whole deploy - completes cleanly.
+        run: npx --yes firebase-tools@latest deploy --project "$PROJECT_ID" --only firestore,storage,functions,hosting --non-interactive --force
