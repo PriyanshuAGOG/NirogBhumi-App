@@ -372,6 +372,36 @@ describe('users/{uid} program-field lock also applies on create (not just update
   });
 });
 
+// Regression: onUserCreate (async Auth trigger) can land AFTER the client's
+// own first onboarding write, leaving a users/{uid} doc with no role/status.
+// Owner updates on such a doc must still succeed (this was the new-device
+// "signed up but every saveProfile is PERMISSION_DENIED" bug), while the
+// role/status/enrollment escalation guard stays intact.
+describe('users/{uid} owner update when role/status not yet set (onUserCreate race)', () => {
+  beforeEach(async () => {
+    await seed(async (db) => {
+      // Created as the client's first write would: userId only, no role/status.
+      await setDoc(doc(db, 'users/raceuser'), { userId: 'raceuser', fullName: 'Race User' });
+    });
+  });
+
+  it('lets the owner write consent/profile fields on a role-less doc', async () => {
+    await assertSucceeds(updateDoc(doc(member('raceuser'), 'users/raceuser'), {
+      consent: { healthData: true, version: '2025-07' }, city: 'Jaipur',
+    }));
+  });
+
+  it('still denies self-granting admin on a role-less doc', async () => {
+    await assertFails(updateDoc(doc(member('raceuser'), 'users/raceuser'), { role: 'admin' }));
+  });
+
+  it('still denies self-enrolling (programActive) on a status-less doc', async () => {
+    await assertFails(updateDoc(doc(member('raceuser'), 'users/raceuser'), {
+      programActive: true, activeProgramId: 'progA',
+    }));
+  });
+});
+
 describe('health-log collection group - coach read scoped to assigned members', () => {
   // mem1 is in progA (coach-a's batch); coach-b runs a different batch and
   // has no relationship to mem1 - the core PII-scoping check is that

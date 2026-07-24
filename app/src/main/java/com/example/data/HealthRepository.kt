@@ -397,6 +397,13 @@ class FirebaseHealthRepository : HealthRepository {
     }
 
     override fun ensureProgramMembership(done: (CloudResult<Boolean>) -> Unit) {
+        // Must never call the callable without a signed-in user. This is fired
+        // fire-and-forget from the users/{uid} snapshot listener, which can
+        // deliver from the offline cache before (or independently of) an auth
+        // token being attached - that call reaches the function with no auth
+        // and is rejected as UNAUTHENTICATED (and reported as a bogus error).
+        // Return quietly (nothing to repair) instead of hitting the network.
+        if (userId == null) return done(CloudResult.Success(false))
         val done = reporting("ensureProgramMembership", done)
         val callable = functions?.getHttpsCallable("ensureProgramMembership")
             ?: return done(CloudResult.Failure("Firebase is not configured"))

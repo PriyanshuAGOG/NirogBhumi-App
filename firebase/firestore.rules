@@ -71,9 +71,19 @@ service cloud.firestore {
       // rules entirely - see redeemProgramCode / setUserRole), may set them.
       // .get(field, default) makes this airtight even when the field is
       // absent from the existing doc, unlike a plain 'in' presence check.
+      // Both sides use .get() with a default. onUserCreate (an async Auth
+      // trigger) sets role/status, but it can land AFTER the client's own
+      // first onboarding write has already created users/{uid} (the create
+      // rule allows a doc with neither field). On such a doc, a bare
+      // request.resource.data.role / .status reads a missing field, which
+      // errors and denies EVERY later owner update - which is exactly why a
+      // brand-new device could sign up but then hit PERMISSION_DENIED on
+      // every saveProfile (consent, profile setup). Defaulting both sides
+      // keeps the privilege-escalation guard intact (a client sending
+      // role:'admin' still fails) while letting a legit profile write through.
       allow update: if admin() || (owner(uid)
-        && request.resource.data.role == resource.data.get('role', 'user')
-        && request.resource.data.status == resource.data.get('status', 'active')
+        && request.resource.data.get('role', 'user') == resource.data.get('role', 'user')
+        && request.resource.data.get('status', 'active') == resource.data.get('status', 'active')
         && request.resource.data.get('programActive', false) == resource.data.get('programActive', false)
         && request.resource.data.get('activeProgramId', null) == resource.data.get('activeProgramId', null)
         && request.resource.data.get('activeProgramName', null) == resource.data.get('activeProgramName', null)
