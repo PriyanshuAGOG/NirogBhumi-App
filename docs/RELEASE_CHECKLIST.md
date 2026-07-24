@@ -2,6 +2,7 @@
 
 ## Firebase owner actions
 
+- **BLOCKER — lift the org policy blocking callable-function invoker.** The GCP org policy `iam.allowedPolicyMemberDomains` (Domain Restricted Sharing) prevents binding the public (`allUsers`) Cloud Run invoker that HTTPS **callable** functions require. Any *newly created* callable then fails to deploy at the "set invoker" step and returns 403 when called. This currently blocks `createAnnouncement`, `deleteAnnouncement`, `markAnnouncementSeen`, and `previewAnnouncementAudience` — so **posting announcements and "seen by N" are broken** until fixed. Fix (one-time): in GCP Console → IAM & Admin → Organization Policies → `iam.allowedPolicyMemberDomains`, add a **project-level override** for `nirog-bhumi-app` set to *Allow All* (or add your allowed values plus `allUsers`/`allAuthenticatedUsers`); alternatively grant the deploy service account `roles/run.admin` if the cause is a missing role. Then re-run the **Deploy Firebase** workflow — the invoker binds and the deploy goes green. This fixes every current and future callable at once; the alternative is refactoring those callables to the Firestore-trigger dispatch pattern (no public invoker).
 - Create production and staging Firebase projects in the India-compatible region selected by the owner.
 - Register `in.nirogbhumi.app`; add `app/google-services.json` and SHA-1/SHA-256 certificates.
 - Enable Phone and Email/Password Auth, Firestore, Storage, Functions, Messaging, Analytics, Crashlytics, and App Check.
