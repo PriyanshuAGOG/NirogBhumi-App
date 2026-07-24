@@ -65,15 +65,26 @@ jobs:
           VITE_FIREBASE_MESSAGING_SENDER_ID: "126409331898"
           VITE_FIREBASE_APP_ID: "1:126409331898:web:62ba9137dd9781f0009e83"
         run: npm ci && npm run build
-      - name: Deploy rules, indexes, storage, functions, and hosting
+      # Split into two deploys on purpose:
+      #  1. firestore/storage/hosting WITHOUT --force. --force on a Firestore
+      #     deploy would DELETE any composite index present in the project but
+      #     missing from firestore.indexes.json - which could silently drop a
+      #     manually-created index the app depends on. Never force-delete
+      #     indexes; a missing one is added to the file, not pruned live.
+      #  2. functions WITH --force, so it can prune functions removed from
+      #     source (e.g. the long-renamed onAnnouncementCreate) instead of
+      #     aborting in non-interactive mode.
+      # NOTE: the functions step can still fail if the project's
+      # `iam.allowedPolicyMemberDomains` org policy blocks binding the public
+      # (allUsers) invoker on a *newly created* callable function - that's an
+      # owner/infra action (lift/except the org policy, or grant the deploy SA
+      # roles/run.admin), not a code issue. Rules + indexes in step 1 still
+      # deploy cleanly regardless.
+      - name: Deploy Firestore rules, indexes, Storage rules, and Hosting
         env:
           PROJECT_ID: ${{ inputs.project_id || 'nirog-bhumi-app' }}
-        # --force: the project still has a stale function (onAnnouncementCreate,
-        # long since renamed to createAnnouncement) that no longer exists in
-        # source. Without --force, firebase deploy aborts in non-interactive
-        # mode rather than delete it - which marked EVERY deploy as failed even
-        # though rules/indexes/hosting had already released. --force lets it
-        # prune functions that were removed from source (only that stale one
-        # here; every current function is present in the source), so the
-        # functions step - and the whole deploy - completes cleanly.
-        run: npx --yes firebase-tools@latest deploy --project "$PROJECT_ID" --only firestore,storage,functions,hosting --non-interactive --force
+        run: npx --yes firebase-tools@latest deploy --project "$PROJECT_ID" --only firestore,storage,hosting --non-interactive
+      - name: Deploy Cloud Functions
+        env:
+          PROJECT_ID: ${{ inputs.project_id || 'nirog-bhumi-app' }}
+        run: npx --yes firebase-tools@latest deploy --project "$PROJECT_ID" --only functions --non-interactive --force
