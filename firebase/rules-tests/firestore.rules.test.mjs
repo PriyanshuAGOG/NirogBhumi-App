@@ -281,6 +281,10 @@ describe('users/{uid} program-field lock (self-enrollment bypass fix)', () => {
 describe('health-log collection group (glucoseReadings as representative)', () => {
   beforeEach(async () => {
     await seed(async (db) => {
+      await setDoc(doc(db, 'programs/progA'), { name: 'Program A', coachId: 'coach-a' });
+      await setDoc(doc(db, 'users/mem1'), {
+        userId: 'mem1', role: 'user', status: 'active', programActive: true, activeProgramId: 'progA',
+      });
       await setDoc(doc(db, 'glucoseReadings/r1'), {
         userId: 'mem1', value: 110, createdAt: serverTimestamp(),
       });
@@ -291,11 +295,13 @@ describe('health-log collection group (glucoseReadings as representative)', () =
     await assertSucceeds(getDoc(doc(member('mem1'), 'glucoseReadings/r1')));
   });
 
-  it('lets any staff (coach or admin) read - not yet program-scoped, by design', async () => {
-    await assertSucceeds(getDoc(doc(coach('any-coach'), 'glucoseReadings/r1')));
+  it('lets the assigned coach and admin read the reading', async () => {
+    await assertSucceeds(getDoc(doc(coach('coach-a'), 'glucoseReadings/r1')));
+    await assertSucceeds(getDoc(doc(admin(), 'glucoseReadings/r1')));
   });
 
-  it('denies an unrelated signed-in member', async () => {
+  it('denies an unassigned coach and unrelated signed-in member', async () => {
+    await assertFails(getDoc(doc(coach('coach-b'), 'glucoseReadings/r1')));
     await assertFails(getDoc(doc(member('mem2'), 'glucoseReadings/r1')));
   });
 
@@ -303,8 +309,9 @@ describe('health-log collection group (glucoseReadings as representative)', () =
     await assertFails(getDoc(doc(anon(), 'glucoseReadings/r1')));
   });
 
-  it('denies a coach deleting another member\'s reading (admin-only)', async () => {
-    await assertFails(deleteDoc(doc(coach('any-coach'), 'glucoseReadings/r1')));
+  it('keeps assigned-coach access read-only', async () => {
+    await assertFails(deleteDoc(doc(coach('coach-a'), 'glucoseReadings/r1')));
+    await assertFails(updateDoc(doc(coach('coach-a'), 'glucoseReadings/r1'), { value: 999 }));
   });
 
   it('lets admin delete a reading', async () => {
@@ -312,17 +319,33 @@ describe('health-log collection group (glucoseReadings as representative)', () =
   });
 });
 
-describe('coachNotes stay staff-wide (documented, not per-program scoped)', () => {
-  it('lets any coach create a note with themselves as author', async () => {
-    const db = coach('coach-x');
+describe('coachNotes are scoped to the target member program', () => {
+  beforeEach(async () => {
+    await seed(async (db) => {
+      await setDoc(doc(db, 'programs/progA'), { name: 'Program A', coachId: 'coach-a' });
+      await setDoc(doc(db, 'users/mem1'), {
+        userId: 'mem1', role: 'user', status: 'active', programActive: true, activeProgramId: 'progA',
+      });
+    });
+  });
+
+  it('lets the assigned coach create a note with themselves as author', async () => {
+    const db = coach('coach-a');
     await assertSucceeds(setDoc(doc(db, 'coachNotes/note1'), {
-      targetUid: 'mem1', authorId: 'coach-x', text: 'Doing well', createdAt: serverTimestamp(),
+      targetUid: 'mem1', authorId: 'coach-a', text: 'Doing well', createdAt: serverTimestamp(),
+    }));
+  });
+
+  it('denies an unassigned coach creating a note for the member', async () => {
+    const db = coach('coach-b');
+    await assertFails(setDoc(doc(db, 'coachNotes/note2'), {
+      targetUid: 'mem1', authorId: 'coach-b', text: 'Cross-program note', createdAt: serverTimestamp(),
     }));
   });
 
   it('denies creating a note claiming to be authored by someone else', async () => {
-    const db = coach('coach-x');
-    await assertFails(setDoc(doc(db, 'coachNotes/note1'), {
+    const db = coach('coach-a');
+    await assertFails(setDoc(doc(db, 'coachNotes/note3'), {
       targetUid: 'mem1', authorId: 'someone-else', text: 'Doing well', createdAt: serverTimestamp(),
     }));
   });
