@@ -13,19 +13,21 @@ data class UpdateInfo(
     val fileSizeBytes: Long?,
 ) {
     companion object {
+        private val SHA256_HEX = Regex("^[0-9a-fA-F]{64}$")
+
         fun fromMap(channel: String, values: Map<String, Any?>): UpdateInfo? {
             val versionCode = (values["latestVersionCode"] as? Number)?.toInt() ?: return null
             val versionName = values["latestVersionName"] as? String ?: return null
             val apkUrl = values["apkUrl"] as? String ?: return null
-            val checksum = values["checksum"] as? String ?: ""
-            if (apkUrl.isBlank() || versionCode <= 0) return null
+            val checksum = (values["checksum"] as? String)?.trim() ?: return null
+            if (apkUrl.isBlank() || versionCode <= 0 || !SHA256_HEX.matches(checksum)) return null
             return UpdateInfo(
                 channel = channel,
                 latestVersionCode = versionCode,
                 latestVersionName = versionName,
                 minSupportedVersionCode = (values["minSupportedVersionCode"] as? Number)?.toInt() ?: 0,
                 apkUrl = apkUrl,
-                checksum = checksum,
+                checksum = checksum.lowercase(),
                 releaseNotes = (values["releaseNotes"] as? String).orEmpty(),
                 forceUpdate = values["forceUpdate"] == true,
                 fileSizeBytes = (values["fileSizeBytes"] as? Number)?.toLong(),
