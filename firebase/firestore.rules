@@ -7,20 +7,21 @@ service cloud.firestore {
     function admin() { return role('admin') || role('super_admin'); }
     function expert() { return role('expert'); }
     function coach() { return role('coach'); }
-    // Program-management staff: admins and coaches. staff() alone is
-    // deliberately still used for platform-wide surfaces (moderation review
-    // queue routing, support inbox) where any staff member handling any
-    // ticket is fine. For anything scoped to a specific program (roster,
-    // calendar, announcements, batch stats, coach-to-member messages),
-    // programStaff(programId) is the real boundary: admin always passes,
-    // a coach only passes for the program(s) they're assigned via
-    // programs/{programId}.coachId.
+    // Platform-wide staff surfaces such as moderation/support may use staff().
+    // Anything tied to one program or one member must use programStaff() or
+    // assignedCoachToUser() so a coach never crosses batch boundaries.
     function staff() { return admin() || coach(); }
     function assignedCoach(programId) {
       return coach() && programId is string && programId != ''
         && get(/databases/$(database)/documents/programs/$(programId)).data.coachId == request.auth.uid;
     }
     function programStaff(programId) { return admin() || assignedCoach(programId); }
+    function assignedCoachToUser(uid) {
+      let userDoc = get(/databases/$(database)/documents/users/$(uid));
+      return coach() && uid is string && uid != ''
+        && userDoc.data.programActive == true
+        && assignedCoach(userDoc.data.activeProgramId);
+    }
     function assigned(uid) { return expert() && exists(/databases/$(database)/documents/expertAssignments/$(request.auth.uid + '_' + uid)); }
     function ownsResource() { return owner(resource.data.userId); }
     function ownsRequest() { return owner(request.resource.data.userId); }
@@ -33,7 +34,7 @@ service cloud.firestore {
 
     match /users/{uid} {
       allow create: if owner(uid) && request.resource.data.userId == uid && (!('role' in request.resource.data) || request.resource.data.role == 'user');
-      allow read: if owner(uid) || staff() || assigned(uid);
+      allow read: if owner(uid) || admin() || assigned(uid) || assignedCoachToUser(uid);
       // Role/status/enrollment fields are the actual security and billing
       // boundary of this doc, so the owner can never change them directly -
       // only admin(), or a Cloud Function via the Admin SDK (which bypasses
@@ -67,23 +68,17 @@ service cloud.firestore {
     }
     match /{collection}/{id} {
       allow create: if collection in ['glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','labReports','dailyCheckins','checklistLogs','medicationLogs'] && validCreate();
-      // Coaches get read-only access to their members' day-to-day logs (Care+
-      // console health monitoring) alongside the member and the admin/expert
-      // paths; only admin (not coach) may delete or edit another member's entry.
-      // Deliberately staff()-wide rather than programStaff()-scoped, unlike
-      // programs/programEvents/programMembers/announcements/coachMessages
-      // above: scoping this to "coach assigned to this member's program"
-      // would need chaining member uid -> activeProgramId -> that program's
-      // coachId, and health data read access is exactly where an untested
-      // rule bug would be worst - revisit alongside coachNotes once rules
-      // unit tests exist.
-      allow read: if collection in ['glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','labReports','dailyCheckins','checklistLogs','medicationLogs'] && (ownsResource() || staff() || assigned(resource.data.userId));
+      // Health data is sensitive. A coach receives read-only access only when
+      // the record owner is an active member of a program assigned to that
+      // coach. Admins and explicitly assigned experts retain their intended
+      // access. Coaches can never update/delete a member's health record.
+      allow read: if collection in ['glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','labReports','dailyCheckins','checklistLogs','medicationLogs'] && (ownsResource() || admin() || assigned(resource.data.userId) || assignedCoachToUser(resource.data.userId));
       allow delete: if collection in ['glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','labReports','dailyCheckins','checklistLogs','medicationLogs'] && (ownsResource() || admin() || assigned(resource.data.userId));
       allow update: if collection in ['glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','labReports','dailyCheckins','checklistLogs','medicationLogs'] && (admin() || (ownsResource() && ownsRequest() && preservesUserId()) || (assigned(resource.data.userId) && preservesUserId()));
     }
     match /consultations/{id} {
       allow create: if validCreate() && request.resource.data.paymentStatus == 'pending' && request.resource.data.status in ['pending', 'payment_pending'];
-      allow read: if ownsResource() || staff() || (expert() && resource.data.expertId == request.auth.uid);
+      allow read: if ownsResource() || admin() || assignedCoachToUser(resource.data.userId) || (expert() && resource.data.expertId == request.auth.uid);
       allow update: if admin() || (expert() && resource.data.expertId == request.auth.uid && request.resource.data.expertId == resource.data.expertId && preservesUserId()) || (ownsResource() && ownsRequest() && preservesUserId() && request.resource.data.paymentStatus == resource.data.paymentStatus && request.resource.data.status == resource.data.status);
     }
     match /{collection}/{id} {
@@ -227,9 +222,14 @@ service cloud.firestore {
       allow read: if programStaff(resource.data.programId) || ownProgram(resource.data.programId);
       allow write: if false;
     }
-    // Program access codes - sensitive, staff-managed only.
+    // Program access codes are sensitive bearer credentials. Admins can manage
+    // every code; a coach can only see or mutate codes belonging to a program
+    // that coach is explicitly assigned to.
     match /programCodes/{id} {
-      allow read, write: if staff();
+      allow read: if admin() || assignedCoach(resource.data.programId);
+      allow create: if admin() || assignedCoach(request.resource.data.programId);
+      allow update: if admin() || (assignedCoach(resource.data.programId) && request.resource.data.programId == resource.data.programId);
+      allow delete: if admin() || assignedCoach(resource.data.programId);
     }
     // Private coach-to-member notes. The recipient may read their own; only
     // admin or that program's assigned coach can send.
@@ -238,21 +238,15 @@ service cloud.firestore {
       allow create: if programStaff(request.resource.data.programId) && request.resource.data.fromUid == request.auth.uid;
       allow update, delete: if programStaff(resource.data.programId);
     }
-    // Coach-only case notes on a member, for consultation prep. Members never
-    // see these - staff-only end to end. Deliberately not scoped to
-    // programStaff() like the collections above: that would need chaining
-    // two get() calls (member uid -> their activeProgramId -> that
-    // program's coachId) per note, and this is lower-stakes than a coach
-    // being able to broadcast/manage a batch they don't own. Revisit once
-    // rules unit tests exist to verify a chained check like that actually
-    // behaves as intended.
+    // Private coach case notes are sensitive health-adjacent data. They are
+    // restricted to admins and the coach assigned to the target member's
+    // active program. A coach cannot rewrite authorship or retarget a note.
     match /coachNotes/{id} {
-      allow read, delete: if staff();
-      allow create: if staff() && request.resource.data.authorId == request.auth.uid && request.resource.data.createdAt == request.time;
-      // Editing a note can't reassign who wrote it or which member it's
-      // about - otherwise any staff member could rewrite authorship history
-      // or quietly move a note onto a different member's file.
-      allow update: if staff()
+      allow read, delete: if admin() || assignedCoachToUser(resource.data.targetUid);
+      allow create: if (admin() || assignedCoachToUser(request.resource.data.targetUid))
+        && request.resource.data.authorId == request.auth.uid
+        && request.resource.data.createdAt == request.time;
+      allow update: if (admin() || assignedCoachToUser(resource.data.targetUid))
         && request.resource.data.authorId == resource.data.authorId
         && request.resource.data.targetUid == resource.data.targetUid;
     }
