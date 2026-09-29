@@ -8,6 +8,7 @@ import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import * as functions from 'firebase-functions/v1';
 import { createHash, randomBytes } from 'node:crypto';
+import { DELETION_GRACE_DAYS, cancelAccountDeletion as cancelDeletionRequest, processDueDeletions, scheduleAccountDeletion } from './accountDeletion.js';
 
 initializeApp();
 const db = getFirestore();
@@ -907,27 +908,95 @@ export const requestDataExport = onCall({ region }, async request => {
   if (!recent.empty) throw new HttpsError('resource-exhausted', 'You can request one export per hour - please try again later.');
   await db.collection('dataExportRequests').add({ userId: auth.uid, status: 'requested', createdAt: FieldValue.serverTimestamp() }); return { accepted: true };
 });
+// Schedules the caller's own account for deletion after a grace period (see
+// accountDeletion.ts for the full lifecycle and what gets removed). Idempotent:
+// asking again while a request is pending just reports the existing one.
 export const requestAccountDeletion = onCall({ region }, async request => {
   const auth = requireUser(request);
-  // Same cooldown as requestDataExport, for the same reason - one request is
-  // plenty for the legitimate flow, and this can no longer be skipped via a
-  // direct Firestore write (see the dataExportRequests/deletionRequests
-  // create rule), but the callable itself still had no limit of its own.
-  const cooldown = Timestamp.fromMillis(Date.now() - 60 * 60000);
-  const recent = await db.collection('deletionRequests').where('userId', '==', auth.uid).where('createdAt', '>=', cooldown).limit(1).get();
-  if (!recent.empty) throw new HttpsError('resource-exhausted', 'You can request this once per hour - please try again later.');
-  await db.collection('deletionRequests').add({ userId: auth.uid, status: 'requested', createdAt: FieldValue.serverTimestamp() }); return { accepted: true };
+  const result = await scheduleAccountDeletion(db, auth.uid, 'app');
+  if (!result.alreadyPending) {
+    await db.collection('auditLogs').add({ actorId: auth.uid, actorRole: String(auth.token.role ?? 'user'), action: 'request_account_deletion', entityType: 'deletionRequest', entityId: result.requestId, metadata: { scheduledFor: result.scheduledFor.toDate().toISOString() }, createdAt: FieldValue.serverTimestamp() });
+    await db.collection('notifications').add({
+      userId: auth.uid, profileId: null, title: 'Account deletion scheduled',
+      body: `Your account will be permanently deleted on ${result.scheduledFor.toDate().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Kolkata' })}. Open Privacy & data to cancel any time before then.`,
+      type: 'privacy', status: 'scheduled', scheduledFor: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp(),
+    });
+  }
+  return { accepted: true, alreadyPending: result.alreadyPending, status: result.status, scheduledForMillis: result.scheduledFor.toMillis(), graceDays: DELETION_GRACE_DAYS };
 });
+export const cancelAccountDeletion = onCall({ region }, async request => {
+  const auth = requireUser(request);
+  const cancelled = await cancelDeletionRequest(db, auth.uid);
+  if (cancelled) await db.collection('auditLogs').add({ actorId: auth.uid, actorRole: String(auth.token.role ?? 'user'), action: 'cancel_account_deletion', entityType: 'user', entityId: auth.uid, createdAt: FieldValue.serverTimestamp() });
+  return { cancelled };
+});
+// Admin side of data-protection requests: approve a scheduled deletion now
+// (e.g. the member emailed privacy@ and was verified), reject one, or start one
+// for a member identified by email/phone/uid. Never on your own account or on
+// another admin - use the in-app flow for that.
+export const adminManageDeletion = onCall({ region }, async request => {
+  const auth = requireUser(request);
+  const role = auth.token.role;
+  if (role !== 'admin' && role !== 'super_admin') throw new HttpsError('permission-denied', 'Admins only');
+  const action = String(request.data?.action ?? '');
+  if (!['approve', 'reject', 'start'].includes(action)) throw new HttpsError('invalid-argument', 'Unknown action');
 
+  const guardTarget = async (uid: string) => {
+    if (uid === auth.uid) throw new HttpsError('failed-precondition', 'Use the in-app flow to delete your own account');
+    const target = await getAuth().getUser(uid).catch(() => null);
+    const targetRole = target?.customClaims?.role;
+    if (targetRole === 'admin' || targetRole === 'super_admin') throw new HttpsError('failed-precondition', 'Demote this admin before deleting their account');
+  };
+
+  if (action === 'start') {
+    const email = String(request.data?.email ?? '').trim();
+    const phone = String(request.data?.phone ?? '').trim();
+    let uid = String(request.data?.uid ?? '').trim();
+    if (!uid) {
+      if (!email && !phone) throw new HttpsError('invalid-argument', 'Provide a uid, email or phone number');
+      const user = await (email ? getAuth().getUserByEmail(email) : getAuth().getUserByPhoneNumber(phone)).catch(() => null);
+      if (!user) throw new HttpsError('not-found', 'No account matches that email/phone');
+      uid = user.uid;
+    }
+    await guardTarget(uid);
+    const result = await scheduleAccountDeletion(db, uid, 'email');
+    // An emailed request has already been identity-verified by the admin, so skip the grace wait.
+    await db.doc(`deletionRequests/${result.requestId}`).set({ status: 'approved', approvedBy: auth.uid, approvedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    await db.collection('auditLogs').add({ actorId: auth.uid, actorRole: role, action: 'admin_start_account_deletion', entityType: 'deletionRequest', entityId: result.requestId, createdAt: FieldValue.serverTimestamp() });
+    return { requestId: result.requestId, status: 'approved' };
+  }
+
+  const requestId = String(request.data?.requestId ?? '');
+  if (!requestId) throw new HttpsError('invalid-argument', 'requestId is required');
+  const ref = db.doc(`deletionRequests/${requestId}`);
+  const snap = await ref.get();
+  if (!snap.exists) throw new HttpsError('not-found', 'Request not found');
+  const status = String(snap.get('status'));
+  if (!['scheduled', 'requested', 'awaiting_verification', 'failed'].includes(status)) throw new HttpsError('failed-precondition', `A request that is ${status} can no longer be changed`);
+  if (action === 'approve') {
+    await guardTarget(String(snap.get('userId') ?? ''));
+    await ref.set({ status: 'approved', approvedBy: auth.uid, approvedAt: FieldValue.serverTimestamp(), attempts: 0, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  } else {
+    await ref.set({ status: 'rejected', rejectedBy: auth.uid, rejectedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  }
+  await db.collection('auditLogs').add({ actorId: auth.uid, actorRole: role, action: `${action}_account_deletion`, entityType: 'deletionRequest', entityId: requestId, createdAt: FieldValue.serverTimestamp() });
+  return { requestId, status: action === 'approve' ? 'approved' : 'rejected' };
+});
 export const exportUserData = onDocumentCreated({ document: 'dataExportRequests/{requestId}', region }, async event => {
   const request = event.data; if (!request) return; const uid = request.get('userId'); if (!uid) return;
   await request.ref.set({ status: 'processing', updatedAt: FieldValue.serverTimestamp() }, { merge: true });
-  const names = ['users','profiles','glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','labReports','dailyCheckins','dailyActions','weeklyReports','sugarStories','consultations','userPrograms','programPlans','checklistLogs','expertNotes','notifications','deviceConnections','medicationLogs'];
+  const names = ['users','profiles','glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','labReports','dailyCheckins','dailyActions','weeklyReports','sugarStories','consultations','userPrograms','programPlans','checklistLogs','expertNotes','notifications','deviceConnections','medicationLogs','orders','supportRequests','programChatMessages'];
   const exported: Record<string, unknown> = { exportedAt: new Date().toISOString(), formatVersion: 1 };
   for (const name of names) {
     if (name === 'users') { const user = await db.doc(`users/${uid}`).get(); exported.users = user.exists ? [{ id: user.id, ...user.data() }] : []; continue; }
     const snapshot = await db.collection(name).where('userId', '==', uid).get(); exported[name] = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
   }
+  // Not keyed by `userId`, so gathered separately: the member's coach-inbox
+  // threads, program roster entries, and their consent receipts (the record of
+  // what they agreed to and when).
+  exported.coachInboxMessages = (await db.collection('coachInboxMessages').where('memberUid', '==', uid).get()).docs.map(doc => ({ id: doc.id, ...doc.data() }));
+  exported.programMembers = (await db.collection('programMembers').where('uid', '==', uid).get()).docs.map(doc => ({ id: doc.id, ...doc.data() }));
+  exported.consentReceipts = (await db.collection(`users/${uid}/consentReceipts`).get()).docs.map(doc => ({ id: doc.id, ...doc.data() }));
   const path = `users/${uid}/exports/${request.id}.json`; const file = getStorage().bucket().file(path);
   await file.save(JSON.stringify(exported, null, 2), { contentType: 'application/json', metadata: { cacheControl: 'private, max-age=0', metadata: { ownerUid: uid } } });
   await request.ref.set({ status: 'completed', storagePath: path, completedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
@@ -976,10 +1045,6 @@ export const createAuditLog = onCall({ region }, async request => {
   await db.collection('auditLogs').add({ actorId: auth.uid, actorRole: auth.token.role, action, entityType, entityId, metadata, createdAt: FieldValue.serverTimestamp() });
   return { logged: true };
 });
-export const queueDeletionRequest = onDocumentCreated({ document: 'deletionRequests/{requestId}', region }, async event => {
-  await event.data?.ref.set({ status: 'awaiting_verification', updatedAt: FieldValue.serverTimestamp() }, { merge: true });
-});
-
 // Feature areas a coach's console access can be scoped to. Admin/super_admin
 // always have full access regardless of this list (it only narrows coaches).
 const PERMISSION_KEYS = ['moderation', 'batches', 'announcements', 'calendar', 'programs', 'consultations', 'support', 'members'] as const;
@@ -1156,62 +1221,11 @@ export const sendBulkNotification = onCall({ region }, async request => {
 // collections on `resource.data.userId == request.auth.uid`, so once that
 // field is gone the record becomes unreadable by any individual user's
 // client - it only exists for internal, aggregate analysis from here on.
-export const processApprovedDeletions = onSchedule({ schedule: 'every 60 minutes', timeZone: 'Asia/Kolkata', region }, async () => {
-  const requests = await db.collection('deletionRequests').where('status', '==', 'approved').limit(10).get();
-
-  const personalCollections = ['profiles', 'dailyActions', 'weeklyReports', 'sugarStories', 'consultations', 'userPrograms', 'programPlans', 'expertNotes', 'notifications', 'deviceConnections'];
-  const anonymizeCollections = ['glucoseReadings', 'bpReadings', 'sleepLogs', 'walkLogs', 'weightLogs', 'medicationLogs', 'checklistLogs', 'dailyCheckins', 'labReports'];
-
-  for (const request of requests.docs) {
-    const uid = request.get('userId'); if (!uid) continue;
-    await request.ref.set({ status: 'processing', updatedAt: FieldValue.serverTimestamp() }, { merge: true });
-
-    for (const name of personalCollections) {
-      const docs = await db.collection(name).where('userId', '==', uid).get();
-      for (let offset = 0; offset < docs.docs.length; offset += 400) { const batch = db.batch(); docs.docs.slice(offset, offset + 400).forEach(doc => batch.delete(doc.ref)); await batch.commit(); }
-    }
-
-    for (const name of anonymizeCollections) {
-      const docs = await db.collection(name).where('userId', '==', uid).get();
-      for (let offset = 0; offset < docs.docs.length; offset += 400) {
-        const batch = db.batch();
-        docs.docs.slice(offset, offset + 400).forEach(doc => {
-          const update: Record<string, unknown> = { userId: FieldValue.delete(), profileId: FieldValue.delete(), anonymizedAt: FieldValue.serverTimestamp() };
-          // labReports carries free-text fields (lab name, notes) and a
-          // Storage fileUrl - the underlying file is deleted outright below
-          // (a scanned report shows a name on its face), so the dangling
-          // URL and any free text that could identify someone go with it.
-          if (name === 'labReports') { update.labName = FieldValue.delete(); update.notes = FieldValue.delete(); update.fileUrl = FieldValue.delete(); }
-          batch.set(doc.ref, update, { merge: true });
-        });
-        await batch.commit();
-      }
-    }
-
-    // programMembers and the batchStats/checkedInMembers marker are tied to
-    // program-membership identity (visible to a coach as roster rows), not
-    // a standalone health metric - deleted the same as the personal
-    // collections above, not anonymized.
-    const roster = await db.collection('programMembers').where('uid', '==', uid).get();
-    const programIds = new Set(roster.docs.map(doc => String(doc.get('programId') ?? '')).filter(Boolean));
-    for (let offset = 0; offset < roster.docs.length; offset += 400) { const batch = db.batch(); roster.docs.slice(offset, offset + 400).forEach(doc => batch.delete(doc.ref)); await batch.commit(); }
-    // Sweep this user's daily check-in marker out of every batchStats day for
-    // every program they were ever in (marker doc id is the uid itself -
-    // deleting a non-existent doc is a safe no-op).
-    for (const programId of programIds) {
-      const days = await db.collection('batchStats').where('programId', '==', programId).get();
-      for (let offset = 0; offset < days.docs.length; offset += 400) {
-        const batch = db.batch();
-        days.docs.slice(offset, offset + 400).forEach(day => batch.delete(day.ref.collection('checkedInMembers').doc(uid)));
-        await batch.commit();
-      }
-    }
-    // Raw uploaded files (lab scans, profile photos, consultation
-    // attachments, generated PDF reports) almost always show identifying
-    // detail on their face - deleted outright, never anonymized in place.
-    for (const prefix of [`users/${uid}/`, `lab-reports/${uid}/`, `consultation-attachments/${uid}/`, `reports/${uid}/`]) await getStorage().bucket().deleteFiles({ prefix });
-    await db.doc(`users/${uid}`).delete();
-    await getAuth().deleteUser(uid);
-    await request.ref.set({ status: 'completed', completedAt: FieldValue.serverTimestamp(), userIdHash: createHash('sha256').update(uid).digest('hex'), userId: FieldValue.delete() }, { merge: true });
-  }
+export const processApprovedDeletions = onSchedule({ schedule: 'every 60 minutes', timeZone: 'Asia/Kolkata', region, timeoutSeconds: 540 }, async () => {
+  const summary = await processDueDeletions({
+    db,
+    deleteFiles: async prefix => { await getStorage().bucket().deleteFiles({ prefix }); },
+    deleteAuthUser: async uid => { try { await getAuth().deleteUser(uid); } catch (error) { if ((error as { code?: string }).code !== 'auth/user-not-found') throw error; } },
+  });
+  if (summary.completed || summary.retrying || summary.failed) console.log('Account deletions processed', JSON.stringify(summary));
 });

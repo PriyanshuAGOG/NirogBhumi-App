@@ -53,12 +53,16 @@ interface HealthRepository {
     fun listenUserCollection(collection: String, limit: Long = 30, orderByField: String? = null, descending: Boolean = true, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription
     fun listenPublicCollection(collection: String, limit: Long = 30, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription
     fun requestDataExport(done: (CloudResult<Unit>) -> Unit)
-    // Despite the name (kept to avoid touching the deletionRequests
-    // collection/queue), this is now an anonymization request, not a full
-    // erase: identifying info is deleted, health readings are stripped of
-    // any link back to the person and kept for aggregate research - see
-    // processApprovedDeletions in firebase/functions/src/index.ts.
-    fun requestAccountDeletion(done: (CloudResult<Unit>) -> Unit)
+    // Schedules the account (and its data) for permanent deletion after a
+    // grace period; succeeds with the scheduled time in epoch millis. What is
+    // erased versus kept (health readings are only kept, de-identified, if the
+    // member opted into research) is decided server-side - see
+    // firebase/functions/src/accountDeletion.ts.
+    fun requestAccountDeletion(done: (CloudResult<Long>) -> Unit)
+    // Cancels a still-pending deletion; the Boolean is whether one was cancelled.
+    fun cancelAccountDeletion(done: (CloudResult<Boolean>) -> Unit)
+    // Epoch millis a pending deletion will run at, or null if none is pending.
+    fun getPendingAccountDeletion(done: (CloudResult<Long?>) -> Unit)
     fun upsertUserRecord(collection: String, documentId: String, values: Map<String, Any?>, done: (CloudResult<Unit>) -> Unit = {})
     fun deleteUserRecord(collection: String, documentId: String, done: (CloudResult<Unit>) -> Unit)
     fun getPrivateDownloadUrl(storagePath: String, done: (CloudResult<String>) -> Unit)
@@ -323,8 +327,57 @@ class FirebaseHealthRepository : HealthRepository {
         return CloudSubscription { registration.remove() }
     }
 
-    override fun requestDataExport(done: (CloudResult<Unit>) -> Unit) = createRequest("dataExportRequests", reporting("requestDataExport", done))
-    override fun requestAccountDeletion(done: (CloudResult<Unit>) -> Unit) = createRequest("deletionRequests", reporting("requestAccountDeletion", done))
+    // Both requests go through Cloud Functions (which rate-limit and schedule
+    // them) - Firestore rules deny client-side creates on these collections, so
+    // writing them directly always failed with PERMISSION_DENIED.
+    override fun requestDataExport(done: (CloudResult<Unit>) -> Unit) {
+        val done = reporting("requestDataExport", done)
+        val callable = functions?.getHttpsCallable("requestDataExport") ?: return done(CloudResult.Failure("Firebase is not configured"))
+        callable.call()
+            .addOnSuccessListener { AnalyticsLogger.log("data_export_requested"); done(CloudResult.Success(Unit)) }
+            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Export could not be requested", it)) }
+    }
+
+    override fun requestAccountDeletion(done: (CloudResult<Long>) -> Unit) {
+        val done = reporting("requestAccountDeletion", done)
+        val callable = functions?.getHttpsCallable("requestAccountDeletion") ?: return done(CloudResult.Failure("Firebase is not configured"))
+        callable.call()
+            .addOnSuccessListener { result ->
+                val data = result.data as? Map<*, *>
+                val scheduledFor = (data?.get("scheduledForMillis") as? Number)?.toLong()
+                if (scheduledFor == null) done(CloudResult.Failure("Deletion could not be scheduled"))
+                else { AnalyticsLogger.log("account_deletion_requested"); done(CloudResult.Success(scheduledFor)) }
+            }
+            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Deletion could not be scheduled", it)) }
+    }
+
+    override fun cancelAccountDeletion(done: (CloudResult<Boolean>) -> Unit) {
+        val done = reporting("cancelAccountDeletion", done)
+        val callable = functions?.getHttpsCallable("cancelAccountDeletion") ?: return done(CloudResult.Failure("Firebase is not configured"))
+        callable.call()
+            .addOnSuccessListener { result ->
+                val cancelled = (result.data as? Map<*, *>)?.get("cancelled") as? Boolean ?: false
+                if (cancelled) AnalyticsLogger.log("account_deletion_cancelled")
+                done(CloudResult.Success(cancelled))
+            }
+            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Could not cancel the deletion", it)) }
+    }
+
+    override fun getPendingAccountDeletion(done: (CloudResult<Long?>) -> Unit) {
+        val done = reporting("getPendingAccountDeletion", done)
+        val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
+        val database = db ?: return done(CloudResult.Failure("Firebase is not configured"))
+        // No orderBy: a member has at most a handful of requests, and this keeps the query index-free.
+        database.collection("deletionRequests").whereEqualTo("userId", uid).get()
+            .addOnSuccessListener { snapshot ->
+                val pending = snapshot.documents
+                    .filter { it.getString("status") in setOf("scheduled", "approved", "processing") }
+                    .mapNotNull { it.getTimestamp("scheduledFor")?.toDate()?.time ?: System.currentTimeMillis() }
+                    .minOrNull()
+                done(CloudResult.Success(pending))
+            }
+            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Could not check deletion status", it)) }
+    }
 
     override fun getPrivateDownloadUrl(storagePath: String, done: (CloudResult<String>) -> Unit) {
         val done = reporting("getPrivateDownloadUrl", done)
@@ -909,17 +962,6 @@ class FirebaseHealthRepository : HealthRepository {
         db?.collection(collection)?.document(documentId)?.delete()
             ?.addOnSuccessListener { done(CloudResult.Success(Unit)) }
             ?.addOnFailureListener { done(CloudResult.Failure(it.message ?: "Synced record could not be saved", it)) }
-            ?: done(CloudResult.Failure("Firebase is not configured"))
-    }
-
-    private fun createRequest(collection: String, done: (CloudResult<Unit>) -> Unit) {
-        val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
-        db?.collection(collection)?.add(mapOf("userId" to uid, "status" to "requested", "createdAt" to FieldValue.serverTimestamp()))
-            ?.addOnSuccessListener {
-                AnalyticsLogger.log(if (collection == "dataExportRequests") "data_export_requested" else "account_deletion_requested")
-                done(CloudResult.Success(Unit))
-            }
-            ?.addOnFailureListener { done(CloudResult.Failure(it.message ?: "Request failed", it)) }
             ?: done(CloudResult.Failure("Firebase is not configured"))
     }
 }

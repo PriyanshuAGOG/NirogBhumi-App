@@ -109,7 +109,7 @@ jobs:
           java-version: "21"
       - name: Run Cloud Functions unit tests against the emulator
         working-directory: .
-        run: npx --yes firebase-tools@15.22.3 emulators:exec --only firestore --project demo-nirog-bhumi "npm --prefix firebase/functions run test:unit"
+        run: npx --yes firebase-tools@15.22.3 emulators:exec --only firestore,auth --project demo-nirog-bhumi "npm --prefix firebase/functions run test:unit"
 
   firebase-rules:
     name: Firebase rules validation

@@ -25,6 +25,7 @@ const NAV: NavItem[] = [
   { to: '/moderation', label: 'Moderation', icon: '🛡️', section: 'Support', permission: 'moderation' },
   { to: '/support', label: 'Support', icon: '💬', section: 'Support', permission: 'support' },
   { to: '/error-reports', label: 'Error Reports', icon: '🚨', section: 'Support', adminOnly: true },
+  { to: '/data-requests', label: 'Data Requests', icon: '🔒', section: 'Support', adminOnly: true },
   { to: '/content', label: 'Content', icon: '📚', section: 'Platform', adminOnly: true },
   { to: '/users', label: 'Users & Roles', icon: '🧑‍🤝‍🧑', section: 'Platform', adminOnly: true },
   { to: '/settings', label: 'Settings', icon: '⚙️', section: 'Account' },

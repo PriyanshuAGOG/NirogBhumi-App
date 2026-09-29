@@ -26,7 +26,7 @@ Users must provide accurate information, protect account access, use the service
 
 ## Data deletion policy
 
-Users may submit an in-app deletion request. Access is disabled while the verified request is processed. Data and files are deleted or irreversibly anonymized except where law, fraud prevention, payment records, or dispute handling requires limited retention. Completion status is communicated to the verified account holder.
+Users may delete their account in the app; deletion is scheduled for 7 days later (cancellable) and then runs automatically, or immediately for a verified emailed request. Data and files are permanently deleted (health readings are kept only without any link to the user, and only if the user opted into anonymized research) except where law, fraud prevention, payment records, or dispute handling requires limited retention.
 
 ## Refund policy
 

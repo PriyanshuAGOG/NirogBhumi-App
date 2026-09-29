@@ -1333,7 +1333,7 @@ fun ProfileScreen(state: NirogState) {
         SettingsSection(title = "Notifications & Privacy") {
             SettingsRow(Icons.Filled.Notifications, "Notification settings") { state.currentScreen = "notification_settings" }
             SettingsRow(Icons.Filled.Shield, "Privacy & consent") { state.currentScreen = "privacy_consent" }
-            SettingsRow(Icons.Filled.DownloadForOffline, "Export or anonymize my data") { state.currentScreen = "data_controls" }
+            SettingsRow(Icons.Filled.DownloadForOffline, "Export or delete my data") { state.currentScreen = "data_controls" }
         }
 
         SettingsSection(title = "Support") {
@@ -2467,29 +2467,37 @@ fun relativeTimeLabel(date: java.util.Date): String {
     }
 }
 
-// Data export & anonymization - both real, backed by the same Cloud
-// Functions/Firestore request-queue path (requestDataExport/
-// requestAccountDeletion -> dataExportRequests/deletionRequests, processed by
-// existing scheduled Functions) rather than a generic form that goes nowhere.
-// This used to be a full erase-everything account deletion. It's now an
-// anonymization: identifying info (name, contact, profile, uploaded files,
-// consultations) is permanently removed, but health readings themselves
-// (sugar, BP, sleep, walks, weight, medications) are kept with every link
-// back to the person stripped out - see processApprovedDeletions in
-// firebase/functions/src/index.ts for exactly what happens to each
-// collection. The client-facing name/copy changed to "anonymize" to match;
-// the underlying request-queue collection name is unchanged.
+// Data export & account deletion - both real, and both go through Cloud
+// Functions (requestDataExport / requestAccountDeletion), which rate-limit and
+// queue the work. Deletion is scheduled for 7 days out so an accidental tap or
+// a borrowed phone can't destroy an account instantly, and can be cancelled in
+// that window; after that it runs automatically. Everything that identifies the
+// member is erased. Health readings are erased too unless the member opted in
+// to anonymized research in Privacy & consent, in which case they stay with
+// every link back to the person removed. See
+// firebase/functions/src/accountDeletion.ts for exactly what happens to each
+// collection.
 @Composable
 fun DataControlsScreen(state: NirogState) {
     var exporting by remember { mutableStateOf(false) }
     var exportRequested by remember { mutableStateOf(false) }
     var confirmingDelete by remember { mutableStateOf(false) }
-    var deleting by remember { mutableStateOf(false) }
-    var deletionRequested by remember { mutableStateOf(false) }
-    var showAnonymizeExplainer by remember { mutableStateOf(false) }
+    var busy by remember { mutableStateOf(false) }
+    var showDeletionExplainer by remember { mutableStateOf(false) }
+    // null = none pending (or not loaded yet); otherwise the epoch millis the deletion will run at.
+    var scheduledForMillis by remember { mutableStateOf<Long?>(null) }
+    var statusLoaded by remember { mutableStateOf(false) }
 
-    Column(modifier = Modifier.fillMaxSize().background(Color(0xFFF8F6EF))) {
-        DetailScreenHeader("Export or anonymize my data", onBack = { state.currentScreen = "profile" })
+    LaunchedEffect(Unit) {
+        state.repository.getPendingAccountDeletion { result ->
+            statusLoaded = true
+            if (result is CloudResult.Success) scheduledForMillis = result.value
+        }
+    }
+    val dateLabel = scheduledForMillis?.let { java.text.SimpleDateFormat("d MMMM yyyy", java.util.Locale.getDefault()).format(java.util.Date(it)) }
+
+    Column(modifier = Modifier.fillMaxSize().background(Color(0xFFF8F6EF)).verticalScroll(rememberScrollState())) {
+        DetailScreenHeader("Export or delete my data", onBack = { state.currentScreen = "profile" })
         Column(modifier = Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -2503,7 +2511,7 @@ fun DataControlsScreen(state: NirogState) {
                     Text("Export your data", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF1B3221))
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        "A copy of everything you've logged - readings, reports, program activity - as a file you can keep or share with a doctor.",
+                        "A copy of everything you've logged - readings, reports, chats with your coach, program activity - as a file you can keep or share with a doctor.",
                         fontSize = 13.sp, color = Color(0xFF697169), lineHeight = 18.sp
                     )
                     Spacer(modifier = Modifier.height(14.dp))
@@ -2520,8 +2528,8 @@ fun DataControlsScreen(state: NirogState) {
                                 exporting = true
                                 state.repository.requestDataExport { result ->
                                     exporting = false
-                                    if (result is com.nirogbhumi.app.data.CloudResult.Success) exportRequested = true
-                                    else state.cloudMessage = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
+                                    if (result is CloudResult.Success) exportRequested = true
+                                    else state.cloudMessage = (result as CloudResult.Failure).message
                                 }
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF314936)),
@@ -2539,29 +2547,46 @@ fun DataControlsScreen(state: NirogState) {
                 Column(modifier = Modifier.padding(20.dp)) {
                     Icon(Icons.Filled.DeleteForever, contentDescription = null, tint = Color(0xFFB4472F))
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text("Anonymize my account", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF7B332E))
+                    Text("Delete my account", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF7B332E))
                     Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        "Removes your name, contact details, and login access after identity verification. Your health readings stay on file with no link back to you - see what that means below. This can't be undone.",
-                        fontSize = 13.sp, color = Color(0xFF7B332E), lineHeight = 18.sp
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    TextButton(
-                        onClick = { showAnonymizeExplainer = true },
-                        contentPadding = PaddingValues(0.dp),
-                        modifier = Modifier.height(28.dp)
-                    ) {
-                        Text("What does anonymizing mean?", fontSize = 12.5.sp, fontWeight = FontWeight.Bold, color = Color(0xFF7B332E), textDecoration = TextDecoration.Underline)
-                    }
-                    Spacer(modifier = Modifier.height(10.dp))
-                    if (deletionRequested) {
-                        Text("Anonymization requested - pending approval and identity verification.", fontSize = 13.sp, color = Color(0xFF7B332E), fontWeight = FontWeight.SemiBold)
+                    if (dateLabel != null) {
+                        Text(
+                            "Your account is scheduled to be permanently deleted on $dateLabel. Until then everything is still here and you can keep using the app.",
+                            fontSize = 13.sp, color = Color(0xFF7B332E), lineHeight = 18.sp, fontWeight = FontWeight.SemiBold
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Button(
+                            enabled = !busy,
+                            onClick = {
+                                busy = true
+                                state.repository.cancelAccountDeletion { result ->
+                                    busy = false
+                                    if (result is CloudResult.Success) { scheduledForMillis = null; state.cloudMessage = "Deletion cancelled - your account stays exactly as it was." }
+                                    else state.cloudMessage = (result as CloudResult.Failure).message
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF314936)),
+                            shape = RoundedCornerShape(20.dp)
+                        ) { Text(if (busy) "Cancelling..." else "Keep my account - cancel deletion", color = Color.White, fontWeight = FontWeight.Bold) }
                     } else {
+                        Text(
+                            "Permanently removes your account, name, contact details, reports, chats and login. You have 7 days to change your mind. This can't be undone afterwards.",
+                            fontSize = 13.sp, color = Color(0xFF7B332E), lineHeight = 18.sp
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        TextButton(
+                            onClick = { showDeletionExplainer = true },
+                            contentPadding = PaddingValues(0.dp),
+                            modifier = Modifier.height(28.dp)
+                        ) {
+                            Text("What exactly gets deleted?", fontSize = 12.5.sp, fontWeight = FontWeight.Bold, color = Color(0xFF7B332E), textDecoration = TextDecoration.Underline)
+                        }
+                        Spacer(modifier = Modifier.height(10.dp))
                         OutlinedButton(
-                            enabled = !deleting,
+                            enabled = !busy && statusLoaded,
                             onClick = { confirmingDelete = true },
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFB4472F))
-                        ) { Text("Request anonymization") }
+                        ) { Text("Delete my account") }
                     }
                 }
             }
@@ -2571,49 +2596,50 @@ fun DataControlsScreen(state: NirogState) {
 
     if (confirmingDelete) {
         AlertDialog(
-            onDismissRequest = { confirmingDelete = false },
-            title = { Text("Anonymize your account?", fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221)) },
-            text = { Text("Your name, contact details, and login access will be permanently removed after verification. Your health readings stay on file with no link back to you. This can't be undone.", fontSize = 13.sp, color = Color(0xFF434842)) },
+            onDismissRequest = { if (!busy) confirmingDelete = false },
+            title = { Text("Delete your account?", fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221)) },
+            text = { Text("In 7 days your account, name, contact details, uploaded reports, chats and login will be permanently deleted. You can cancel from this screen any time before then.", fontSize = 13.sp, color = Color(0xFF434842)) },
             confirmButton = {
                 Button(
+                    enabled = !busy,
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB4472F)),
                     onClick = {
-                        deleting = true
+                        busy = true
                         state.repository.requestAccountDeletion { result ->
-                            deleting = false
+                            busy = false
                             confirmingDelete = false
-                            if (result is com.nirogbhumi.app.data.CloudResult.Success) deletionRequested = true
-                            else state.cloudMessage = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
+                            if (result is CloudResult.Success) scheduledForMillis = result.value
+                            else state.cloudMessage = (result as CloudResult.Failure).message
                         }
                     }
-                ) { Text("Anonymize my account", color = Color.White) }
+                ) { Text(if (busy) "Scheduling..." else "Delete my account", color = Color.White) }
             },
-            dismissButton = { TextButton(onClick = { confirmingDelete = false }) { Text("Cancel", color = Color(0xFF737972)) } }
+            dismissButton = { TextButton(enabled = !busy, onClick = { confirmingDelete = false }) { Text("Keep my account", color = Color(0xFF737972)) } }
         )
     }
 
-    if (showAnonymizeExplainer) {
+    if (showDeletionExplainer) {
         AlertDialog(
-            onDismissRequest = { showAnonymizeExplainer = false },
-            title = { Text("About anonymized health data", fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221)) },
+            onDismissRequest = { showDeletionExplainer = false },
+            title = { Text("What gets deleted", fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221)) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.verticalScroll(rememberScrollState())) {
                     Text(
-                        "When you anonymize your account, we permanently delete anything that identifies you - your name, email, phone number, profile, uploaded reports, and consultation history.",
+                        "Always deleted: your name, email, phone number, profile, family profiles, uploaded reports and photos, consultations, program activity, coach messages, chat messages and voice notes, support requests, notifications - and your login.",
                         fontSize = 13.sp, color = Color(0xFF434842), lineHeight = 18.sp
                     )
                     Text(
-                        "Your day-to-day health readings - blood sugar, blood pressure, sleep, walks, weight, medications - stay on file, but with every link back to you removed. No name, no contact info, nothing connecting a reading to a person.",
+                        "Your health readings (sugar, blood pressure, sleep, walks, weight, medications, check-ins) are deleted too - unless you've switched on \"Anonymized research\" in Privacy & consent. In that case they stay on file with every link back to you removed, and are only ever used in aggregate.",
                         fontSize = 13.sp, color = Color(0xFF434842), lineHeight = 18.sp
                     )
                     Text(
-                        "We use this anonymized data in aggregate - never about one specific person - to understand what habits and routines actually help people manage and reverse conditions like type-2 diabetes, and to keep improving the guidance Nirog Bhumi gives everyone.",
+                        "Kept only as the law requires: payment and invoice records (with your identity removed where possible) and security logs.",
                         fontSize = 13.sp, color = Color(0xFF434842), lineHeight = 18.sp
                     )
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showAnonymizeExplainer = false }) {
+                TextButton(onClick = { showDeletionExplainer = false }) {
                     Text("Got it", color = Color(0xFF314936), fontWeight = FontWeight.Bold)
                 }
             }
@@ -2675,7 +2701,7 @@ fun PrivacyConsentScreen(state: NirogState) {
                 SectionLabel("Your consent")
                 ConsentRow(
                     title = "Health data storage",
-                    description = "Required to track your readings and reports. Withdraw by anonymizing your account.",
+                    description = "Required to track your readings and reports. Withdraw by deleting your account.",
                     granted = state.consentHealthData,
                     kind = ConsentKind.Required
                 )
@@ -2700,7 +2726,7 @@ fun PrivacyConsentScreen(state: NirogState) {
                 )
                 ConsentRow(
                     title = "Medical disclaimer acknowledgement",
-                    description = "You understand this app doesn't replace medical advice. Withdraw by anonymizing your account.",
+                    description = "You understand this app doesn't replace medical advice. Withdraw by deleting your account.",
                     granted = state.consentMedicalDisclaimer,
                     kind = ConsentKind.Required
                 )
@@ -2734,7 +2760,7 @@ fun PrivacyConsentScreen(state: NirogState) {
                         Text("Anonymized data & research", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFF1B2219))
                     }
                     Text(
-                        "If you ever anonymize your account, your name and contact details are permanently deleted - but health readings (sugar, BP, sleep, walks, weight, medications) stay on file with no link back to you. We use this in aggregate, never about one person, to understand what actually helps people manage and reverse conditions like type-2 diabetes.",
+                        "If you delete your account while this is switched on, your name and contact details are permanently deleted - but your health readings (sugar, BP, sleep, walks, weight, medications) stay on file with no link back to you. If it is off, your readings are deleted too. We only ever use anonymized data in aggregate, never about one person.",
                         fontSize = 12.5.sp, color = Color(0xFF3F4A41), lineHeight = 18.sp
                     )
                     TextButton(
@@ -2752,7 +2778,7 @@ fun PrivacyConsentScreen(state: NirogState) {
                 LegalLinkRow("Privacy Policy", "What we collect and why") { state.legalInitialSection = "Privacy Policy"; state.legalReturnRoute = "privacy_consent"; state.currentScreen = "legal_center" }
                 LegalLinkRow("Terms of Use", "Your responsibilities using Nirog Bhumi") { state.legalInitialSection = "Terms of Use"; state.legalReturnRoute = "privacy_consent"; state.currentScreen = "legal_center" }
                 LegalLinkRow("Medical Disclaimer", "What this app is - and isn't") { state.legalInitialSection = "Medical Disclaimer"; state.legalReturnRoute = "privacy_consent"; state.currentScreen = "legal_center" }
-                LegalLinkRow("Data Deletion & Anonymization Policy", "What happens when you anonymize your account") { state.legalInitialSection = "Data Deletion Policy"; state.legalReturnRoute = "privacy_consent"; state.currentScreen = "legal_center" }
+                LegalLinkRow("Data Deletion Policy", "What happens when you delete your account") { state.legalInitialSection = "Data Deletion Policy"; state.legalReturnRoute = "privacy_consent"; state.currentScreen = "legal_center" }
                 LegalLinkRow("Program Terms", "What a Care+ program does and doesn't promise") { state.legalInitialSection = "Program Terms"; state.legalReturnRoute = "privacy_consent"; state.currentScreen = "legal_center" }
                 TextButton(onClick = { state.legalInitialSection = null; state.legalReturnRoute = "privacy_consent"; state.currentScreen = "legal_center" }) {
                     Text("See all legal documents", color = Color(0xFF314936), fontWeight = FontWeight.Bold, fontSize = 13.sp)

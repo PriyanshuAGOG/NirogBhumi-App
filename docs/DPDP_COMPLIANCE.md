@@ -17,7 +17,7 @@ Firebase/Cloud, the payment gateway, notification and diagnostics vendors are
 | **Withdrawal** as easy as giving | Privacy & consent: optional consents toggle off instantly; required consent → account anonymize/delete | — |
 | **Right to access** | Data Controls → export (Cloud Function `requestDataExport` → JSON of ~20 collections) | — |
 | **Right to correction/completion** | Profile edit; health logs editable/quick-correct | — |
-| **Right to erasure** | Data Controls → delete/anonymize (`requestAccountDeletion`); hosted `account-deletion.html` (works without the app) | Verify deletion worker runs end-to-end in prod |
+| **Right to erasure** | Profile → Export or delete my data (`requestAccountDeletion`: scheduled 7 days out, cancellable, then runs automatically via `processApprovedDeletions`); admin console **Data Requests** page for emailed requests; hosted `account-deletion.html` (works without the app). Erases identity, uploads, chats, inbox, and health readings unless the member opted into anonymized research. Covered by 15 emulator tests. | Confirm the scheduler runs in prod after first deploy (Cloud Scheduler job `processApprovedDeletions`) |
 | **Right to grievance redressal** | Legal Center "Grievance Officer & complaints"; hosted `grievance.html` | **Appoint a Grievance Officer**, publish name + address + working mailbox |
 | **Right to nominate** | Stated in Privacy Policy §6 / Legal Center "Your rights" | Operational process for acting on a nomination |
 | **Children's data (s.9)** — verifiable parental consent; no tracking/targeted ads | Add Family Member: under-18 detection → guardian-consent affirmation + `isMinor`/`guardianConsent` stored; no ad SDKs in app | Keep ad/tracking SDKs out; document age-assurance approach |
