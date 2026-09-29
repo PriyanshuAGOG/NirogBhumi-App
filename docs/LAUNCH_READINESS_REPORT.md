@@ -410,3 +410,47 @@ Other half-built logic:
   Robolectric-tested, but need a manual pass on a phone.
 - ⏳ Owner actions unchanged: Cloud Run public-invoker org policy, release SHA-1/256
   in Firebase, Grievance Officer + legal placeholders, real content, merge to `main`.
+
+### Merge to `main` (2026-09-29) and Sprint 3 — release
+- ✅ Sprints 0-2 merged to `main` (PR #18, `0d55ca9`). On `main`: CI green,
+  tester APK built and distributed, Firestore/Storage rules, indexes and the
+  console released to production.
+- ⚠ **Deploy Firebase ended red, by design, on the known owner-blocked item:** the org
+  policy `iam.allowedPolicyMemberDomains` rejects the public invoker on every
+  callable (20 of 20, including the three new ones). All function *code*
+  deployed. Until the policy is lifted, **every callable is unreachable**
+  (batch join, access codes, announcements, export/deletion, consultation
+  cancel). Exact steps are in `docs/RELEASE_CHECKLIST.md`.
+- ✅ **Bug found and fixed while verifying that deploy:** the retired
+  `queueDeletionRequest` trigger was still live (Firebase skips deleting functions
+  when any function in the deploy fails) and would have overwritten every new
+  deletion request's status, so nobody's data would ever have been erased. Now a
+  no-op with a regression test; delete the stub after a clean deploy.
+- ✅ **Release pipeline fixed:** `upload-google-play.yml` never set a version
+  code (every upload would have been versionCode 1 and rejected from the second
+  upload on); `release-android.yml` ran a Gradle task that does not exist so it
+  could never pass. Both now stamp a rising version code, verify the signature and
+  merged manifest, print the upload-key fingerprints, and (upload) send the R8
+  mapping file so Play/Crashlytics stacks are readable. CI signs the release bundle
+  with a throwaway key on every push to exercise the real signing path.
+- ✅ **Release gates** (`scripts/check_release_gates.py`): listing text within
+  Play limits (it caught my own 90-character short description), release notes
+  ≤ 500 characters, store graphics present and correctly sized, and legal-page
+  placeholders **block any non-internal track**.
+- ✅ **Play Console pack:** `docs/PLAY_CONSOLE_DECLARATIONS.md` (app content,
+  content rating, reviewer access, Data Safety, Health apps, Health Connect,
+  permissions), icon 512 and feature graphic generated from the launcher art,
+  `docs/CLOSED_TEST_AND_ROLLOUT.md` (internal → 12-tester/14-day closed test →
+  staged rollout) and `docs/RUNBOOK.md` (rollback, deletion requests, push,
+  cost).
+- ✅ No demo/dev surfaces in release: the developer bar is behind a constant
+  `false` (stripped by R8), self-update and Developer settings are debug-only.
+- ⏳ **Owner-only, in order:** (1) lift the org policy and re-run Deploy Firebase;
+  (2) create the upload key + Play app + service account and set the six GitHub
+  `production` secrets; (3) fill the legal placeholders / appoint the Grievance
+  Officer; (4) run the upload workflow to `internal`, then fill the Console forms
+  from `docs/PLAY_CONSOLE_DECLARATIONS.md`; (5) closed test (≥12 testers × 14 days
+  if this is a personal developer account); (6) staged production rollout.
+- ⚠ Still not verifiable without a device or Play Console: real-phone behaviour of
+  every screen, Play Integrity / App Check enforcement, Play pre-launch report,
+  push delivery on physical devices.

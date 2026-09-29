@@ -43,6 +43,8 @@
 
 ## Play Console
 
+> Step-by-step: `docs/CLOSED_TEST_AND_ROLLOUT.md` (order of operations), `docs/PLAY_CONSOLE_DECLARATIONS.md` (answers to paste), `docs/RUNBOOK.md` (operations). `scripts/check_release_gates.py` runs automatically before every upload.
+
 - Use a private upload key and Play App Signing; build `bundleRelease` with release environment variables.
 - Create the Play Console app for `in.nirogbhumi.app`, enable the Google Play Developer API, and grant a least-privilege Play service account access to the app.
 - Add `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` as a GitHub Actions production secret containing the Play service-account JSON.
