@@ -3,7 +3,9 @@ package com.nirogbhumi.app.ui.screens
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import com.google.firebase.Timestamp
 import com.nirogbhumi.app.data.CloudDocument
 import com.nirogbhumi.app.ui.NirogState
@@ -16,6 +18,9 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+
+/** Scroll into view first: below-the-fold nodes exist semantically but a tap on them would miss. */
+private fun SemanticsNodeInteraction.tap() = performScrollTo().performClick()
 
 private fun doc(id: String, vararg pairs: Pair<String, Any?>) = CloudDocument(id, mapOf(*pairs))
 
@@ -93,17 +98,17 @@ class ProgramResourcesScreenTest {
     composeTestRule.onNodeWithText("Plans & guidance").assertExists()
     composeTestRule.onNodeWithText("Week 1 plate").assertExists()
     composeTestRule.onNodeWithText("Morning flow").assertExists()
-    composeTestRule.onNodeWithText("Week 1").assertExists()
+    composeTestRule.onNodeWithText("Week 1", ignoreCase = true).assertExists() // chips render upper-case
     composeTestRule.onNodeWithText("Half plate vegetables.").assertExists()
   }
 
   @Test
   fun `category filter narrows the list and All restores it`() {
     show()
-    composeTestRule.onNodeWithText("Yoga").performClick()
+    composeTestRule.onNodeWithText("Yoga").tap()
     composeTestRule.onNodeWithText("Morning flow").assertExists()
     composeTestRule.onNodeWithText("Week 1 plate").assertDoesNotExist()
-    composeTestRule.onNodeWithText("All").performClick()
+    composeTestRule.onNodeWithText("All").tap()
     composeTestRule.onNodeWithText("Week 1 plate").assertExists()
   }
 
@@ -111,7 +116,7 @@ class ProgramResourcesScreenTest {
   fun `opening a link hands the exact url to the caller`() {
     var opened = ""
     show(onOpenLink = { opened = it })
-    composeTestRule.onNodeWithText("Open link").performClick()
+    composeTestRule.onNodeWithText("Open link").tap()
     assertEquals("https://nirogbhumi.com/yoga", opened)
   }
 
@@ -120,7 +125,7 @@ class ProgramResourcesScreenTest {
     val long = ProgramResource("3", "diet", "Full week", "Line of guidance. ".repeat(40), null, null, "Coach", 0L)
     show(resources = listOf(long))
     composeTestRule.onNodeWithText("Read more").assertExists()
-    composeTestRule.onNodeWithText("Read more").performClick()
+    composeTestRule.onNodeWithText("Read more").tap()
     composeTestRule.onNodeWithText("Show less").assertExists()
   }
 

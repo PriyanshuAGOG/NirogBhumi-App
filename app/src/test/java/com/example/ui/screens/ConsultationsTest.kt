@@ -5,7 +5,9 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import com.google.firebase.Timestamp
 import com.nirogbhumi.app.data.CloudDocument
@@ -21,6 +23,9 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+
+/** Scroll into view first: below-the-fold nodes exist semantically but a tap on them would miss. */
+private fun SemanticsNodeInteraction.tap() = performScrollTo().performClick()
 
 private fun cdoc(id: String, vararg pairs: Pair<String, Any?>) = CloudDocument(id, mapOf(*pairs))
 
@@ -76,11 +81,11 @@ class RequestConsultationScreenTest {
   fun `send is disabled until there is a real concern and the emergency note is acknowledged`() {
     composeTestRule.setContent { MyApplicationTheme { RequestConsultationContent(submitting = false, error = null, onBack = {}, onSubmit = { _, _, _, _ -> }) } }
     composeTestRule.onNodeWithText("Send request").assertIsNotEnabled()
-    composeTestRule.onNodeWithText("For example: my fasting sugar is high on weekends and I'm not sure what to change.").performTextInput("too short")
+    composeTestRule.onNodeWithText("For example: my fasting sugar is high on weekends and I'm not sure what to change.").performScrollTo().performTextInput("too short")
     composeTestRule.onNodeWithText("Send request").assertIsNotEnabled()
-    composeTestRule.onNodeWithText("For example: my fasting sugar is high on weekends and I'm not sure what to change.").performTextInput(" - now it is long enough to be useful")
+    composeTestRule.onNodeWithText("For example: my fasting sugar is high on weekends and I'm not sure what to change.").performScrollTo().performTextInput(" - now it is long enough to be useful")
     composeTestRule.onNodeWithText("Send request").assertIsNotEnabled() // still not acknowledged
-    composeTestRule.onNodeWithText("I understand this is not emergency care. If I feel very unwell I will contact emergency services or my doctor.").performClick()
+    composeTestRule.onNodeWithText("I understand this is not emergency care. If I feel very unwell I will contact emergency services or my doctor.").tap()
     composeTestRule.onNodeWithText("Send request").assertIsEnabled()
   }
 
@@ -90,12 +95,12 @@ class RequestConsultationScreenTest {
     composeTestRule.setContent {
       MyApplicationTheme { RequestConsultationContent(submitting = false, error = null, onBack = {}, onSubmit = { t, c, w, s -> captured = listOf(t, c, w, s) }) }
     }
-    composeTestRule.onNodeWithText("Yoga").performClick()
-    composeTestRule.onNodeWithText("Evening").performClick()
-    composeTestRule.onNodeWithText("Let the expert see my recent readings").performClick() // untick
-    composeTestRule.onNodeWithText("For example: my fasting sugar is high on weekends and I'm not sure what to change.").performTextInput("Knees hurt during the morning routine")
-    composeTestRule.onNodeWithText("I understand this is not emergency care. If I feel very unwell I will contact emergency services or my doctor.").performClick()
-    composeTestRule.onNodeWithText("Send request").performClick()
+    composeTestRule.onNodeWithText("Yoga").tap()
+    composeTestRule.onNodeWithText("Evening").tap()
+    composeTestRule.onNodeWithText("Let the expert see my recent readings").tap() // untick
+    composeTestRule.onNodeWithText("For example: my fasting sugar is high on weekends and I'm not sure what to change.").performScrollTo().performTextInput("Knees hurt during the morning routine")
+    composeTestRule.onNodeWithText("I understand this is not emergency care. If I feel very unwell I will contact emergency services or my doctor.").tap()
+    composeTestRule.onNodeWithText("Send request").tap()
     assertEquals(listOf<Any>("Yoga", "Knees hurt during the morning routine", "Evening", false), captured)
   }
 
@@ -136,11 +141,11 @@ class MyConsultationsScreenTest {
   fun `a confirmed booking shows expert, how, fee note, message and a join button`() {
     var opened = ""
     show(listOf(confirmed), onOpenLink = { opened = it })
-    composeTestRule.onNodeWithText("Confirmed").assertExists()
+    composeTestRule.onNodeWithText("Confirmed", ignoreCase = true).assertExists()
     composeTestRule.onNodeWithText("with Dr. Meera · Video call").assertExists()
     composeTestRule.onNodeWithText("₹699 - payment link to follow").assertExists()
     composeTestRule.onNodeWithText("“Keep your last week's readings handy”").assertExists()
-    composeTestRule.onNodeWithText("Join video call").performClick()
+    composeTestRule.onNodeWithText("Join video call").tap()
     assertEquals("https://meet.example/abc", opened)
   }
 
@@ -148,9 +153,9 @@ class MyConsultationsScreenTest {
   fun `a waiting request shows the concern and can be withdrawn only after confirming`() {
     var cancelled = ""
     show(listOf(requested), onCancel = { cancelled = it })
-    composeTestRule.onNodeWithText("Waiting for confirmation").assertExists()
+    composeTestRule.onNodeWithText("Waiting for confirmation", ignoreCase = true).assertExists()
     composeTestRule.onNodeWithText("Knees hurt in the morning routine").assertExists()
-    composeTestRule.onNodeWithText("Withdraw request").performClick()
+    composeTestRule.onNodeWithText("Withdraw request").tap()
     assertEquals("", cancelled) // dialog first
     composeTestRule.onNodeWithText("Cancel this consultation?").assertExists()
     composeTestRule.onNodeWithText("Cancel consultation").performClick()
@@ -161,7 +166,7 @@ class MyConsultationsScreenTest {
   fun `keeping it closes the dialog without cancelling`() {
     var cancelled = ""
     show(listOf(confirmed), onCancel = { cancelled = it })
-    composeTestRule.onNodeWithText("Cancel this booking").performClick()
+    composeTestRule.onNodeWithText("Cancel this booking").tap()
     composeTestRule.onNodeWithText("Keep it").performClick()
     assertEquals("", cancelled)
     composeTestRule.onNodeWithText("Cancel this consultation?").assertDoesNotExist()
@@ -171,10 +176,10 @@ class MyConsultationsScreenTest {
   fun `a declined request explains why and offers support`() {
     var support = false
     show(listOf(declined), onSupport = { support = true })
-    composeTestRule.onNodeWithText("Not scheduled").assertExists()
+    composeTestRule.onNodeWithText("Not scheduled", ignoreCase = true).assertExists()
     composeTestRule.onNodeWithText("Fully booked this week - please request again Monday.").assertExists()
     composeTestRule.onNodeWithText("Withdraw request").assertDoesNotExist()
-    composeTestRule.onNodeWithText("Contact support").performClick()
+    composeTestRule.onNodeWithText("Contact support").tap()
     assertTrue(support)
   }
 
@@ -194,7 +199,7 @@ class MyConsultationsScreenTest {
   fun `request button starts a new request`() {
     var started = false
     show(emptyList(), onNew = { started = true })
-    composeTestRule.onNodeWithText("Request a consultation").performClick()
+    composeTestRule.onNodeWithText("Request a consultation").tap()
     assertTrue(started)
   }
 
