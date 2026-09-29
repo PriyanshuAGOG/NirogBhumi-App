@@ -17,5 +17,7 @@ cd "$(dirname "$0")/.."
   VITE_FIREBASE_MESSAGING_SENDER_ID=1 VITE_FIREBASE_APP_ID=1:1:web:e2e \
   npx vite build --outDir ../e2e/dist-emulator --emptyOutDir --logLevel warn)
 
-npx --yes firebase-tools@15.22.3 emulators:exec --only auth,firestore,functions --project demo-nirog-bhumi \
-  "node e2e/seed.mjs && node e2e/console.e2e.mjs"
+# The functions emulator has no default bucket for a demo project; give it one.
+export FIREBASE_CONFIG='{"projectId":"demo-nirog-bhumi","storageBucket":"demo-nirog-bhumi.appspot.com"}'
+npx --yes firebase-tools@15.22.3 emulators:exec --only auth,firestore,functions,storage --project demo-nirog-bhumi \
+  "node e2e/seed.mjs && node e2e/console.e2e.mjs && node e2e/member-journey.e2e.mjs"
