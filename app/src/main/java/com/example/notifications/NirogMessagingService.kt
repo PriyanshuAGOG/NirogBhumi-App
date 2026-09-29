@@ -24,7 +24,7 @@ class NirogMessagingService : FirebaseMessagingService() {
         val body = message.notification?.body ?: message.data["body"] ?: return
         val route = when (message.data["type"]) {
             "report" -> "weekly_report"
-            "consultation" -> "consultation_detail"
+            "consultation" -> "my_consultations"
             "program" -> "active_journey"
             "order" -> "order_detail"
             "expert_message" -> "expert_notes"

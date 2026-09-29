@@ -137,6 +137,9 @@ interface HealthRepository {
     // Coach-authored plans and guidance (diet, yoga, naturopathy, notes) for one
     // batch - programResources, readable only by that batch's members and staff.
     fun listenProgramResources(programId: String, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription
+    // Withdraws the member's own consultation request or booking (they can't edit
+    // its status directly); the server also drops any queued reminder.
+    fun cancelConsultation(id: String, done: (CloudResult<Unit>) -> Unit)
     fun sendCoachInboxMessage(programId: String, memberUid: String, text: String, senderName: String, senderRole: String, done: (CloudResult<Unit>) -> Unit)
 
     // Batch Pulse: today's PII-free "N of M checked in" + collective walking
@@ -667,6 +670,14 @@ class FirebaseHealthRepository : HealthRepository {
                 else update(CloudResult.Success(snapshot?.documents.orEmpty().map { CloudDocument(it.id, it.data.orEmpty()) }))
             }
         return CloudSubscription { registration.remove() }
+    }
+
+    override fun cancelConsultation(id: String, done: (CloudResult<Unit>) -> Unit) {
+        val done = reporting("cancelConsultation", done)
+        val callable = functions?.getHttpsCallable("cancelConsultation") ?: return done(CloudResult.Failure("Firebase is not configured"))
+        callable.call(mapOf("id" to id))
+            .addOnSuccessListener { AnalyticsLogger.log("consultation_cancelled"); done(CloudResult.Success(Unit)) }
+            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Could not cancel this consultation", it)) }
     }
 
     override fun listenProgramResources(programId: String, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription {

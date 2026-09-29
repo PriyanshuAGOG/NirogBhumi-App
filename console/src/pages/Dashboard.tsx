@@ -216,6 +216,7 @@ export default function Dashboard() {
     const list = scoped((ids) => query(collection(db, 'programEvents'), where('programId', 'in', ids), where('startsAt', '>=', now), where('startsAt', '<=', weekEnd)))
     return list ? { primary: list } : null
   }, scopeDeps)
+  const consults = useCount(() => (isAdmin ? { primary: [query(collection(db, 'consultations'), where('status', 'in', ['pending', 'payment_pending']))] } : null), scopeDeps)
   const support = useCount(() => ({ primary: [query(collection(db, 'supportRequests'), where('status', '==', 'open'))], fallback: [query(collection(db, 'supportRequests'))] }))
   const team = useCount(() => (isAdmin ? { primary: [query(collection(db, 'users'), where('role', 'in', ['admin', 'coach', 'super_admin']))] } : null), scopeDeps)
 
@@ -242,6 +243,16 @@ export default function Dashboard() {
       accent: 'var(--status-attention)',
       state: support,
     },
+    ...(isAdmin
+      ? [{
+          key: 'consults',
+          label: 'Consultation requests',
+          hint: 'Members waiting for a confirmed time',
+          to: '/consultations',
+          accent: 'var(--gold)',
+          state: consults,
+        }]
+      : []),
     {
       key: 'quiet',
       label: 'Needs attention',

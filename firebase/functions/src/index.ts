@@ -3,12 +3,13 @@ import { FieldValue, getFirestore, Timestamp } from 'firebase-admin/firestore';
 import { getAuth } from 'firebase-admin/auth';
 import { getStorage } from 'firebase-admin/storage';
 import { getMessaging } from 'firebase-admin/messaging';
-import { onDocumentCreated, onDocumentWritten } from 'firebase-functions/v2/firestore';
+import { onDocumentCreated, onDocumentUpdated, onDocumentWritten } from 'firebase-functions/v2/firestore';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import * as functions from 'firebase-functions/v1';
 import { createHash, randomBytes } from 'node:crypto';
 import { processPendingNotifications } from './notificationSender.js';
+import { cancelOwnConsultation, handleConsultationChange } from './consultations.js';
 import { dayKeyIST, isMondayIST, sendWeeklyDigests, updateBatchPulse } from './scheduledJobs.js';
 import { DELETION_GRACE_DAYS, cancelAccountDeletion as cancelDeletionRequest, processDueDeletions, scheduleAccountDeletion } from './accountDeletion.js';
 
@@ -202,6 +203,28 @@ export const onCoachInboxMessageCreate = onDocumentCreated({ document: 'coachInb
   } catch (error) {
     console.error('Coach inbox push failed', event.params.messageId, error);
     await notificationRef.set({ ...base, status: 'failed', failureReason: 'send_failed' });
+  }
+});
+
+// Pushes and reminders for consultation requests as staff confirm, move, decline or
+// cancel them (see consultations.ts).
+export const onConsultationUpdate = onDocumentUpdated({ document: 'consultations/{consultationId}', region }, async event => {
+  await handleConsultationChange(db, event.params.consultationId, event.data?.before.data(), event.data?.after.data());
+});
+
+// A member withdraws their own consultation request or booking.
+export const cancelConsultation = onCall({ region }, async request => {
+  const auth = requireUser(request);
+  const id = String(request.data?.id ?? '');
+  if (!id) throw new HttpsError('invalid-argument', 'id is required');
+  try {
+    return await cancelOwnConsultation(db, auth.uid, id);
+  } catch (error) {
+    const code = (error as { code?: string }).code;
+    if (code === 'not-found') throw new HttpsError('not-found', 'That consultation was not found');
+    if (code === 'permission-denied') throw new HttpsError('permission-denied', 'You can only cancel your own consultation');
+    if (code === 'failed-precondition') throw new HttpsError('failed-precondition', 'This consultation can no longer be cancelled');
+    throw error;
   }
 });
 

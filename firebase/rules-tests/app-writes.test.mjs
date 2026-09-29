@@ -89,6 +89,23 @@ describe('health logs (addHealthLog / updateHealthLog / upsertUserRecord)', () =
     await assertSucceeds(setDoc(doc(db, 'deviceConnections/mem_hc'), { userId: 'mem', profileId: 'mem', provider: 'health_connect', status: 'connected', createdAt: ts(), updatedAt: ts() }, { merge: true }));
     await assertSucceeds(setDoc(doc(db, 'deviceConnections/mem_hc'), { userId: 'mem', lastSyncAt: ts() }, { merge: true }));
   });
+  it('a consultation REQUEST (type, concern, preferred window) can be created but cannot self-confirm or carry a slot/link/expert', async () => {
+    const db = member('mem');
+    const request = { userId: 'mem', profileId: 'mem', consultationType: 'Diet review', concern: 'My fasting sugar is high on weekends', preferredWindow: 'Evening', shareRecentLogs: true, status: 'pending', paymentStatus: 'pending', createdAt: ts() };
+    await assertSucceeds(setDoc(doc(collection(db, 'consultations')), request));
+    await assertFails(setDoc(doc(collection(db, 'consultations')), { ...request, concern: 'x'.repeat(1001) }));
+    await assertFails(setDoc(doc(collection(db, 'consultations')), { ...request, scheduledAt: new Date() }));
+    await assertFails(setDoc(doc(collection(db, 'consultations')), { ...request, joinLink: 'https://evil.example' }));
+    await assertFails(setDoc(doc(collection(db, 'consultations')), { ...request, status: 'confirmed' }));
+  });
+  it('a member cannot confirm or cancel their own consultation directly (staff confirm, the cancel callable cancels)', async () => {
+    const db = member('mem');
+    const ref = doc(collection(db, 'consultations'));
+    await setDoc(ref, { userId: 'mem', status: 'pending', paymentStatus: 'pending', createdAt: ts() });
+    await assertFails(setDoc(ref, { status: 'confirmed' }, { merge: true }));
+    await assertFails(setDoc(ref, { status: 'cancelled' }, { merge: true }));
+    await assertSucceeds(setDoc(ref, { concern: 'Updated details' }, { merge: true }));
+  });
   it('family profile, support request, and a pending consultation can be created; a paid one cannot', async () => {
     const db = member('mem');
     await assertSucceeds(setDoc(doc(collection(db, 'profiles')), { userId: 'mem', profileId: 'x', name: 'Mum', createdAt: ts() }));

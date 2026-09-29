@@ -1963,7 +1963,8 @@ fun CareTab(state: NirogState) {
             // stepper was pulled with the Razorpay removal and isn't being
             // rebuilt yet, so this is an honest handoff instead of a dead-end
             // flow or a fabricated "coming soon" screen.
-            CareRow(Icons.Outlined.MedicalServices, "Book a Consultation", "Opens nirogbhumi.com to pick an expert and a time.") { openConsultationBooking() }
+            CareRow(Icons.Outlined.MedicalServices, "Request a consultation", "Tell us what you need - our team confirms a time with you.") { state.currentScreen = "request_consultation" }
+            CareRow(Icons.Outlined.EventAvailable, "My consultations", "Your requests and booked sessions.") { state.currentScreen = "my_consultations" }
 
             // Care+'s calendar/community layer is a second tier only for enrolled
             // program members. Rather than a single thin locked card, show what's
@@ -2031,9 +2032,13 @@ fun CareTab(state: NirogState) {
             PinnedAnnouncementCard(state)
 
             SectionLabel("SUPPORT", color = NirogColor.gold)
-            CareRow(Icons.Outlined.MedicalServices, "Book a Consultation", "Opens nirogbhumi.com to pick an expert and a time.") { openConsultationBooking() }
+            CareRow(Icons.Outlined.MedicalServices, "Request a consultation", "Tell us what you need - our team confirms a time with you.") { state.currentScreen = "request_consultation" }
+            CareRow(Icons.Outlined.EventAvailable, "My consultations", "Your requests and booked sessions.") { state.currentScreen = "my_consultations" }
         }
 
+        TextButton(onClick = { openConsultationBooking() }, modifier = Modifier.fillMaxWidth()) {
+            Text("Prefer to book on our website?", color = NirogColor.forestSoft, fontSize = 13.sp)
+        }
         Spacer(modifier = Modifier.height(32.dp))
     }
 }

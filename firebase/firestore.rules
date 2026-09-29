@@ -115,7 +115,14 @@ service cloud.firestore {
       allow update: if collection in ['glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','labReports','dailyCheckins','checklistLogs','medicationLogs'] && (admin() || (ownsResource() && ownsRequest() && preservesUserId()) || (assigned(resource.data.userId) && preservesUserId()));
     }
     match /consultations/{id} {
-      allow create: if validCreate() && request.resource.data.paymentStatus == 'pending' && request.resource.data.status in ['pending', 'payment_pending'];
+      // A member can only ever *request*: status starts 'pending' and payment 'pending'; the
+      // confirmed time, expert and link are written by staff (admin update below). Free text is
+      // length-capped so a request can't be used to store arbitrary bulk data.
+      allow create: if validCreate() && request.resource.data.paymentStatus == 'pending' && request.resource.data.status in ['pending', 'payment_pending']
+        && request.resource.data.get('concern', '') is string && request.resource.data.get('concern', '').size() <= 1000
+        && request.resource.data.get('consultationType', '') is string && request.resource.data.get('consultationType', '').size() <= 80
+        && request.resource.data.get('preferredWindow', '') is string && request.resource.data.get('preferredWindow', '').size() <= 40
+        && !('scheduledAt' in request.resource.data) && !('joinLink' in request.resource.data) && !('expertName' in request.resource.data);
       allow read: if ownsResource() || admin() || assignedCoachToUser(resource.data.userId) || (expert() && resource.data.expertId == request.auth.uid);
       allow update: if admin() || (expert() && resource.data.expertId == request.auth.uid && request.resource.data.expertId == resource.data.expertId && preservesUserId()) || (ownsResource() && ownsRequest() && preservesUserId() && request.resource.data.paymentStatus == resource.data.paymentStatus && request.resource.data.status == resource.data.status);
     }
