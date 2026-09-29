@@ -314,3 +314,26 @@ Other half-built logic:
    Health apps declaration.
 7. Decide whether this branch keeps deploying to production, or gets a
    separate staging Firebase project (recommended).
+
+---
+
+## 10. Progress log
+
+### Sprint 0 — stabilize production (done on branch, awaiting merge to `main`)
+- ✅ Branch merged with `main`: keeps `main`'s coach scoping, APK checksum
+  and Storage guard, and this branch's signup fix, create-lock, consent
+  receipts, coach inbox and legal pages. 111 rules tests pass.
+- ✅ Production deploys only from `main`; a new deploy step re-applies the
+  public invoker to every callable and fails loudly if the org policy still
+  blocks it.
+- ✅ Access codes: `redeemProgramCode` honours console codes (active,
+  expiry, max uses, no double-counting), with clear error messages. The
+  console normalises, validates and can generate and copy codes.
+- ✅ Batches "Message" now reaches the member (in the coach inbox) and
+  pushes immediately, in both directions.
+- ✅ Calendar "also announce" uses the announcement function and no longer
+  mislabels a saved event as failed.
+- ✅ Glucose feed index added.
+- ⏳ Needs the owner: the org-policy change in §9 item 1 (until then the
+  invoker step will report failure), and merging this branch to `main` to
+  deploy.
