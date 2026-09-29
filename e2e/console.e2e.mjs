@@ -286,6 +286,60 @@ await step('admin members page shows real names (the app stores fullName) and se
   await noBanner(admin.page, 'Members');
 });
 
+await step('consultations: validate, confirm a time, reschedule (reminder replaced), decline with a reason', async () => {
+  const inputDate = (daysAhead, hour) => { const d = new Date(Date.now() + daysAhead * 86_400_000); d.setHours(hour, 30, 0, 0); const p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; };
+  await go(admin.page, '/consultations');
+  const card = admin.page.locator('.cons-card', { hasText: 'Diet review' });
+  await card.waitFor();
+  await card.getByText('Asha Member').waitFor();
+  await card.getByText(/My fasting sugar is high on weekends/).waitFor();
+  await snap(admin.page, 'admin-consultations');
+  await card.getByRole('button', { name: 'Confirm a time' }).click();
+  await admin.page.getByRole('button', { name: 'Confirm & notify' }).click();
+  await admin.page.getByText('Pick the date and time.').waitFor();
+  await admin.page.locator('input[type="datetime-local"]').fill(inputDate(-1, 10));
+  await admin.page.getByRole('button', { name: 'Confirm & notify' }).click();
+  await admin.page.getByText('That time is in the past.').waitFor();
+  await admin.page.locator('input[type="datetime-local"]').fill(inputDate(2, 10));
+  await admin.page.getByRole('button', { name: 'Confirm & notify' }).click();
+  await admin.page.getByText("Add the expert's name.").waitFor();
+  await admin.page.getByPlaceholder('Dr. Meera').fill('Dr. Meera');
+  await admin.page.getByPlaceholder('https://meet.…').fill('not-a-link');
+  await admin.page.getByRole('button', { name: 'Confirm & notify' }).click();
+  await admin.page.getByText(/video link/).waitFor();
+  await admin.page.getByPlaceholder('https://meet.…').fill('https://meet.example.com/asha');
+  await admin.page.getByPlaceholder(/payment link/).fill('₹699 - we will send a payment link');
+  await admin.page.getByRole('button', { name: 'Confirm & notify' }).click();
+  await admin.page.getByText(/Confirmed\. The member has been notified/).waitFor();
+  let doc = (await adb.doc('consultations/consA').get()).data();
+  expect(doc.status === 'confirmed' && doc.expertName === 'Dr. Meera' && doc.mode === 'video' && doc.joinLink === 'https://meet.example.com/asha' && doc.confirmedBy === 'admin1', `consultation not confirmed properly: ${JSON.stringify(doc)}`);
+  const first = await eventually(async () => { const s = await adb.collection('notifications').where('consultationId', '==', 'consA').get(); return s.size >= 2 ? s.docs.map((d) => d.data()) : null; }, 'confirmation push and reminder should be queued');
+  expect(first.some((n) => n.title === 'Consultation confirmed' && n.userId === 'memA'), 'member is told it is confirmed');
+  expect(first.filter((n) => n.kind === 'reminder').length === 1, 'one reminder queued');
+  // reschedule: the old reminder must be replaced, not duplicated
+  await admin.page.getByRole('tab', { name: 'Upcoming' }).click().catch(async () => admin.page.getByRole('button', { name: 'Upcoming' }).click());
+  const up = admin.page.locator('.cons-card', { hasText: 'Diet review' });
+  await up.getByRole('button', { name: 'Reschedule' }).click();
+  await admin.page.locator('input[type="datetime-local"]').fill(inputDate(4, 16));
+  await admin.page.getByRole('button', { name: 'Save new time' }).click();
+  await admin.page.getByText(/Updated\. The member has been notified of the new time/).waitFor();
+  await eventually(async () => { const s = await adb.collection('notifications').where('consultationId', '==', 'consA').where('status', '==', 'scheduled').get(); const r = s.docs.filter((d) => d.get('kind') === 'reminder'); return r.length === 1 && r[0].get('scheduledFor').toMillis() > Date.now() + 3 * 86_400_000 ? true : null; }, 'the reminder should move to the new time (exactly one)');
+  expect((await adb.collection('notifications').where('consultationId', '==', 'consA').get()).docs.some((d) => d.get('title') === 'Consultation rescheduled'), 'member is told about the new time');
+  // decline the other request with a reason
+  await admin.page.getByRole('button', { name: /Requests/ }).click();
+  const other = admin.page.locator('.cons-card', { hasText: 'Naturopathy' });
+  await other.getByRole('button', { name: 'Decline' }).click();
+  await admin.page.getByRole('button', { name: 'Decline & notify' }).click();
+  await admin.page.getByText('Tell the member why, and what to do next.').waitFor();
+  await admin.page.locator('.modal textarea').fill('Fully booked this week - please request again from Monday.');
+  await admin.page.getByRole('button', { name: 'Decline & notify' }).click();
+  await admin.page.getByText(/Declined\. The member has been told/).waitFor();
+  doc = (await adb.doc('consultations/consB').get()).data();
+  expect(doc.status === 'declined' && /request again from Monday/.test(doc.declineReason), 'declined with the reason');
+  await eventually(async () => (await adb.collection('notifications').where('consultationId', '==', 'consB').get()).docs.some((d) => /couldn't schedule/i.test(d.get('title')) && /Monday/.test(d.get('body'))), 'decline reason should reach the member');
+  await noBanner(admin.page, 'Consultations');
+});
+
 await step('member detail and moderation load for admin', async () => {
   await admin.page.goto(`${BASE}/members/memA`);
   await admin.page.getByText('Asha Member').first().waitFor();

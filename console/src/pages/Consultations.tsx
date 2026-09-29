@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { collection, doc, getDoc, onSnapshot, orderBy, query, limit, serverTimestamp, Timestamp, updateDoc } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import { useAuth } from '../auth/AuthProvider'
@@ -277,7 +278,7 @@ export default function Consultations() {
                   {c.preferredWindow && c.preferredWindow !== 'Any' && <span>Prefers {c.preferredWindow.toLowerCase()}</span>}
                   {c.shareRecentLogs && <span>Shares recent readings</span>}
                   {c.userId && (
-                    <a href={`/members/${c.userId}`} className="cons-link">Open health record</a>
+                    <Link to={`/members/${c.userId}`} className="cons-link">Open health record</Link>
                   )}
                 </div>
                 {c.status === 'confirmed' && when && (

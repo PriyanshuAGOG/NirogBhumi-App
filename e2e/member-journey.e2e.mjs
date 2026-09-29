@@ -103,6 +103,17 @@ await step('plans & guidance: the member sees their own batch\'s resources and n
   expect((await errorCode(() => addDoc(collection(db, 'programResources'), { programId: 'progJ', category: 'diet', title: 'Mine', body: 'x', createdBy: uid, createdAt: serverTimestamp() }))) === 'permission-denied', 'members cannot author resources');
 });
 
+await step('consultations: the member requests one, cannot self-confirm it, and can cancel it', async () => {
+  const req = await addDoc(collection(db, 'consultations'), { userId: uid, profileId: uid, consultationType: 'Follow-up', concern: 'Checking in after two weeks of the plan.', preferredWindow: 'Any time', shareRecentLogs: true, status: 'pending', paymentStatus: 'pending', source: 'app', createdAt: serverTimestamp() });
+  const mine = await getDocs(query(collection(db, 'consultations'), where('userId', '==', uid)));
+  expect(mine.size === 1 && mine.docs[0].get('status') === 'pending', 'member can list their own requests');
+  expect((await errorCode(() => updateDoc(req, { status: 'confirmed' }))) === 'permission-denied', 'members cannot confirm themselves');
+  expect((await errorCode(() => addDoc(collection(db, 'consultations'), { userId: uid, consultationType: 'Yoga', status: 'pending', paymentStatus: 'pending', joinLink: 'https://evil.example', createdAt: serverTimestamp() }))) === 'permission-denied', 'members cannot attach their own join link');
+  expect((await call('cancelConsultation', { id: req.id })).cancelled === true, 'cancel works');
+  expect((await getDoc(req)).get('status') === 'cancelled', 'status is cancelled');
+  expect((await call('cancelConsultation', { id: req.id })).alreadyCancelled === true, 'cancelling twice is harmless');
+});
+
 let healthFilePath;
 await step('uploads: private files and chat photos succeed; wrong owner or wrong type is refused', async () => {
   healthFilePath = `users/${uid}/health-file/abc123`;

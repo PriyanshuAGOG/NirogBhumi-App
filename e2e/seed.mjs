@@ -45,6 +45,8 @@ await db.collection('supportRequests').add({ userId: 'memA', status: 'open', sub
 await db.collection('reportedMessages').add({ programId: 'progA', messageId: 'm1', reportedText: 'spammy text in A', reportedUserId: 'memA', reporterId: 'memB', status: 'open', createdAt: daysAgo(1) });
 await db.collection('reportedMessages').add({ programId: 'progB', messageId: 'm2', reportedText: 'spammy text in B', reportedUserId: 'memB', reporterId: 'memA', status: 'open', createdAt: daysAgo(1) });
 
+await db.collection('consultations').doc('consA').set({ userId: 'memA', consultationType: 'Diet review', concern: 'My fasting sugar is high on weekends.', preferredWindow: 'Evening', shareRecentLogs: true, status: 'pending', paymentStatus: 'pending', createdAt: daysAgo(2) });
+await db.collection('consultations').doc('consB').set({ userId: 'memB', consultationType: 'Naturopathy', concern: 'Looking for a gentle daily routine.', preferredWindow: 'Morning', status: 'pending', paymentStatus: 'pending', createdAt: daysAgo(1) });
 await db.collection('deletionRequests').add({ userId: 'memDel', status: 'scheduled', source: 'app', scheduledFor: Timestamp.fromMillis(Date.now() + 5 * 86_400_000), attempts: 0, createdAt: daysAgo(2) });
 await db.collection('programInvites').doc('email_invitee@test.dev').set({ contact: 'invitee@test.dev', contactType: 'email', programId: 'progA', programName: 'July Batch', createdAt: FieldValue.serverTimestamp(), consumedAt: null, consumedByUid: null });
 
