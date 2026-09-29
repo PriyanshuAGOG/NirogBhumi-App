@@ -102,6 +102,7 @@ export default function Programs() {
   const [cSaving, setCSaving] = useState(false)
   const [cError, setCError] = useState<string | null>(null)
   const [busyCode, setBusyCode] = useState<string | null>(null)
+  const [copiedCode, setCopiedCode] = useState<string | null>(null)
 
   // Invites - pre-enroll by phone/email, consumed automatically at signup
   const [invites, setInvites] = useState<ProgramInvite[]>([])
@@ -176,8 +177,20 @@ export default function Programs() {
   }
 
   async function saveCode() {
-    if (!cDraft || !cDraft.code.trim() || !cDraft.programId) {
+    if (!cDraft) return
+    // Codes are matched case-insensitively by the redeem function, which looks
+    // the code up by its upper-cased text - so it is stored that way here.
+    const code = cDraft.code.trim().toUpperCase()
+    if (!code || !cDraft.programId) {
       setCError('A code and a target program are required.')
+      return
+    }
+    if (!/^[A-Z0-9_-]{4,24}$/.test(code)) {
+      setCError('Use 4–24 letters, numbers, dashes or underscores (no spaces).')
+      return
+    }
+    if (codes.some((c) => (c.code ?? c.id).toUpperCase() === code)) {
+      setCError('That code already exists. Pick a different one, or reactivate the existing code.')
       return
     }
     setCSaving(true)
@@ -186,11 +199,11 @@ export default function Programs() {
     const exp = fromInputDateTime(cDraft.expiresAt ? `${cDraft.expiresAt}T23:59` : '')
     try {
       // Use the code text as the doc id so codes are unique & directly lookupable.
-      await setDoc(doc(db, 'programCodes', cDraft.code.trim()), {
-        code: cDraft.code.trim(),
+      await setDoc(doc(db, 'programCodes', code), {
+        code,
         programId: cDraft.programId,
         active: true,
-        maxUses: Number.isFinite(max) ? max : null,
+        maxUses: Number.isFinite(max) && max > 0 ? max : null,
         uses: 0,
         expiresAt: exp ? Timestamp.fromDate(exp) : null,
         createdAt: serverTimestamp(),
@@ -200,6 +213,24 @@ export default function Programs() {
       setCError(errText(err, 'Code could not be created'))
     } finally {
       setCSaving(false)
+    }
+  }
+
+  // Unambiguous alphabet (no 0/O/1/I) so a code read out over a call or typed
+  // from a screenshot doesn't fail on a look-alike character.
+  function generateCode(): string {
+    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+    const bytes = crypto.getRandomValues(new Uint8Array(8))
+    return Array.from(bytes, (b) => alphabet[b % alphabet.length]).join('')
+  }
+
+  async function copyCode(c: ProgramCode) {
+    try {
+      await navigator.clipboard.writeText(c.code ?? c.id)
+      setCopiedCode(c.id)
+      window.setTimeout(() => setCopiedCode((cur) => (cur === c.id ? null : cur)), 1800)
+    } catch {
+      setCodesError('Could not copy - select the code and copy it manually.')
     }
   }
 
@@ -433,6 +464,9 @@ export default function Programs() {
                   ) : (
                     <span className="tag tag-neutral">Off</span>
                   )}
+                  <button className="btn btn-ghost btn-sm" onClick={() => void copyCode(c)}>
+                    {copiedCode === c.id ? 'Copied ✓' : 'Copy'}
+                  </button>
                   <button
                     className="btn btn-ghost btn-sm"
                     disabled={busyCode === c.id}
@@ -650,7 +684,13 @@ export default function Programs() {
             )}
             <div className="field">
               <span className="field-label">Code</span>
-              <input className="input" value={cDraft.code} onChange={(e) => setC('code', e.target.value)} placeholder="JULY26" />
+              <div className="field-row">
+                <input className="input" value={cDraft.code} onChange={(e) => setC('code', e.target.value.toUpperCase())} placeholder="JULY26" maxLength={24} autoCapitalize="characters" />
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setC('code', generateCode())}>
+                  Generate
+                </button>
+              </div>
+              <span className="field-hint">Members type this when they join. Not case-sensitive.</span>
             </div>
             <div className="field">
               <span className="field-label">Program</span>

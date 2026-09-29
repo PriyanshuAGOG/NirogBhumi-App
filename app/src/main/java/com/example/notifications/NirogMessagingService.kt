@@ -29,6 +29,7 @@ class NirogMessagingService : FirebaseMessagingService() {
             "order" -> "order_detail"
             "expert_message" -> "expert_notes"
             "announcement" -> "announcements"
+            "coach_message" -> "coach_inbox"
             else -> "dashboard"
         }
         val intent = Intent(this, MainActivity::class.java).putExtra("route", route).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)

@@ -45,7 +45,7 @@ private const val IS_PRODUCTION_APK = true
 private val DEEP_LINK_ROUTES = setOf(
   "dashboard", "weekly_report", "consultation_detail", "active_journey",
   "order_detail", "expert_notes", "program_calendar", "announcements",
-  "daily_checkin",
+  "daily_checkin", "coach_inbox",
 )
 private fun sanitizedRoute(raw: String?): String = raw?.takeIf { it in DEEP_LINK_ROUTES } ?: ""
 

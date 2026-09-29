@@ -170,6 +170,45 @@ export const onBPReadingCreate = onDocumentCreated({ document: 'bpReadings/{read
 // Daily maintenance job. Runs once a day; on Mondays it also builds weekly
 // reports. Keeping daily + weekly in one schedule keeps us to 3 Cloud
 // Scheduler jobs total (this + notifications + deletions), inside the free tier.
+// Two-way coach <-> member inbox (coachInboxMessages, written by the app's
+// "Ask your coach" screen and by the console's roster "Message" action).
+// Pushes the message to whoever did NOT write it, immediately rather than
+// waiting for the 15-minute notification sweep - a reply from a coach is a
+// human conversation, not a batchable reminder. Every send is recorded in
+// `notifications` so it shows in the member's notification inbox and audit.
+export const onCoachInboxMessageCreate = onDocumentCreated({ document: 'coachInboxMessages/{messageId}', region }, async event => {
+  const message = event.data?.data();
+  if (!message) return;
+  const memberUid = String(message.memberUid ?? '');
+  const fromUid = String(message.fromUid ?? '');
+  const programId = String(message.programId ?? '');
+  const text = String(message.text ?? '').trim();
+  if (!memberUid || !fromUid || !text) return;
+
+  let recipientUid = memberUid;
+  let title = `${String(message.senderName ?? 'Your coach')} replied`;
+  if (fromUid === memberUid) {
+    // Member asked a question: notify the program's coach, if one is assigned.
+    const program = await db.doc(`programs/${programId}`).get();
+    recipientUid = String(program.get('coachId') ?? '');
+    title = `${String(message.senderName ?? 'A member')} asked a question`;
+  }
+  if (!recipientUid || recipientUid === fromUid) return;
+
+  const body = text.length > 140 ? `${text.slice(0, 137)}...` : text;
+  const notificationRef = db.collection('notifications').doc();
+  const base = { userId: recipientUid, profileId: null, title, body, type: 'coach_message', createdAt: FieldValue.serverTimestamp() };
+  const token = (await db.doc(`users/${recipientUid}`).get()).get('fcmToken');
+  if (!token) { await notificationRef.set({ ...base, status: 'failed', failureReason: 'missing_token' }); return; }
+  try {
+    await getMessaging().send({ token, notification: { title, body }, data: { type: 'coach_message', notificationId: notificationRef.id } });
+    await notificationRef.set({ ...base, status: 'sent', sentAt: FieldValue.serverTimestamp() });
+  } catch (error) {
+    console.error('Coach inbox push failed', event.params.messageId, error);
+    await notificationRef.set({ ...base, status: 'failed', failureReason: 'send_failed' });
+  }
+});
+
 export const generateDailyContent = onSchedule({ schedule: '0 5 * * *', timeZone: 'Asia/Kolkata', region }, async () => {
   const users = await db.collection('users').where('status', '==', 'active').get();
   const day = new Date().toISOString().slice(0, 10); const batch = db.batch();
@@ -553,35 +592,78 @@ export const redeemProgramCode = onCall({ region }, async request => {
   const auth = requireUser(request);
   const code = String(request.data?.code ?? '').trim().toUpperCase();
   if (!code) throw new HttpsError('invalid-argument', 'A program code is required');
+  if (code.length > 64 || code.includes('/')) throw new HttpsError('not-found', "That program code wasn't recognized");
 
-  const matches = await db.collection('programs').where('code', '==', code).limit(1).get();
-  const programDoc = matches.docs[0];
-  if (!programDoc) throw new HttpsError('not-found', "That program code wasn't recognized");
+  // Two sources of codes, checked in order:
+  //  1. programCodes/{code} - what the console's "Access codes" panel creates,
+  //     with active / expiry / max-uses controls. Doc id is the upper-cased
+  //     code text. Uses are counted here, transactionally, so two people
+  //     racing for the last seat can't both get in.
+  //  2. programs.code - the single legacy code stored on the program itself.
+  //     Kept so batches created before access codes existed keep working.
+  const codeRef = db.doc(`programCodes/${code}`);
+  const redemptionRef = codeRef.collection('redemptions').doc(auth.uid);
+  const userRef = db.doc(`users/${auth.uid}`);
 
-  const programId = programDoc.id;
-  const programName = String(programDoc.get('name') ?? 'Nirog Bhumi Program');
-  const durationDays = programDurationDays(programDoc);
+  const result = await db.runTransaction(async tx => {
+    const [codeSnap, userSnap] = await Promise.all([tx.get(codeRef), tx.get(userRef)]);
 
-  const userDoc = await db.doc(`users/${auth.uid}`).get();
-  const memberName = String(userDoc.get('fullName') ?? '').trim() || 'Member';
+    let programSnap: FirebaseFirestore.DocumentSnapshot | undefined;
+    let countsUse = false;
+    if (codeSnap.exists) {
+      if (codeSnap.get('active') === false) throw new HttpsError('failed-precondition', 'This code is no longer active. Ask your coach for a new one.');
+      const expiresAt = codeSnap.get('expiresAt');
+      if (expiresAt && typeof expiresAt.toMillis === 'function' && expiresAt.toMillis() < Date.now()) throw new HttpsError('failed-precondition', 'This code has expired. Ask your coach for a new one.');
+      programSnap = await tx.get(db.doc(`programs/${String(codeSnap.get('programId') ?? '_')}`));
+      if (!programSnap.exists) throw new HttpsError('not-found', "That program code wasn't recognized");
+      countsUse = true;
+    } else {
+      const legacy = await tx.get(db.collection('programs').where('code', '==', code).limit(1));
+      programSnap = legacy.docs[0];
+      if (!programSnap) throw new HttpsError('not-found', "That program code wasn't recognized");
+    }
 
-  // Enrollment and the roster entry the coach console reads from must land
-  // together, or the console shows a phantom program with no members.
-  const batch = db.batch();
-  batch.set(db.doc(`users/${auth.uid}`), {
-    programActive: true,
-    activeProgramId: programId,
-    activeProgramName: programName,
-    programDurationDays: durationDays,
-    programStartedAt: FieldValue.serverTimestamp(),
-    updatedAt: FieldValue.serverTimestamp(),
-  }, { merge: true });
-  batch.set(db.doc(`programMembers/${programId}_${auth.uid}`), {
-    programId, uid: auth.uid, name: memberName, status: 'active', joinedAt: FieldValue.serverTimestamp(),
-  }, { merge: true });
-  await batch.commit();
+    const programId = programSnap.id;
+    const alreadyIn = userSnap.get('programActive') === true && userSnap.get('activeProgramId') === programId;
 
-  return { activeProgramId: programId, activeProgramName: programName, programDurationDays: durationDays, programActive: true };
+    if (countsUse && !alreadyIn) {
+      // Re-redeeming after a partial/failed earlier attempt must not burn a
+      // second seat, so a per-user marker makes the count idempotent.
+      const marker = await tx.get(redemptionRef);
+      if (!marker.exists) {
+        const maxUses = Number(codeSnap.get('maxUses') ?? 0);
+        const uses = Number(codeSnap.get('uses') ?? 0);
+        if (maxUses > 0 && uses >= maxUses) throw new HttpsError('resource-exhausted', 'This code has reached its limit. Ask your coach for a new one.');
+        tx.update(codeRef, { uses: FieldValue.increment(1), lastUsedAt: FieldValue.serverTimestamp() });
+        tx.set(redemptionRef, { uid: auth.uid, redeemedAt: FieldValue.serverTimestamp() });
+      }
+    }
+
+    const programName = String(programSnap.get('name') ?? 'Nirog Bhumi Program');
+    const durationDays = programDurationDays(programSnap);
+    const memberName = String(userSnap.get('fullName') ?? '').trim() || 'Member';
+
+    // Enrollment and the roster entry the coach console reads from must land
+    // together, or the console shows a phantom program with no members.
+    if (!alreadyIn) {
+      tx.set(userRef, {
+        programActive: true,
+        activeProgramId: programId,
+        activeProgramName: programName,
+        programDurationDays: durationDays,
+        programStartedAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      }, { merge: true });
+    }
+    tx.set(db.doc(`programMembers/${programId}_${auth.uid}`), {
+      programId, uid: auth.uid, name: memberName, status: 'active',
+      ...(alreadyIn ? {} : { joinedAt: FieldValue.serverTimestamp() }),
+    }, { merge: true });
+
+    return { activeProgramId: programId, activeProgramName: programName, programDurationDays: durationDays, programActive: true };
+  });
+
+  return result;
 });
 
 // Self-heals a missing programMembers roster doc for an account that Firestore

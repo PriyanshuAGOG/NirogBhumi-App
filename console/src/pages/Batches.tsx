@@ -134,11 +134,16 @@ function Roster({ program }: { program: Program }) {
     setSending(true)
     setSendError(null)
     try {
-      await addDoc(collection(db, 'coachMessages'), {
+      // Same collection/shape the app's "Ask your coach" inbox reads, so the
+      // member sees this in-thread; onCoachInboxMessageCreate pushes it.
+      const memberUid = target.uid ?? target.id.replace(`${program.id}_`, '')
+      await addDoc(collection(db, 'coachInboxMessages'), {
         programId: program.id,
-        toUid: target.uid ?? target.id,
+        memberUid,
         fromUid: user?.uid ?? null,
-        text: text.trim(),
+        senderName: user?.displayName ?? (isAdmin ? 'Nirog Bhumi team' : 'Your coach'),
+        senderRole: 'coach', // the app renders any staff reply as "coach"
+        text: text.trim().slice(0, 2000),
         createdAt: serverTimestamp(),
       })
       setSentTo(target.name ?? 'member')
