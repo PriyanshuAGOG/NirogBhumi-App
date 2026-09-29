@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { collection, onSnapshot, orderBy, query } from 'firebase/firestore'
+import { collection, onSnapshot, orderBy, query, where } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import { useAuth } from '../auth/AuthProvider'
 import { usePrograms } from '../lib/usePrograms'
@@ -95,10 +95,19 @@ export default function Announcements() {
 
   useEffect(() => {
     setLoading(true)
+    // A coach sees only their own posts (announcement docs list every
+    // recipient's uid, so the rules keep them to the author + admins), and the
+    // query has to say so or Firestore rejects it. Sorted here rather than in
+    // the query to avoid needing a second composite index.
+    if (!isAdmin && !user?.uid) return
     const unsub = onSnapshot(
-      query(collection(db, 'announcements'), orderBy('createdAt', 'desc')),
+      isAdmin
+        ? query(collection(db, 'announcements'), orderBy('createdAt', 'desc'))
+        : query(collection(db, 'announcements'), where('authorId', '==', user?.uid ?? '')),
       (snap) => {
-        setItems(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Announcement, 'id'>) })))
+        const next = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Announcement, 'id'>) }))
+        if (!isAdmin) next.sort((a, b) => ((b.createdAt as { toMillis?: () => number } | undefined)?.toMillis?.() ?? 0) - ((a.createdAt as { toMillis?: () => number } | undefined)?.toMillis?.() ?? 0))
+        setItems(next)
         setLoading(false)
         setError(null)
       },
@@ -108,7 +117,7 @@ export default function Announcements() {
       },
     )
     return unsub
-  }, [])
+  }, [isAdmin, user?.uid])
 
   // Recipient count preview goes stale the moment any targeting input
   // changes, so it's cleared rather than left showing a number that no

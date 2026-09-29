@@ -448,7 +448,7 @@ export const createAnnouncement = onCall({ region, timeoutSeconds: 120 }, async 
     for (let offset = 0; offset < recipients.length; offset += 400) {
       const batch = db.batch();
       recipients.slice(offset, offset + 400).forEach(uid => {
-        batch.set(db.doc(`users/${uid}/announcements/${announcementRef.id}`), { announcementId: announcementRef.id, title, body, authorName, createdAt: now, expiresAt });
+        batch.set(db.doc(`users/${uid}/announcements/${announcementRef.id}`), { announcementId: announcementRef.id, title, body, authorName, authorId: auth.uid, createdAt: now, expiresAt });
       });
       await batch.commit();
     }

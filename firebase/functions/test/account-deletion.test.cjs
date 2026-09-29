@@ -43,6 +43,7 @@ async function seedMember(uid, { research = false } = {}) {
   await db.doc(`reportedMessages/${uid}-r1`).set({ reporterId: uid, reportedUserId: 'x', reportedText: 'their words', programId: 'progA' });
   await db.doc(`reportedMessages/${uid}-r2`).set({ reporterId: 'y', reportedUserId: uid, reportedText: 'my words', programId: 'progA' });
   await db.doc(`programInvites/${uid}-inv`).set({ contact: `${uid}@example.com`, programId: 'progA' });
+  await db.doc(`programInvites/${uid}-used`).set({ contact: 'someone-else@example.com', programId: 'progA', consumedByUid: uid });
   await db.doc('announcements/ann1').set({ title: 'Batch news', recipientUids: [uid, 'other'] });
   await db.doc('batchStats/progA_2026-09-29').set({ programId: 'progA' });
   await db.doc(`batchStats/progA_2026-09-29/checkedInMembers/${uid}`).set({ at: 1 });
@@ -113,7 +114,7 @@ describe('processDueDeletions', () => {
     assert.equal(await exists('users/u1'), false);
     assert.equal(await exists('users/u1/announcements/a1'), false);
     assert.equal(await exists('users/u1/consentReceipts/c1'), false);
-    for (const path of ['glucoseReadings/u1-1', 'bpReadings/u1-1', 'sleepLogs/u1-1', 'walkLogs/u1-1', 'weightLogs/u1-1', 'medicationLogs/u1-1', 'checklistLogs/u1-1', 'dailyCheckins/u1-1', 'labReports/u1-1', 'profiles/u1-p', 'notifications/u1-n', 'supportRequests/u1-s', 'errorReports/u1-e', 'programChatMessages/u1-m', 'programTypingStatus/progA_u1', 'coachInboxMessages/u1-i', 'coachMessages/u1-c', 'coachNotes/u1-n', 'programMembers/progA_u1', 'programInvites/u1-inv', 'batchStats/progA_2026-09-29/checkedInMembers/u1']) {
+    for (const path of ['glucoseReadings/u1-1', 'bpReadings/u1-1', 'sleepLogs/u1-1', 'walkLogs/u1-1', 'weightLogs/u1-1', 'medicationLogs/u1-1', 'checklistLogs/u1-1', 'dailyCheckins/u1-1', 'labReports/u1-1', 'profiles/u1-p', 'notifications/u1-n', 'supportRequests/u1-s', 'errorReports/u1-e', 'programChatMessages/u1-m', 'programTypingStatus/progA_u1', 'coachInboxMessages/u1-i', 'coachMessages/u1-c', 'coachNotes/u1-n', 'programMembers/progA_u1', 'programInvites/u1-inv', 'programInvites/u1-used', 'batchStats/progA_2026-09-29/checkedInMembers/u1']) {
       assert.equal(await exists(path), false, `${path} should be deleted`);
     }
     // kept: other people's data, including their chat messages next to this member's

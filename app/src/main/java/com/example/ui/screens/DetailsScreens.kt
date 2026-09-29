@@ -3388,8 +3388,11 @@ fun AnnouncementsScreen(state: NirogState) {
         if (isStaffViewer) {
             // A coach viewing their own broadcast isn't "a member seeing it" -
             // only fetch the count, never call markAnnouncementSeen below.
+            // Only an announcement's author (or an admin) may read its master doc -
+            // it lists every recipient - so don't ask for the count on anyone else's.
             current.forEach { record ->
-                if (record.id !in seenMetaByAnnouncementId) {
+                val mayReadMeta = state.isAdmin || (record.values["authorId"] as? String) == state.repository.userId
+                if (mayReadMeta && record.id !in seenMetaByAnnouncementId) {
                     state.repository.fetchAnnouncementMeta(record.id) { result ->
                         if (result is com.nirogbhumi.app.data.CloudResult.Success) {
                             seenMetaByAnnouncementId = seenMetaByAnnouncementId + (record.id to result.value)

@@ -123,6 +123,7 @@ export async function eraseUserData(deps: DeletionDeps, uid: string, options: Er
   await drain(db, db.collection('reportedMessages').where('reporterId', '==', uid), (batch, doc) => batch.set(doc.ref, { reporterId: FieldValue.delete(), reporterAnonymizedAt: FieldValue.serverTimestamp() }, { merge: true }));
   await drain(db, db.collection('reportedMessages').where('reportedUserId', '==', uid), (batch, doc) => batch.set(doc.ref, { reportedUserId: FieldValue.delete(), reportedText: FieldValue.delete(), reportedAnonymizedAt: FieldValue.serverTimestamp() }, { merge: true }));
 
+  await eraseAll(db, db.collection('programInvites').where('consumedByUid', '==', uid));
   for (const value of emails) await eraseAll(db, db.collection('programInvites').where('contact', '==', value));
   for (const value of phones) await eraseAll(db, db.collection('programInvites').where('contact', '==', value));
 

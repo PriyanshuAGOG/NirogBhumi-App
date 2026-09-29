@@ -569,8 +569,13 @@ describe('announcements (staff-only source doc, never client-writable)', () => {
     await assertSucceeds(getDoc(doc(admin(), 'announcements/ann1')));
   });
 
-  it('lets a coach read the source announcement', async () => {
-    await assertSucceeds(getDoc(doc(coach('coach-a'), 'announcements/ann1')));
+  it('denies a coach reading an announcement someone else wrote (it lists every recipient uid)', async () => {
+    await assertFails(getDoc(doc(coach('coach-a'), 'announcements/ann1')));
+  });
+
+  it('lets a coach read an announcement they wrote themselves', async () => {
+    await seed(async (db) => { await setDoc(doc(db, 'announcements/annOwn'), { title: 'Mine', authorId: 'coach-a', recipientUids: ['mem1'] }); });
+    await assertSucceeds(getDoc(doc(coach('coach-a'), 'announcements/annOwn')));
   });
 
   it('denies a plain member reading the source announcement (only their own fan-out copy)', async () => {

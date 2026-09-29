@@ -167,7 +167,16 @@ service cloud.firestore {
     // the Android app reads from, and it's what used to be readable here by
     // any enrolled member of *any* program, not just staff.
     match /announcements/{id} {
-      allow read: if staff();
+      // The doc lists every recipient's uid, so a coach may only read their
+      // own posts (admin reads all); the console queries with authorId == uid.
+      allow read: if admin() || (coach() && resource.data.authorId == request.auth.uid);
+      allow write: if false;
+    }
+    // Pre-enrollment invites (created/consumed by the inviteToProgram/bulkOnboard
+    // functions via the Admin SDK - never client-written). The console lists
+    // them per program, so a coach sees only invites for programs they coach.
+    match /programInvites/{id} {
+      allow read: if programStaff(resource.data.programId);
       allow write: if false;
     }
     match /programChatMessages/{id} {

@@ -150,7 +150,7 @@ function Gate() {
           <Route
             path="/consultations"
             element={
-              <Protected permission="consultations">
+              <Protected adminOnly>
                 <Consultations />
               </Protected>
             }

@@ -10,11 +10,13 @@ import {
   setDoc,
   Timestamp,
   updateDoc,
+  where,
 } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
 import { FirebaseError } from 'firebase/app'
 import { db, functions } from '../lib/firebase'
-import { usePrograms, type Program } from '../lib/usePrograms'
+import { chunk, type Program } from '../lib/usePrograms'
+import { useScope } from '../lib/scope'
 import { errText } from '../lib/errors'
 import { formatDate, toDate, toInputDateTime, fromInputDateTime } from '../lib/time'
 import { parseCsvRecords, toCsv, downloadCsv } from '../lib/csv'
@@ -88,7 +90,7 @@ const emptyProgram: ProgramDraft = {
 }
 
 export default function Programs() {
-  const { programs, loading, error } = usePrograms()
+  const { programs, programIds, programKey, isAdmin, loading, error } = useScope()
 
   // Program editor
   const [pDraft, setPDraft] = useState<ProgramDraft | null>(null)
@@ -116,31 +118,58 @@ export default function Programs() {
   const [csvError, setCsvError] = useState<string | null>(null)
   const [csvSummary, setCsvSummary] = useState<string | null>(null)
 
+  // Invites and codes are tied to a program. An admin reads them all; a coach
+  // must ask only for the programs they coach (Firestore rejects a list query it
+  // can't prove is limited to those), so those are read per program (chunked
+  // `in`) and ordered here.
   useEffect(() => {
-    const unsub = onSnapshot(
-      query(collection(db, 'programInvites'), orderBy('createdAt', 'desc')),
-      (snap) => {
-        setInvites(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<ProgramInvite, 'id'>) })))
-        setInvitesError(null)
-      },
-      (err) => setInvitesError(errText(err, 'Could not load invites')),
+    if (!isAdmin && (loading || programIds.length === 0)) {
+      setInvites([])
+      return
+    }
+    const createdMillis = (i: ProgramInvite) => (i.createdAt as { toMillis?: () => number } | undefined)?.toMillis?.() ?? 0
+    const queries = isAdmin
+      ? [query(collection(db, 'programInvites'), orderBy('createdAt', 'desc'))]
+      : chunk(programIds).map((ids) => query(collection(db, 'programInvites'), where('programId', 'in', ids)))
+    const perChunk = new Map<number, ProgramInvite[]>()
+    const unsubs = queries.map((q, index) =>
+      onSnapshot(
+        q,
+        (snap) => {
+          perChunk.set(index, snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<ProgramInvite, 'id'>) })))
+          setInvites(Array.from(perChunk.values()).flat().sort((a, b) => createdMillis(b) - createdMillis(a)))
+          setInvitesError(null)
+        },
+        (err) => setInvitesError(errText(err, 'Could not load invites')),
+      ),
     )
-    return unsub
-  }, [])
+    return () => unsubs.forEach((u) => u())
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin, programKey, loading])
 
   useEffect(() => {
-    const unsub = onSnapshot(
-      query(collection(db, 'programCodes')),
-      (snap) => {
-        const next = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<ProgramCode, 'id'>) }))
-        next.sort((a, b) => (a.code ?? '').localeCompare(b.code ?? ''))
-        setCodes(next)
-        setCodesError(null)
-      },
-      (err) => setCodesError(errText(err, 'Could not load codes')),
+    if (!isAdmin && (loading || programIds.length === 0)) {
+      setCodes([])
+      return
+    }
+    const queries = isAdmin
+      ? [query(collection(db, 'programCodes'))]
+      : chunk(programIds).map((ids) => query(collection(db, 'programCodes'), where('programId', 'in', ids)))
+    const perChunk = new Map<number, ProgramCode[]>()
+    const unsubs = queries.map((q, index) =>
+      onSnapshot(
+        q,
+        (snap) => {
+          perChunk.set(index, snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<ProgramCode, 'id'>) })))
+          setCodes(Array.from(perChunk.values()).flat().sort((a, b) => (a.code ?? '').localeCompare(b.code ?? '')))
+          setCodesError(null)
+        },
+        (err) => setCodesError(errText(err, 'Could not load codes')),
+      ),
     )
-    return unsub
-  }, [])
+    return () => unsubs.forEach((u) => u())
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin, programKey, loading])
 
   const programName = (id?: string) => programs.find((p) => p.id === id)?.name ?? id ?? '—'
 
@@ -346,15 +375,17 @@ export default function Programs() {
       <div className="toolbar">
         <h2 className="section-h">Programs</h2>
         <div className="toolbar-spacer" />
-        <button
-          className="btn btn-forest"
-          onClick={() => {
-            setPDraft({ ...emptyProgram })
-            setPError(null)
-          }}
-        >
-          + New program
-        </button>
+        {isAdmin && (
+          <button
+            className="btn btn-forest"
+            onClick={() => {
+              setPDraft({ ...emptyProgram })
+              setPError(null)
+            }}
+          >
+            + New program
+          </button>
+        )}
       </div>
 
       {error && (
