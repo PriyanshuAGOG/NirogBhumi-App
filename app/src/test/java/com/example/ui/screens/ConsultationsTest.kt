@@ -101,8 +101,9 @@ class RequestConsultationScreenTest {
     composeTestRule.onNodeWithText("Let the expert see my recent readings").tap() // untick
     composeTestRule.onNode(hasSetTextAction()).performScrollTo().performTextInput("Knees hurt during the morning routine")
     composeTestRule.onNodeWithText("I understand this is not emergency care. If I feel very unwell I will contact emergency services or my doctor.").tap()
+    composeTestRule.onNodeWithText("Send request").assertIsEnabled()
     composeTestRule.onNodeWithText("Send request").tap()
-    assertEquals(listOf<Any>("Yoga", "Knees hurt during the morning routine", "Evening", false), captured)
+    assertEquals("onSubmit arguments (type, concern, window, share)", listOf<Any>("Yoga", "Knees hurt during the morning routine", "Evening", false), captured)
   }
 
   @Test

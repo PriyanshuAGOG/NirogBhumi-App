@@ -3,7 +3,7 @@ package com.nirogbhumi.app.ui.screens
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -267,7 +267,7 @@ private fun Pill(label: String, selected: Boolean, onClick: () -> Unit) {
   Box(
     Modifier
       .background(if (selected) NirogColor.forest else NirogColor.surfaceSunken, NirogRadius.pillShape)
-      .clickable(onClick = onClick)
+      .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
       .padding(horizontal = NirogSpace.lg, vertical = NirogSpace.sm),
   ) {
     Text(label, style = NirogType.caption, color = if (selected) Color.White else NirogColor.inkSecondary)
