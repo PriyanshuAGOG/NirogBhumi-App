@@ -5,6 +5,7 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -12,6 +13,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
 import com.google.firebase.Timestamp
 import com.nirogbhumi.app.data.CloudDocument
@@ -30,6 +32,9 @@ import org.robolectric.annotation.Config
 
 /** Scroll into view first: below-the-fold nodes exist semantically but a tap on them would miss. */
 private fun SemanticsNodeInteraction.tap() = performScrollTo().performClick()
+
+/** For chips inside a horizontally scrolling row: invoke the click action directly rather than a touch that may land off-screen. */
+private fun SemanticsNodeInteraction.choose() = performSemanticsAction(SemanticsActions.OnClick)
 
 private fun cdoc(id: String, vararg pairs: Pair<String, Any?>) = CloudDocument(id, mapOf(*pairs))
 
@@ -99,9 +104,9 @@ class RequestConsultationScreenTest {
     composeTestRule.setContent {
       MyApplicationTheme { RequestConsultationContent(submitting = false, error = null, onBack = {}, onSubmit = { t, c, w, s -> captured = listOf(t, c, w, s) }) }
     }
-    composeTestRule.onNodeWithText("Yoga").tap()
+    composeTestRule.onNodeWithText("Yoga").choose()
     composeTestRule.onNodeWithText("Yoga").assertIsSelected()
-    composeTestRule.onNodeWithText("Evening").tap()
+    composeTestRule.onNodeWithText("Evening").choose()
     composeTestRule.onNodeWithText("Evening").assertIsSelected()
     composeTestRule.onNodeWithText("Let the expert see my recent readings").assertIsOn()
     composeTestRule.onNodeWithText("Let the expert see my recent readings").tap() // untick
