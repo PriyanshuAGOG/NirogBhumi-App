@@ -5,6 +5,10 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- No advertising, so the advertising-ID permission that Firebase
+         Analytics / Play Services would otherwise merge in is removed. This
+         keeps the Data Safety form truthful ("no advertising ID"). -->
+    <uses-permission android:name="com.google.android.gms.permission.AD_ID" tools:node="remove" />
     <!-- REQUEST_INSTALL_PACKAGES is declared ONLY in the debug source set's
          manifest (app/src/debug/AndroidManifest.xml), not here. It's needed
          solely by the tester self-update flow (sideloaded Firebase App
