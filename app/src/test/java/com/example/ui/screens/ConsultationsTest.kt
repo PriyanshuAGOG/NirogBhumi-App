@@ -2,6 +2,9 @@ package com.nirogbhumi.app.ui.screens
 
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -97,8 +100,12 @@ class RequestConsultationScreenTest {
       MyApplicationTheme { RequestConsultationContent(submitting = false, error = null, onBack = {}, onSubmit = { t, c, w, s -> captured = listOf(t, c, w, s) }) }
     }
     composeTestRule.onNodeWithText("Yoga").tap()
+    composeTestRule.onNodeWithText("Yoga").assertIsSelected()
     composeTestRule.onNodeWithText("Evening").tap()
+    composeTestRule.onNodeWithText("Evening").assertIsSelected()
+    composeTestRule.onNodeWithText("Let the expert see my recent readings").assertIsOn()
     composeTestRule.onNodeWithText("Let the expert see my recent readings").tap() // untick
+    composeTestRule.onNodeWithText("Let the expert see my recent readings").assertIsOff()
     composeTestRule.onNode(hasSetTextAction()).performScrollTo().performTextInput("Knees hurt during the morning routine")
     composeTestRule.onNodeWithText("I understand this is not emergency care. If I feel very unwell I will contact emergency services or my doctor.").tap()
     composeTestRule.onNodeWithText("Send request").assertIsEnabled()
