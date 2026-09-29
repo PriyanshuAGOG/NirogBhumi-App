@@ -1709,18 +1709,10 @@ fun ProfileEditScreen(state: NirogState) {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         OutlinedTextField(
                             value = editAge,
-                            onValueChange = { editAge = it },
+                            onValueChange = { editAge = com.nirogbhumi.app.ui.ProfileValidation.numericOnly(it, allowDecimal = false) },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             label = { Text("Age", color = Color(0xFF1B3221).copy(alpha = 0.7f)) },
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = Color(0xFF314936),
-                                unfocusedBorderColor = Color(0xFFD8D0C0)
-                            ),
-                            modifier = Modifier.weight(1f)
-                        )
-                        OutlinedTextField(
-                            value = editGender,
-                            onValueChange = { editGender = it },
-                            label = { Text("Gender", color = Color(0xFF1B3221).copy(alpha = 0.7f)) },
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedBorderColor = Color(0xFF314936),
                                 unfocusedBorderColor = Color(0xFFD8D0C0)
@@ -1729,10 +1721,26 @@ fun ProfileEditScreen(state: NirogState) {
                         )
                     }
 
+                    Text("Gender", fontSize = 12.sp, color = Color(0xFF1B3221).copy(alpha = 0.7f), fontWeight = FontWeight.SemiBold)
+                    Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        com.nirogbhumi.app.ui.ProfileValidation.GENDER_OPTIONS.forEach { option ->
+                            val selected = editGender == option
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(if (selected) Color(0xFF314936) else Color(0xFFEFE9DA))
+                                    .clickable { editGender = if (selected) "" else option }
+                                    .padding(horizontal = 14.dp, vertical = 9.dp)
+                            ) { Text(option, color = if (selected) Color.White else Color(0xFF1B2219), fontWeight = FontWeight.Bold, fontSize = 12.sp) }
+                        }
+                    }
+
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         OutlinedTextField(
                             value = editHeight,
-                            onValueChange = { editHeight = it },
+                            onValueChange = { editHeight = com.nirogbhumi.app.ui.ProfileValidation.numericOnly(it, allowDecimal = true) },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                             label = { Text("Height (cm)", color = Color(0xFF1B3221).copy(alpha = 0.7f)) },
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedBorderColor = Color(0xFF314936),
@@ -1742,7 +1750,9 @@ fun ProfileEditScreen(state: NirogState) {
                         )
                         OutlinedTextField(
                             value = editWeight,
-                            onValueChange = { editWeight = it },
+                            onValueChange = { editWeight = com.nirogbhumi.app.ui.ProfileValidation.numericOnly(it, allowDecimal = true) },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                             label = { Text("Weight (kg)", color = Color(0xFF1B3221).copy(alpha = 0.7f)) },
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedBorderColor = Color(0xFF314936),
@@ -1931,6 +1941,7 @@ fun ProfileEditScreen(state: NirogState) {
             Button(
                 onClick = {
                     if (editName.isBlank()) { state.cloudMessage = "Name cannot be empty"; return@Button }
+                    com.nirogbhumi.app.ui.ProfileValidation.validate(editAge, editWeight, editHeight)?.let { state.cloudMessage = it; return@Button }
                     state.profileName = editName
                     state.profileAge = editAge
                     state.profileGender = editGender

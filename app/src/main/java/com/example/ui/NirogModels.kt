@@ -89,11 +89,11 @@ class NirogState {
 
     // Profile Details
     var profileName by mutableStateOf("")
-    var profileAge by mutableStateOf("28")
-    var profileGender by mutableStateOf("Male")
-    var profileHeight by mutableStateOf("174")
-    var profileWeight by mutableStateOf("72")
-    var profileCity by mutableStateOf("Jaipur")
+    var profileAge by mutableStateOf("")
+    var profileGender by mutableStateOf("")
+    var profileHeight by mutableStateOf("")
+    var profileWeight by mutableStateOf("")
+    var profileCity by mutableStateOf("")
     var profileLanguage by mutableStateOf("English")
     // Private (users/{uid}/profile-photo/... - readable only by the owner or
     // an admin, same as any other private upload). Not yet surfaced to other

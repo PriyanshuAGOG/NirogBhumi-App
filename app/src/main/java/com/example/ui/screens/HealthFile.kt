@@ -307,23 +307,20 @@ fun HealthFileScreen(state: NirogState) {
               state.repository.uploadPrivateFile("health-file", uri) { result ->
                 when (result) {
                   is CloudResult.Success -> {
-                    val downloadUrl = result.value
-                    val storagePath = storagePathFromDownloadUrl(downloadUrl)
+                    val storagePath = storagePathFromDownloadUrl(result.value)
                     if (storagePath == null) {
                       generatingLink = false
-                      shareLink = downloadUrl
-                      linkExpiresInDays = null
+                      linkError = SECURE_LINK_UNAVAILABLE
                     } else {
-                      // Try for a real, time-limited signed URL first; if the
-                      // one-time Cloud Functions IAM setup hasn't been done
-                      // yet (see getHealthFileShareLink), fall back to the
-                      // Storage download URL rather than leaving the member
-                      // with no link at all.
+                      // Only ever a real, time-limited signed link. If one
+                      // can't be issued we fail closed: falling back to the
+                      // raw Storage download URL would hand out a permanent,
+                      // unrevocable link to the member's health data.
                       state.repository.getHealthFileShareLink(storagePath) { signedResult ->
                         generatingLink = false
                         when (signedResult) {
                           is CloudResult.Success -> { shareLink = signedResult.value; linkExpiresInDays = 7 }
-                          is CloudResult.Failure -> { shareLink = downloadUrl; linkExpiresInDays = null }
+                          is CloudResult.Failure -> linkError = SECURE_LINK_UNAVAILABLE
                         }
                       }
                     }
@@ -344,6 +341,8 @@ fun HealthFileScreen(state: NirogState) {
     HealthFileLinkDialog(link, expiresInDays = linkExpiresInDays, onDismiss = { shareLink = null; linkExpiresInDays = null })
   }
 }
+
+private const val SECURE_LINK_UNAVAILABLE = "A secure, expiring link isn't available right now. Please use \"Share Health File\" to send the PDF directly instead - it never creates a public link."
 
 /** Recovers the raw Storage path (e.g. "users/uid/health-file/xyz") from a
  * Firebase Storage download URL so it can be passed to getHealthFileShareLink

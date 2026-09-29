@@ -1506,6 +1506,7 @@ fun SetupProfileScreen(state: NirogState) {
     var weightTemp by remember { mutableStateOf(state.profileWeight) }
     var heightTemp by remember { mutableStateOf(state.profileHeight) }
     var cityTemp by remember { mutableStateOf(state.profileCity) }
+    var genderTemp by remember { mutableStateOf(state.profileGender) }
     var languageTemp by remember { mutableStateOf(state.profileLanguage) }
     var isSaving by remember { mutableStateOf(false) }
 
@@ -1559,11 +1560,27 @@ fun SetupProfileScreen(state: NirogState) {
             Spacer(modifier = Modifier.height(8.dp))
 
             // Fields Questionnaire
-            OutlinedProfileField("Full Name *", nameTemp, "e.g. Priyanshu") { nameTemp = it }
-            OutlinedProfileField("Age", ageTemp, "e.g. 28") { ageTemp = it }
-            OutlinedProfileField("Weight (kg)", weightTemp, "e.g. 72") { weightTemp = it }
-            OutlinedProfileField("Height (cm)", heightTemp, "e.g. 174") { heightTemp = it }
-            OutlinedProfileField("City", cityTemp, "e.g. Jaipur") { cityTemp = it }
+            OutlinedProfileField("Full Name *", nameTemp, "Your name") { nameTemp = it }
+            OutlinedProfileField("Age", ageTemp, "In years", androidx.compose.ui.text.input.KeyboardType.Number) { ageTemp = com.nirogbhumi.app.ui.ProfileValidation.numericOnly(it, allowDecimal = false) }
+            OutlinedProfileField("Weight (kg)", weightTemp, "Optional", androidx.compose.ui.text.input.KeyboardType.Decimal) { weightTemp = com.nirogbhumi.app.ui.ProfileValidation.numericOnly(it, allowDecimal = true) }
+            OutlinedProfileField("Height (cm)", heightTemp, "Optional", androidx.compose.ui.text.input.KeyboardType.Decimal) { heightTemp = com.nirogbhumi.app.ui.ProfileValidation.numericOnly(it, allowDecimal = true) }
+            OutlinedProfileField("City", cityTemp, "Optional") { cityTemp = it }
+
+            // Gender is optional and never pre-selected: tapping the selected chip again clears it.
+            Text("Gender (optional)", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Ink)
+            Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                com.nirogbhumi.app.ui.ProfileValidation.GENDER_OPTIONS.forEach { option ->
+                    val isS = genderTemp == option
+                    Box(
+                        modifier = Modifier
+                            .background(if (isS) DeepGreen else SoftClay, RoundedCornerShape(12.dp))
+                            .clickable { genderTemp = if (isS) "" else option }
+                            .padding(horizontal = 16.dp, vertical = 10.dp)
+                    ) {
+                        Text(option, color = if (isS) Color.White else Ink, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
+                }
+            }
 
             // Language Selector
             Text("Preferred Coaching Language", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Ink)
@@ -1592,15 +1609,17 @@ fun SetupProfileScreen(state: NirogState) {
                 Button(
                     onClick = {
                         if (nameTemp.isBlank()) { state.authError = "Please enter your name to continue"; return@Button }
+                        com.nirogbhumi.app.ui.ProfileValidation.validate(ageTemp, weightTemp, heightTemp)?.let { state.authError = it; return@Button }
                         state.authError = ""
                         isSaving = true
-                        state.profileName = nameTemp
-                        state.profileAge = ageTemp
-                        state.profileWeight = weightTemp
-                        state.profileHeight = heightTemp
-                        state.profileCity = cityTemp
+                        state.profileName = nameTemp.trim()
+                        state.profileAge = ageTemp.trim()
+                        state.profileWeight = weightTemp.trim()
+                        state.profileHeight = heightTemp.trim()
+                        state.profileCity = cityTemp.trim()
+                        state.profileGender = genderTemp
                         state.profileLanguage = languageTemp
-                        state.repository.saveProfile(mapOf("fullName" to nameTemp, "age" to ageTemp.toIntOrNull(), "weightKg" to weightTemp.toDoubleOrNull(), "heightCm" to heightTemp.toDoubleOrNull(), "city" to cityTemp, "preferredLanguage" to languageTemp)) { result ->
+                        state.repository.saveProfile(mapOf("fullName" to nameTemp.trim(), "age" to ageTemp.trim().toIntOrNull(), "gender" to genderTemp, "weightKg" to weightTemp.trim().toDoubleOrNull(), "heightCm" to heightTemp.trim().toDoubleOrNull(), "city" to cityTemp.trim(), "preferredLanguage" to languageTemp)) { result ->
                             isSaving = false
                             if (result is com.nirogbhumi.app.data.CloudResult.Success) state.currentScreen = "selection_caregiver"
                             else state.authError = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
@@ -1625,7 +1644,13 @@ fun SetupProfileScreen(state: NirogState) {
 }
 
 @Composable
-fun OutlinedProfileField(label: String, value: String, placeholder: String, onValueChange: (String) -> Unit) {
+fun OutlinedProfileField(
+    label: String,
+    value: String,
+    placeholder: String,
+    keyboardType: androidx.compose.ui.text.input.KeyboardType = androidx.compose.ui.text.input.KeyboardType.Text,
+    onValueChange: (String) -> Unit,
+) {
     Column {
         Text(label, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Ink)
         Spacer(modifier = Modifier.height(6.dp))
@@ -1636,6 +1661,7 @@ fun OutlinedProfileField(label: String, value: String, placeholder: String, onVa
             placeholder = { Text(placeholder, color = Ink.copy(alpha = 0.3f)) },
             shape = RoundedCornerShape(12.dp),
             singleLine = true,
+            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = keyboardType),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedBorderColor = DeepGreen,
                 unfocusedBorderColor = Line,

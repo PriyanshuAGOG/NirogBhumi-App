@@ -52,7 +52,7 @@ This is a **health app** (health condition management / self-monitoring).
 Complete the Play **Health apps declaration** and, if you surface Health
 Connect data, the Health Connect–specific declaration. Do not use Health
 Connect data for advertising; access only the record types the app actually
-reads (steps, sleep, weight, heart rate, blood glucose, blood pressure — see
+reads (steps, sleep, weight, blood glucose, blood pressure — see
 the manifest `health.READ_*` permissions).
 
 ## Permissions to justify in the listing
@@ -62,7 +62,7 @@ the manifest `health.READ_*` permissions).
 | `INTERNET` | Sync with Firebase | — |
 | `POST_NOTIFICATIONS` | Reminders, care updates | Runtime-requested |
 | `RECORD_AUDIO` | Chat voice notes + voice entry of readings | Not for background/continuous capture |
-| `health.READ_*` | Import steps/sleep/weight/HR/glucose/BP from Health Connect | Health Connect declaration required |
+| `health.READ_*` | Import steps/sleep/weight/glucose/BP from Health Connect | Health Connect declaration required |
 | `REQUEST_INSTALL_PACKAGES` | **Debug build only** — tester sideload self-update | Absent from the Play AAB (in `src/debug` manifest) |
 
 > Note: `REQUEST_INSTALL_PACKAGES` must **not** appear in the release AAB. It
