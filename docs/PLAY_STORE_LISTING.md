@@ -12,7 +12,7 @@ This file provides review-ready store copy for the Play Console listing. The own
 
 ## Short description
 
-Track diabetes care, health habits, consultations, reports, and guided wellness programs.
+Track diabetes care, health habits, reports, and guided wellness programs with your coach.
 
 ## Full description
 
@@ -20,7 +20,7 @@ Nirog Bhumi helps people manage diabetes and metabolic health routines in one se
 
 Use the app to log glucose, blood pressure, meals, sleep, walking, water, weight, medication, lab reports, and daily check-ins. Review trends, receive reminders, export your records, and manage account deletion requests from inside the app.
 
-The app also supports Health Connect sync, expert consultations, guided programs, educational content, wellness tasks, shopping flows, and notifications designed around ongoing health management.
+The app also supports Health Connect sync, guided programs with diet, yoga and naturopathy plans from your coach, messaging with your coach, requests for expert consultations (the team confirms the time and any fee with you directly; nothing is charged in the app), educational content, wellness tasks, and notifications designed around ongoing health management.
 
 Nirog Bhumi is built with Firebase Authentication, protected cloud storage, Firestore security rules, and release controls for Android production delivery.
 
@@ -28,7 +28,7 @@ Important medical disclaimer: Nirog Bhumi is not a medical device and does not p
 
 ## Hindi short description
 
-डायबिटीज़ care, habits, consultations, reports और wellness programs track करें।
+अपने coach के साथ डायबिटीज़ care, habits, reports और wellness programs track करें।
 
 ## Hindi full description
 
@@ -36,7 +36,7 @@ Nirog Bhumi diabetes और metabolic health routines को एक secure mobil
 
 App में glucose, blood pressure, meals, sleep, walking, water, weight, medication, lab reports और daily check-ins log किए जा सकते हैं। Users trends देख सकते हैं, reminders पा सकते हैं, records export कर सकते हैं और account deletion request manage कर सकते हैं।
 
-App Health Connect sync, expert consultations, guided programs, educational content, wellness tasks, shopping flows और health-management notifications को support करता है।
+App Health Connect sync, coach की diet, yoga और naturopathy plans के साथ guided programs, coach से messaging, expert consultation के requests (समय और fee टीम सीधे आपसे तय करती है; app में कोई payment नहीं लिया जाता), educational content, wellness tasks और health-management notifications को support करता है।
 
 महत्वपूर्ण medical disclaimer: Nirog Bhumi medical device नहीं है और emergency care, diagnosis या treatment provide नहीं करता। App content और insights केवल health tracking, education और care support के लिए हैं। Medication, diet या treatment बदलने से पहले हमेशा qualified healthcare professional से सलाह लें।
 

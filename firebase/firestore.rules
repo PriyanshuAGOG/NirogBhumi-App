@@ -33,7 +33,23 @@ service cloud.firestore {
     function ownProgram(programId) { return signedIn() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.activeProgramId == programId; }
 
     match /users/{uid} {
-      allow create: if owner(uid) && request.resource.data.userId == uid && (!('role' in request.resource.data) || request.resource.data.role == 'user');
+      // Same enrollment/status fields the update rule below locks down must
+      // also be blocked on create, not just update - resource.data doesn't
+      // exist yet for a create, so the update rule's "must match the
+      // existing value" comparison can't apply here. Without this, a client
+      // could self-grant Care+ enrollment (or any status) for free the
+      // moment their own users/{uid} doc is created, by simply including
+      // programActive/activeProgramId in that very first write - entirely
+      // bypassing redeemProgramCode. Requiring these fields be absent means
+      // they can only ever be set afterward by admin() or a Cloud Function
+      // via the Admin SDK (which bypasses rules entirely).
+      allow create: if owner(uid) && request.resource.data.userId == uid
+        && (!('role' in request.resource.data) || request.resource.data.role == 'user')
+        && !('status' in request.resource.data)
+        && !('programActive' in request.resource.data)
+        && !('activeProgramId' in request.resource.data)
+        && !('activeProgramName' in request.resource.data)
+        && !('programDurationDays' in request.resource.data);
       allow read: if owner(uid) || admin() || assigned(uid) || assignedCoachToUser(uid);
       // Role/status/enrollment fields are the actual security and billing
       // boundary of this doc, so the owner can never change them directly -
@@ -41,9 +57,19 @@ service cloud.firestore {
       // rules entirely - see redeemProgramCode / setUserRole), may set them.
       // .get(field, default) makes this airtight even when the field is
       // absent from the existing doc, unlike a plain 'in' presence check.
+      // Both sides use .get() with a default. onUserCreate (an async Auth
+      // trigger) sets role/status, but it can land AFTER the client's own
+      // first onboarding write has already created users/{uid} (the create
+      // rule allows a doc with neither field). On such a doc, a bare
+      // request.resource.data.role / .status reads a missing field, which
+      // errors and denies EVERY later owner update - which is exactly why a
+      // brand-new device could sign up but then hit PERMISSION_DENIED on
+      // every saveProfile (consent, profile setup). Defaulting both sides
+      // keeps the privilege-escalation guard intact (a client sending
+      // role:'admin' still fails) while letting a legit profile write through.
       allow update: if admin() || (owner(uid)
-        && request.resource.data.role == resource.data.get('role', 'user')
-        && request.resource.data.status == resource.data.get('status', 'active')
+        && request.resource.data.get('role', 'user') == resource.data.get('role', 'user')
+        && request.resource.data.get('status', 'active') == resource.data.get('status', 'active')
         && request.resource.data.get('programActive', false) == resource.data.get('programActive', false)
         && request.resource.data.get('activeProgramId', null) == resource.data.get('activeProgramId', null)
         && request.resource.data.get('activeProgramName', null) == resource.data.get('activeProgramName', null)
@@ -59,6 +85,18 @@ service cloud.firestore {
     match /users/{uid}/announcements/{id} {
       allow read: if owner(uid);
       allow write: if false;
+    }
+    // Immutable, timestamped consent records (DPDP Act 2023 "consent record").
+    // The owner appends a receipt each time they give/withdraw consent; it can
+    // never be updated or deleted, and acceptedAt must be the server time so
+    // the audit trail can't be back-dated. Owner and admin may read.
+    match /users/{uid}/consentReceipts/{id} {
+      allow read: if owner(uid) || admin();
+      allow create: if owner(uid)
+        && request.resource.data.acceptedAt == request.time
+        && request.resource.data.version is string
+        && request.resource.data.purposes is map;
+      allow update, delete: if false;
     }
     match /profiles/{id} {
       allow create: if validCreate();
@@ -77,7 +115,14 @@ service cloud.firestore {
       allow update: if collection in ['glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','labReports','dailyCheckins','checklistLogs','medicationLogs'] && (admin() || (ownsResource() && ownsRequest() && preservesUserId()) || (assigned(resource.data.userId) && preservesUserId()));
     }
     match /consultations/{id} {
-      allow create: if validCreate() && request.resource.data.paymentStatus == 'pending' && request.resource.data.status in ['pending', 'payment_pending'];
+      // A member can only ever *request*: status starts 'pending' and payment 'pending'; the
+      // confirmed time, expert and link are written by staff (admin update below). Free text is
+      // length-capped so a request can't be used to store arbitrary bulk data.
+      allow create: if validCreate() && request.resource.data.paymentStatus == 'pending' && request.resource.data.status in ['pending', 'payment_pending']
+        && request.resource.data.get('concern', '') is string && request.resource.data.get('concern', '').size() <= 1000
+        && request.resource.data.get('consultationType', '') is string && request.resource.data.get('consultationType', '').size() <= 80
+        && request.resource.data.get('preferredWindow', '') is string && request.resource.data.get('preferredWindow', '').size() <= 40
+        && !('scheduledAt' in request.resource.data) && !('joinLink' in request.resource.data) && !('expertName' in request.resource.data);
       allow read: if ownsResource() || admin() || assignedCoachToUser(resource.data.userId) || (expert() && resource.data.expertId == request.auth.uid);
       allow update: if admin() || (expert() && resource.data.expertId == request.auth.uid && request.resource.data.expertId == resource.data.expertId && preservesUserId()) || (ownsResource() && ownsRequest() && preservesUserId() && request.resource.data.paymentStatus == resource.data.paymentStatus && request.resource.data.status == resource.data.status);
     }
@@ -129,7 +174,16 @@ service cloud.firestore {
     // the Android app reads from, and it's what used to be readable here by
     // any enrolled member of *any* program, not just staff.
     match /announcements/{id} {
-      allow read: if staff();
+      // The doc lists every recipient's uid, so a coach may only read their
+      // own posts (admin reads all); the console queries with authorId == uid.
+      allow read: if admin() || (coach() && resource.data.authorId == request.auth.uid);
+      allow write: if false;
+    }
+    // Pre-enrollment invites (created/consumed by the inviteToProgram/bulkOnboard
+    // functions via the Admin SDK - never client-written). The console lists
+    // them per program, so a coach sees only invites for programs they coach.
+    match /programInvites/{id} {
+      allow read: if programStaff(resource.data.programId);
       allow write: if false;
     }
     match /programChatMessages/{id} {
@@ -171,7 +225,16 @@ service cloud.firestore {
     }
     match /expertAssignments/{id} { allow read: if admin() || (expert() && resource.data.expertId == request.auth.uid); allow write: if admin(); }
     match /{collection}/{id} {
-      allow create: if collection in ['dataExportRequests','deletionRequests'] && validCreate();
+      // Client-side create used to only check validCreate() (ownership +
+      // server timestamp) - no awareness of requestDataExport's 60-minute
+      // cooldown or any limit at all on requestAccountDeletion, so a script
+      // could skip both callables entirely and write either collection
+      // directly, unthrottled (each dataExportRequests doc alone triggers
+      // ~19 collection reads + a permanent Storage file write). Both
+      // callables already write via the Admin SDK, which always bypasses
+      // this rule regardless - so denying client creates outright costs
+      // the legitimate flow nothing and closes the direct-write bypass.
+      allow create: if false;
       allow read: if collection in ['dataExportRequests','deletionRequests'] && (ownsResource() || admin());
       allow update: if admin();
     }
@@ -185,10 +248,13 @@ service cloud.firestore {
     // user) - the caller can only ever report on their own behalf (never
     // forge another uid's report) and can never read reports back, so this
     // can't be abused as a side-channel to enumerate other users' errors.
-    // Staff triage and mark resolved from the admin console.
+    // The console's Error Reports page is admin-only in its route gating
+    // (App.tsx Protected adminOnly) - the rule matches that here instead of
+    // the broader staff(), so a coach can't bypass the UI and read/resolve
+    // platform-wide crash telemetry directly via the Firestore SDK.
     match /errorReports/{id} {
       allow create: if validCreate() && request.resource.data.resolved == false;
-      allow read, update: if staff();
+      allow read, update: if admin();
     }
     // Care+ program calendar. Members read events for the program they're
     // enrolled in; only admin or that program's assigned coach create/edit.
@@ -208,12 +274,14 @@ service cloud.firestore {
       // member can't plant a doc for a program they didn't redeem a code
       // for, or forge their own contributionKm/lastCheckinAt stats.
       allow create: if programStaff(request.resource.data.programId);
-      // A member may also touch their own doc, but only its two unread-badge
-      // read-marker fields - never contributionKm/lastCheckinAt/status/name,
+      // A member may also touch their own doc, but only these self-service
+      // fields - the two unread-badge read markers, and leaderboardOptIn
+      // (opt-in batch leaderboard: a member chooses whether their own name
+      // appears, never contributionKm/lastCheckinAt/status/name themselves,
       // which stay staff (or Cloud Function)-only above.
       allow update: if programStaff(resource.data.programId)
         || (signedIn() && resource.data.uid == request.auth.uid
-            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastReadGeneralAt', 'lastReadAnnouncementsAt']));
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastReadGeneralAt', 'lastReadAnnouncementsAt', 'leaderboardOptIn']));
       allow delete: if programStaff(resource.data.programId);
     }
     // Aggregated, PII-free batch counts written by Cloud Functions only. Members
@@ -221,6 +289,29 @@ service cloud.firestore {
     match /batchStats/{id} {
       allow read: if programStaff(resource.data.programId) || ownProgram(resource.data.programId);
       allow write: if false;
+    }
+    // Coach-authored guidance for one batch: diet plans, yoga and naturopathy
+    // routines, general notes. Members read only their own batch's resources;
+    // only admin or that batch's assigned coach may write, and a coach can never
+    // move a resource to another batch or forge its author. Field shape is
+    // validated here so a malformed doc can't crash the member app's renderer.
+    function validResource(d) {
+      return d.keys().hasOnly(['programId', 'category', 'title', 'body', 'link', 'weekNumber', 'notify', 'createdBy', 'createdByName', 'createdAt', 'updatedAt'])
+        && d.programId is string && d.programId != ''
+        && d.category in ['diet', 'yoga', 'naturopathy', 'guidance', 'other']
+        && d.title is string && d.title.size() > 0 && d.title.size() <= 120
+        && d.body is string && d.body.size() <= 5000
+        && (d.get('link', null) == null || (d.link is string && d.link.size() <= 500 && d.link.matches('https?://.+')))
+        && (d.get('weekNumber', null) == null || (d.weekNumber is int && d.weekNumber >= 0 && d.weekNumber <= 104));
+    }
+    match /programResources/{id} {
+      allow read: if programStaff(resource.data.programId) || ownProgram(resource.data.programId);
+      allow create: if programStaff(request.resource.data.programId) && validResource(request.resource.data)
+        && request.resource.data.createdBy == request.auth.uid && request.resource.data.createdAt == request.time;
+      allow update: if programStaff(resource.data.programId) && validResource(request.resource.data)
+        && request.resource.data.programId == resource.data.programId
+        && request.resource.data.createdBy == resource.data.createdBy;
+      allow delete: if programStaff(resource.data.programId);
     }
     // Program access codes are sensitive bearer credentials. Admins can manage
     // every code; a coach can only see or mutate codes belonging to a program
@@ -237,6 +328,25 @@ service cloud.firestore {
       allow read: if programStaff(resource.data.programId) || (signedIn() && resource.data.toUid == request.auth.uid);
       allow create: if programStaff(request.resource.data.programId) && request.resource.data.fromUid == request.auth.uid;
       allow update, delete: if programStaff(resource.data.programId);
+    }
+    // Async "ask your coach" inbox - a private two-way thread per (program,
+    // member) pair, separate from the group programChatMessages and from the
+    // one-directional coachMessages notes above. memberUid is whose thread a
+    // message belongs to; fromUid is who actually wrote it (the member, or
+    // that program's staff replying). A member only ever sees their own
+    // thread - never another member's questions - while program staff see
+    // every thread in their own program only. Immutable once sent (no edit/
+    // delete), matching the audit posture of the group chat.
+    match /coachInboxMessages/{id} {
+      allow read: if programStaff(resource.data.programId)
+        || (signedIn() && resource.data.memberUid == request.auth.uid);
+      allow create: if signedIn()
+        && request.resource.data.fromUid == request.auth.uid
+        && (
+          (request.resource.data.memberUid == request.auth.uid && ownProgram(request.resource.data.programId))
+          || programStaff(request.resource.data.programId)
+        );
+      allow update, delete: if false;
     }
     // Private coach case notes are sensitive health-adjacent data. They are
     // restricted to admins and the coach assigned to the target member's

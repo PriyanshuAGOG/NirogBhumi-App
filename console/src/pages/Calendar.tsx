@@ -16,6 +16,7 @@ import { db } from '../lib/firebase'
 import { useAuth } from '../auth/AuthProvider'
 import { usePrograms } from '../lib/usePrograms'
 import { errText } from '../lib/errors'
+import { callCreateAnnouncement } from '../lib/announcements'
 import { formatDate, formatTime, toDate, toInputDateTime, fromInputDateTime } from '../lib/time'
 import { parseCsvRecords, toCsv, downloadCsv } from '../lib/csv'
 import './Calendar.css'
@@ -110,6 +111,7 @@ export default function Calendar() {
   const [alsoAnnounce, setAlsoAnnounce] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<{ tone: 'success' | 'error'; text: string } | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
 
   useEffect(() => {
@@ -163,6 +165,7 @@ export default function Calendar() {
     }
     setSaving(true)
     setSaveError(null)
+    setNotice(null)
     const trimmedLink = draft.link.trim()
     if (trimmedLink && !safeHttpUrl(trimmedLink)) {
       setSaveError('Join link must be a valid http:// or https:// URL.')
@@ -191,17 +194,26 @@ export default function Calendar() {
           createdBy: user?.uid ?? null,
         })
       }
+      // The event is already saved at this point. Announcing goes through the
+      // createAnnouncement callable (the only path that resolves recipients and
+      // fans out to members' feeds - announcements can't be written directly),
+      // and a failure here must never be reported as "event could not be saved".
       if (alsoAnnounce) {
-        await addDoc(collection(db, 'announcements'), {
-          programId,
-          authorId: user?.uid ?? null,
-          authorName: user?.displayName ?? user?.email ?? 'Coach',
-          title: `Schedule update: ${draft.title.trim()}`,
-          body: `${TYPE_META[draft.type].label} — ${formatDate(start)}, ${formatTime(start)}${
-            draft.location.trim() ? ` at ${draft.location.trim()}` : ''
-          }.`,
-          createdAt: serverTimestamp(),
-        })
+        try {
+          const when = `${formatDate(start)}, ${formatTime(start)}`
+          await callCreateAnnouncement({
+            title: `Schedule update: ${draft.title.trim()}`.slice(0, 120),
+            body: `${TYPE_META[draft.type].label} — ${when}${draft.location.trim() ? ` at ${draft.location.trim()}` : ''}.`,
+            audience: { scope: 'program', programIds: [programId], inactiveDays: 4 },
+            channels: { inApp: true, push: true, email: false },
+            expiresInHours: 72,
+          })
+          setNotice({ tone: 'success', text: 'Event saved and announced to the batch.' })
+        } catch (err) {
+          setNotice({ tone: 'error', text: `Event saved, but the announcement could not be sent: ${errText(err, 'please try again from Announcements')}` })
+        }
+      } else {
+        setNotice({ tone: 'success', text: 'Event saved.' })
       }
       setDraft(null)
       setAlsoAnnounce(false)
@@ -377,6 +389,11 @@ export default function Calendar() {
         )}
       </div>
 
+      {notice && (
+        <div className={`banner ${notice.tone === 'success' ? 'banner-success' : 'banner-error'}`} role={notice.tone === 'success' ? 'status' : 'alert'}>
+          {notice.text}
+        </div>
+      )}
       {bulkError && (
         <div className="banner banner-error" role="alert" style={{ whiteSpace: 'pre-line' }}>
           {bulkError}

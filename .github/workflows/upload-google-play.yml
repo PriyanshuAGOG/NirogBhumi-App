@@ -84,7 +84,10 @@ jobs:
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           chmod +x gradlew
-          ./gradlew --no-daemon --max-workers=2 testReleaseUnitTest lintRelease bundleRelease
+          # Unit tests are in the shared src/test source set (no
+          # release-specific test source set exists), so testDebugUnitTest is
+          # the task that runs them; testReleaseUnitTest is never registered.
+          ./gradlew --no-daemon --max-workers=2 testDebugUnitTest lintRelease bundleRelease
       - name: Upload bundle to Google Play
         uses: r0adkll/upload-google-play@v1
         with:

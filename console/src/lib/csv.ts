@@ -2,12 +2,24 @@
 // invites) and the existing roster export all go through the same
 // escaping/parsing logic instead of three hand-rolled copies.
 
+// Roster exports include free-text a member set themselves (fullName, via
+// the app's own profile editor) - without this, a value like
+// `=HYPERLINK("http://evil","click")` or `=cmd|'/c calc'!A0` sails straight
+// into the exported CSV and Excel/Sheets executes or renders it as a live
+// formula/link the moment staff opens the file (the well-known "CSV
+// injection" class, CWE-1236). A leading single quote is Excel's own
+// "treat as literal text" escape for exactly these characters, applied
+// before the normal comma/quote/newline quoting below so it survives
+// either way the cell ends up wrapped.
+const FORMULA_TRIGGER = /^[=+\-@\t\r]/
+
 export function csvCell(value: string): string {
+  const escaped = FORMULA_TRIGGER.test(value) ? `'${value}` : value
   // Quote whenever the cell could otherwise be misread (comma/quote/newline),
   // and double any embedded quotes - the standard CSV escaping rule, not
   // just enough to look right in a spreadsheet preview.
-  if (/[",\n]/.test(value)) return `"${value.replace(/"/g, '""')}"`
-  return value
+  if (/[",\n]/.test(escaped)) return `"${escaped.replace(/"/g, '""')}"`
+  return escaped
 }
 
 export function toCsv(rows: string[][]): string {

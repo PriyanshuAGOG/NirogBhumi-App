@@ -18,6 +18,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -72,6 +73,16 @@ private fun applyProfileDocument(state: NirogState, document: com.google.firebas
     document.getString("bpStatus")?.let { state.selectedBpStatus = it }
     document.getString("onMedication")?.let { state.selectedOnMedication = it }
     document.getString("doctorSupervision")?.let { state.selectedDoctorSupervision = it }
+    document.getBoolean("healthProfileCompleted")?.let { state.healthProfileCompleted = it }
+    // Consent state (required + optional) so Privacy & consent reflects what's
+    // actually on record across sessions, not just what was set this run.
+    (document.get("consent") as? Map<*, *>)?.let { consent ->
+        (consent["healthData"] as? Boolean)?.let { state.consentHealthData = it }
+        (consent["expertReview"] as? Boolean)?.let { state.consentExpertReview = it }
+        (consent["medicalDisclaimer"] as? Boolean)?.let { state.consentMedicalDisclaimer = it }
+        (consent["research"] as? Boolean)?.let { state.consentResearch = it }
+        (consent["marketing"] as? Boolean)?.let { state.consentMarketing = it }
+    }
     document.getString("photoUrl")?.let { state.photoUrl = it }
     document.getBoolean("programActive")?.let { state.isProgramActive = it }
     document.getString("activeProgramId")?.let { state.activeProgramId = it }
@@ -117,7 +128,7 @@ private fun refreshAdminClaim(state: NirogState) {
 
 // Existing accounts signing back in (any method) must land on their dashboard,
 // not repeat onboarding - only a genuinely new account has no completed profile yet.
-private fun routeAfterAuthSuccess(state: NirogState, deepLinkFallback: String = "dashboard") {
+private fun routeAfterAuthSuccess(state: NirogState, context: android.content.Context, deepLinkFallback: String = "dashboard") {
     val uid = runCatching { FirebaseAuth.getInstance().currentUser?.uid }.getOrNull()
     if (uid == null) { state.currentScreen = "consent"; return }
     refreshAdminClaim(state)
@@ -125,7 +136,27 @@ private fun routeAfterAuthSuccess(state: NirogState, deepLinkFallback: String = 
         .addOnSuccessListener { document ->
             if (document.getBoolean("onboardingComplete") == true) {
                 applyProfileDocument(state, document)
-                state.currentScreen = deepLinkFallback
+                // Resuming mid check-in: the OS can reclaim the process at any point
+                // (a call, a notification, low memory), which shouldn't cost a member
+                // their half-finished check-in. Only kicks in when nothing else (an
+                // explicit deep link) already claims this launch, and only for the
+                // same local calendar day - a stale step from a prior day would be
+                // confusing rather than helpful, so it's ignored once the day rolls
+                // over. CheckInFlow clears this same pref whenever a member finishes
+                // the flow or taps Close on purpose, so this only fires for a genuine
+                // interruption, never a deliberate exit.
+                val resumeStep = if (deepLinkFallback == "dashboard") {
+                    val prefs = context.getSharedPreferences("nirog_prefs", android.content.Context.MODE_PRIVATE)
+                    val savedDayKey = prefs.getLong("checkin_resume_daykey", -1L)
+                    val savedStep = prefs.getInt("checkin_resume_step", -1)
+                    if (savedStep in 0..3 && savedDayKey == com.nirogbhumi.app.ui.localDayKey(System.currentTimeMillis())) savedStep else null
+                } else null
+                if (resumeStep != null) {
+                    state.checkinStartStep = resumeStep
+                    state.currentScreen = "daily_checkin"
+                } else {
+                    state.currentScreen = deepLinkFallback
+                }
             } else {
                 state.currentScreen = "consent"
             }
@@ -136,11 +167,12 @@ private fun routeAfterAuthSuccess(state: NirogState, deepLinkFallback: String = 
 // SCREEN 1: SPLASH SCREEN
 @Composable
 fun SplashScreen(state: NirogState) {
+    val context = LocalContext.current.applicationContext
     LaunchedEffect(Unit) {
         kotlinx.coroutines.delay(900)
         val user = runCatching { FirebaseAuth.getInstance().currentUser }.getOrNull()
         if (user == null) state.currentScreen = "welcome"
-        else routeAfterAuthSuccess(state, state.pendingDeepLink.ifBlank { "dashboard" })
+        else routeAfterAuthSuccess(state, context, state.pendingDeepLink.ifBlank { "dashboard" })
     }
     Box(
         modifier = Modifier
@@ -715,6 +747,7 @@ fun LoginOtpScreen(state: NirogState) {
     var isValidState by remember { mutableStateOf(true) }
     var resendTimer by remember { mutableStateOf(28) }
     val activity = LocalActivity.current
+    val context = LocalContext.current.applicationContext
 
     LaunchedEffect(Unit) {
         while (resendTimer > 0) {
@@ -853,7 +886,7 @@ fun LoginOtpScreen(state: NirogState) {
                             } else {
                                 state.authBusy = true
                                 FirebaseAuthGateway.verifyOtp(state.otpVerificationId, pinVal,
-                                    onSuccess = { state.authBusy = false; routeAfterAuthSuccess(state) },
+                                    onSuccess = { state.authBusy = false; routeAfterAuthSuccess(state, context) },
                                     onError = { state.authBusy = false; state.authError = it; isValidState = false })
                             }
                         },
@@ -881,6 +914,7 @@ fun EmailAuthScreen(state: NirogState) {
     var passwordInput by remember { mutableStateOf("") }
     var isPasswordVisible by remember { mutableStateOf(false) }
     val activity = LocalActivity.current
+    val context = LocalContext.current.applicationContext
     val googleLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         state.authBusy = true
         state.authError = ""
@@ -888,7 +922,7 @@ fun EmailAuthScreen(state: NirogState) {
             result.data,
             onSuccess = {
                 state.authBusy = false
-                routeAfterAuthSuccess(state)
+                routeAfterAuthSuccess(state, context)
             },
             onError = {
                 state.authBusy = false
@@ -1103,7 +1137,7 @@ fun EmailAuthScreen(state: NirogState) {
                             state.userEmail = emailInput
                             state.authBusy = true; state.authError = ""
                             FirebaseAuthGateway.email(emailInput, passwordInput, state.isSignUpMode,
-                                onSuccess = { state.authBusy = false; routeAfterAuthSuccess(state) },
+                                onSuccess = { state.authBusy = false; routeAfterAuthSuccess(state, context) },
                                 onError = { state.authBusy = false; state.authError = it })
                         },
                         enabled = emailInput.contains("@") && passwordInput.length >= 6 && !state.authBusy,
@@ -1351,6 +1385,15 @@ fun ConsentScreen(state: NirogState) {
                 Text("Read full policies and medical disclaimer", color = DeepGreen, fontWeight = FontWeight.SemiBold)
             }
 
+            // DPDP Act 2023 notice: the law requires that, at or before consent,
+            // we tell you your rights, how to withdraw, and how to complain.
+            Text(
+                "Under India's DPDP Act, 2023 you can access, correct, or delete your data and withdraw optional consent any time in Privacy & consent. Anonymized research and product updates are separate and off by default. Questions or complaints: grievance@nirogbhumi.com, or the Data Protection Board of India.",
+                color = Ink.copy(alpha = 0.6f),
+                fontSize = 12.sp,
+                lineHeight = 17.sp
+            )
+
             if (!(check1 && check2 && check3)) {
                 Text(
                     "Check all three items above to continue.",
@@ -1379,10 +1422,17 @@ fun ConsentScreen(state: NirogState) {
                     state.consentHealthData = check1
                     state.consentExpertReview = check2
                     state.consentMedicalDisclaimer = check3
-                    state.repository.saveProfile(mapOf("consent" to mapOf("healthData" to check1, "expertReview" to check2, "medicalDisclaimer" to check3, "version" to "1.0"))) { result ->
-                        isSaving = false
-                        if (result is com.nirogbhumi.app.data.CloudResult.Success) state.currentScreen = "setup_profile"
-                        else state.authError = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
+                    val purposes = mapOf("healthData" to check1, "expertReview" to check2, "medicalDisclaimer" to check3, "research" to false, "marketing" to false)
+                    state.repository.saveProfile(mapOf("consent" to (purposes + mapOf("version" to com.nirogbhumi.app.ui.CONSENT_VERSION, "acceptedAt" to com.google.firebase.firestore.FieldValue.serverTimestamp())))) { result ->
+                        if (result is com.nirogbhumi.app.data.CloudResult.Success) {
+                            // Immutable, timestamped, versioned consent record (DPDP Act).
+                            state.repository.recordConsentReceipt(purposes, com.nirogbhumi.app.ui.CONSENT_VERSION) {}
+                            isSaving = false
+                            state.currentScreen = "setup_profile"
+                        } else {
+                            isSaving = false
+                            state.authError = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
+                        }
                     }
                 },
                 enabled = check1 && check2 && check3 && !isSaving,
@@ -1456,6 +1506,7 @@ fun SetupProfileScreen(state: NirogState) {
     var weightTemp by remember { mutableStateOf(state.profileWeight) }
     var heightTemp by remember { mutableStateOf(state.profileHeight) }
     var cityTemp by remember { mutableStateOf(state.profileCity) }
+    var genderTemp by remember { mutableStateOf(state.profileGender) }
     var languageTemp by remember { mutableStateOf(state.profileLanguage) }
     var isSaving by remember { mutableStateOf(false) }
 
@@ -1509,11 +1560,27 @@ fun SetupProfileScreen(state: NirogState) {
             Spacer(modifier = Modifier.height(8.dp))
 
             // Fields Questionnaire
-            OutlinedProfileField("Full Name *", nameTemp, "e.g. Priyanshu") { nameTemp = it }
-            OutlinedProfileField("Age", ageTemp, "e.g. 28") { ageTemp = it }
-            OutlinedProfileField("Weight (kg)", weightTemp, "e.g. 72") { weightTemp = it }
-            OutlinedProfileField("Height (cm)", heightTemp, "e.g. 174") { heightTemp = it }
-            OutlinedProfileField("City", cityTemp, "e.g. Jaipur") { cityTemp = it }
+            OutlinedProfileField("Full Name *", nameTemp, "Your name") { nameTemp = it }
+            OutlinedProfileField("Age", ageTemp, "In years", androidx.compose.ui.text.input.KeyboardType.Number) { ageTemp = com.nirogbhumi.app.ui.ProfileValidation.numericOnly(it, allowDecimal = false) }
+            OutlinedProfileField("Weight (kg)", weightTemp, "Optional", androidx.compose.ui.text.input.KeyboardType.Decimal) { weightTemp = com.nirogbhumi.app.ui.ProfileValidation.numericOnly(it, allowDecimal = true) }
+            OutlinedProfileField("Height (cm)", heightTemp, "Optional", androidx.compose.ui.text.input.KeyboardType.Decimal) { heightTemp = com.nirogbhumi.app.ui.ProfileValidation.numericOnly(it, allowDecimal = true) }
+            OutlinedProfileField("City", cityTemp, "Optional") { cityTemp = it }
+
+            // Gender is optional and never pre-selected: tapping the selected chip again clears it.
+            Text("Gender (optional)", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Ink)
+            Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                com.nirogbhumi.app.ui.ProfileValidation.GENDER_OPTIONS.forEach { option ->
+                    val isS = genderTemp == option
+                    Box(
+                        modifier = Modifier
+                            .background(if (isS) DeepGreen else SoftClay, RoundedCornerShape(12.dp))
+                            .clickable { genderTemp = if (isS) "" else option }
+                            .padding(horizontal = 16.dp, vertical = 10.dp)
+                    ) {
+                        Text(option, color = if (isS) Color.White else Ink, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
+                }
+            }
 
             // Language Selector
             Text("Preferred Coaching Language", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Ink)
@@ -1542,15 +1609,17 @@ fun SetupProfileScreen(state: NirogState) {
                 Button(
                     onClick = {
                         if (nameTemp.isBlank()) { state.authError = "Please enter your name to continue"; return@Button }
+                        com.nirogbhumi.app.ui.ProfileValidation.validate(ageTemp, weightTemp, heightTemp)?.let { state.authError = it; return@Button }
                         state.authError = ""
                         isSaving = true
-                        state.profileName = nameTemp
-                        state.profileAge = ageTemp
-                        state.profileWeight = weightTemp
-                        state.profileHeight = heightTemp
-                        state.profileCity = cityTemp
+                        state.profileName = nameTemp.trim()
+                        state.profileAge = ageTemp.trim()
+                        state.profileWeight = weightTemp.trim()
+                        state.profileHeight = heightTemp.trim()
+                        state.profileCity = cityTemp.trim()
+                        state.profileGender = genderTemp
                         state.profileLanguage = languageTemp
-                        state.repository.saveProfile(mapOf("fullName" to nameTemp, "age" to ageTemp.toIntOrNull(), "weightKg" to weightTemp.toDoubleOrNull(), "heightCm" to heightTemp.toDoubleOrNull(), "city" to cityTemp, "preferredLanguage" to languageTemp)) { result ->
+                        state.repository.saveProfile(mapOf("fullName" to nameTemp.trim(), "age" to ageTemp.trim().toIntOrNull(), "gender" to genderTemp, "weightKg" to weightTemp.trim().toDoubleOrNull(), "heightCm" to heightTemp.trim().toDoubleOrNull(), "city" to cityTemp.trim(), "preferredLanguage" to languageTemp)) { result ->
                             isSaving = false
                             if (result is com.nirogbhumi.app.data.CloudResult.Success) state.currentScreen = "selection_caregiver"
                             else state.authError = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
@@ -1575,7 +1644,13 @@ fun SetupProfileScreen(state: NirogState) {
 }
 
 @Composable
-fun OutlinedProfileField(label: String, value: String, placeholder: String, onValueChange: (String) -> Unit) {
+fun OutlinedProfileField(
+    label: String,
+    value: String,
+    placeholder: String,
+    keyboardType: androidx.compose.ui.text.input.KeyboardType = androidx.compose.ui.text.input.KeyboardType.Text,
+    onValueChange: (String) -> Unit,
+) {
     Column {
         Text(label, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Ink)
         Spacer(modifier = Modifier.height(6.dp))
@@ -1586,6 +1661,7 @@ fun OutlinedProfileField(label: String, value: String, placeholder: String, onVa
             placeholder = { Text(placeholder, color = Ink.copy(alpha = 0.3f)) },
             shape = RoundedCornerShape(12.dp),
             singleLine = true,
+            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = keyboardType),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedBorderColor = DeepGreen,
                 unfocusedBorderColor = Line,
@@ -1710,6 +1786,12 @@ fun CaregiverOptionCard(title: String, desc: String, isSelected: Boolean, onClic
 // SCREEN 8: HEALTH PROFILE METABOLIC QUESTIONS
 @Composable
 fun HealthProfileSetupScreen(state: NirogState) {
+    // Re-entered later from Profile's "Complete your health profile" nudge
+    // (healthProfileReturnRoute set) rather than mid-onboarding - every exit
+    // here (back/skip/continue) should land back on Profile instead of
+    // continuing into goal_selection, which no longer makes sense once
+    // onboarding is long finished.
+    val returnRoute = state.healthProfileReturnRoute.ifBlank { null }
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1722,17 +1804,21 @@ fun HealthProfileSetupScreen(state: NirogState) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            IconButton(onClick = { state.currentScreen = "selection_caregiver" }) {
+            IconButton(onClick = { state.currentScreen = returnRoute ?: "selection_caregiver" }) {
                 Icon(imageVector = Icons.Filled.ArrowBack, contentDescription = "Back", tint = Ink)
             }
             Text(
-                "Step 2 of 3",
+                if (returnRoute != null) "Health profile" else "Step 2 of 3",
                 fontWeight = FontWeight.Bold,
                 fontSize = 13.sp,
                 color = Ink.copy(alpha = 0.5f)
             )
-            TextButton(onClick = { state.currentScreen = "goal_selection" }) {
-                Text("Skip", color = DeepGreen, fontWeight = FontWeight.Bold)
+            if (returnRoute == null) {
+                TextButton(onClick = { state.currentScreen = "goal_selection" }) {
+                    Text("Skip", color = DeepGreen, fontWeight = FontWeight.Bold)
+                }
+            } else {
+                Spacer(modifier = Modifier.width(48.dp))
             }
         }
 
@@ -1793,16 +1879,52 @@ fun HealthProfileSetupScreen(state: NirogState) {
             Spacer(modifier = Modifier.height(32.dp))
         }
 
+        var saving by remember { mutableStateOf(false) }
         Box(modifier = Modifier.padding(16.dp)) {
             Button(
-                onClick = { state.currentScreen = "goal_selection" },
+                onClick = {
+                    state.healthProfileCompleted = true
+                    if (returnRoute == null) {
+                        // Still mid-onboarding - OnboardingCompleteScreen's
+                        // saveProfile call a few steps ahead persists these
+                        // fields together with everything else, same as before.
+                        state.currentScreen = "goal_selection"
+                    } else {
+                        // Re-entered from Profile after onboarding already
+                        // finished - there's no later save step to piggyback
+                        // on, so persist directly and only navigate back once
+                        // it actually lands.
+                        saving = true
+                        state.repository.saveProfile(mapOf(
+                            "diabetesStatus" to state.selectedDiabetesStatus,
+                            "bpStatus" to state.selectedBpStatus,
+                            "onMedication" to state.selectedOnMedication,
+                            "doctorSupervision" to state.selectedDoctorSupervision,
+                            "healthProfileCompleted" to true,
+                        )) { result ->
+                            saving = false
+                            if (result is com.nirogbhumi.app.data.CloudResult.Success) {
+                                state.currentScreen = returnRoute
+                                state.healthProfileReturnRoute = ""
+                            } else {
+                                state.healthProfileCompleted = false
+                                state.cloudMessage = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
+                            }
+                        }
+                    }
+                },
+                enabled = !saving,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(54.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = DeepGreen),
                 shape = RoundedCornerShape(27.dp)
             ) {
-                Text("Continue", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                if (saving) {
+                    CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+                } else {
+                    Text("Continue", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                }
             }
         }
     }
@@ -2126,6 +2248,15 @@ fun ProgramCodeOptionalScreen(state: NirogState) {
 @Composable
 fun OnboardingCompleteScreen(state: NirogState) {
     var isSaving by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    // Widget adoption is otherwise entirely undiscoverable unless a member
+    // already knows to long-press their home screen - offering it here,
+    // right before they land in the app for the first time, means they at
+    // least know it exists even if they dismiss it. requestPinAppWidget
+    // still shows the launcher's own confirmation; this can't silently
+    // place anything.
+    var showWidgetOffer by remember { mutableStateOf(com.nirogbhumi.app.widget.isPinWidgetSupported(context)) }
+    var widgetRequestSent by remember { mutableStateOf(false) }
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -2194,6 +2325,41 @@ fun OnboardingCompleteScreen(state: NirogState) {
                 }
             }
 
+            if (showWidgetOffer) {
+                Spacer(modifier = Modifier.height(16.dp))
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFEBF3EC)),
+                    border = BorderStroke(1.dp, DeepGreen.copy(alpha = 0.2f)),
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.fillMaxWidth(0.9f)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text(
+                            "One-tap logging from your home screen",
+                            fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Ink,
+                        )
+                        Text(
+                            "Add the Quick Log widget now so you can log sugar or BP without opening the app.",
+                            fontSize = 12.5.sp, color = Ink.copy(alpha = 0.65f), lineHeight = 17.sp,
+                        )
+                        if (widgetRequestSent) {
+                            Text("Check your home screen to place it.", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = DeepGreen)
+                        } else {
+                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Button(
+                                    onClick = { widgetRequestSent = com.nirogbhumi.app.widget.requestPinQuickLogWidget(context) },
+                                    colors = ButtonDefaults.buttonColors(containerColor = DeepGreen),
+                                    shape = RoundedCornerShape(20.dp),
+                                ) { Text("Add widget", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp) }
+                                TextButton(onClick = { showWidgetOffer = false }) {
+                                    Text("Maybe later", color = Ink.copy(alpha = 0.6f), fontSize = 13.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             Spacer(modifier = Modifier.height(16.dp))
 
             if (state.authError.isNotBlank()) {
@@ -2204,6 +2370,26 @@ fun OnboardingCompleteScreen(state: NirogState) {
                 onClick = {
                     state.authError = ""
                     isSaving = true
+                    // programActive is never sent from here - it's a server-set
+                    // enrollment field (redeemProgramCode already wrote it via the
+                    // Admin SDK if a code was redeemed), and firestore.rules
+                    // rejects a client trying to set it at all, whether creating or
+                    // updating this doc - state.isProgramActive is only ever a
+                    // local mirror of that value, re-sending it here would be
+                    // redundant at best.
+                    // Personalizes the very first reminder schedule instead of
+                    // leaving checkinHourHint null (which falls back to a flat
+                    // 7pm - see ReminderScheduler.scheduleSmart). Clamped to a
+                    // waking-hours window so a signup at, say, 2am doesn't seed
+                    // a 2am daily reminder - the actual signup hour is used
+                    // whenever it's already a reasonable time to be nudged,
+                    // and only off-hours signups fall back to the old flat
+                    // default. This is read the moment the member later
+                    // enables the Daily check-in reminder toggle (Notification
+                    // Settings screen already calls peekCheckinHourHint there),
+                    // so it never needs scheduling directly from here.
+                    val signupHour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+                    val seededHourHint = if (signupHour in 7..21) signupHour else 19
                     state.repository.saveProfile(mapOf(
                         "onboardingComplete" to true,
                         "trackingFor" to if (state.isTrackingForSelf) "self" else "family",
@@ -2212,7 +2398,8 @@ fun OnboardingCompleteScreen(state: NirogState) {
                         "onMedication" to state.selectedOnMedication,
                         "doctorSupervision" to state.selectedDoctorSupervision,
                         "goals" to state.selectedGoals.toList(),
-                        "programActive" to state.isProgramActive
+                        "healthProfileCompleted" to state.healthProfileCompleted,
+                        "checkinHourHint" to seededHourHint,
                     )) { result ->
                         isSaving = false
                         if (result is com.nirogbhumi.app.data.CloudResult.Success) state.currentScreen = "dashboard"

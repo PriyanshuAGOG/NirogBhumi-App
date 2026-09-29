@@ -14,6 +14,8 @@ import {
 import { FirebaseError } from 'firebase/app'
 import { db } from '../lib/firebase'
 import { useAuth } from '../auth/AuthProvider'
+import { chunk } from '../lib/usePrograms'
+import { useScope } from '../lib/scope'
 import { relativeTime } from '../lib/time'
 import './Moderation.css'
 
@@ -37,6 +39,7 @@ function shortId(id: string | undefined): string {
 
 export default function Moderation() {
   const { user } = useAuth()
+  const { isAdmin, programIds, programKey, loading: scopeLoading } = useScope()
   const [reports, setReports] = useState<Report[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -47,6 +50,40 @@ export default function Moderation() {
   const [actionError, setActionError] = useState<string | null>(null)
 
   useEffect(() => {
+    if (!isAdmin) {
+      // A coach may only read reports from programs they coach, and Firestore
+      // rejects list queries that aren't provably limited to those - so read
+      // per program (chunked `in`) and pick out the open ones here.
+      if (scopeLoading) return
+      if (programIds.length === 0) {
+        setReports([])
+        setLoading(false)
+        return
+      }
+      const perChunk = new Map<number, Report[]>()
+      const unsubs = chunk(programIds).map((ids, index) =>
+        onSnapshot(
+          query(collection(db, 'reportedMessages'), where('programId', 'in', ids)),
+          (snap) => {
+            perChunk.set(index, snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Report, 'id'>) })))
+            const millis = (r: Report) => (r.createdAt as { toMillis?: () => number } | undefined)?.toMillis?.() ?? 0
+            setReports(
+              Array.from(perChunk.values()).flat()
+                .filter((r) => r.status === undefined || r.status === 'open')
+                .sort((a, b) => millis(b) - millis(a)),
+            )
+            setLoading(false)
+            setLoadError(null)
+          },
+          (err) => {
+            setLoading(false)
+            setLoadError(err instanceof FirebaseError ? `Could not load reports (${err.code}).` : 'Could not load reports.')
+          },
+        ),
+      )
+      return () => unsubs.forEach((u) => u())
+    }
+
     const col = collection(db, 'reportedMessages')
     // Prefer open reports, newest first. Requires a composite index on
     // (status ASC, createdAt DESC) — a fallback listener kicks in if the
@@ -99,7 +136,8 @@ export default function Moderation() {
       unsubPrimary()
       if (unsubFallback) unsubFallback()
     }
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin, programKey, scopeLoading])
 
   const visible = useMemo(
     () => reports.filter((r) => !resolvedIds.has(r.id)),

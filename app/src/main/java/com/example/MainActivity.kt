@@ -12,7 +12,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -29,6 +31,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import com.nirogbhumi.app.ui.NirogState
 import com.nirogbhumi.app.ui.screens.*
 import com.nirogbhumi.app.ui.theme.MyApplicationTheme
+import kotlinx.coroutines.launch
 
 private const val IS_PRODUCTION_APK = true
 
@@ -42,6 +45,7 @@ private const val IS_PRODUCTION_APK = true
 private val DEEP_LINK_ROUTES = setOf(
   "dashboard", "weekly_report", "consultation_detail", "active_journey",
   "order_detail", "expert_notes", "program_calendar", "announcements",
+  "daily_checkin", "coach_inbox", "data_controls", "program_resources", "my_consultations",
 )
 private fun sanitizedRoute(raw: String?): String = raw?.takeIf { it in DEEP_LINK_ROUTES } ?: ""
 
@@ -59,6 +63,7 @@ class MainActivity : ComponentActivity() {
         .addOnFailureListener { /* not signed in as a tester yet, or no newer release - nothing to show */ }
     }
     nirogState.pendingDeepLink = sanitizedRoute(intent.getStringExtra("route"))
+    applyQuickLogWidgetAction(intent, coldStart = true)
     val tourSeen = getSharedPreferences("nirog_prefs", MODE_PRIVATE).getBoolean("onboarding_tour_seen", false)
     nirogState.shouldShowTour = !tourSeen
     enableEdgeToEdge()
@@ -273,6 +278,37 @@ class MainActivity : ComponentActivity() {
       nirogState.pendingDeepLink = it
       nirogState.currentScreen = it
     }
+    applyQuickLogWidgetAction(intent, coldStart = false)
+  }
+
+  // The home-screen widget's two buttons launch this same Activity with one
+  // of these fixed action strings instead of an arbitrary extra - jumps
+  // straight to an existing quick-log entry point rather than the widget
+  // trying to capture a precise health value itself with no way to review
+  // or correct it before saving.
+  //
+  // Cold start must NOT jump screens directly: currentScreen is still
+  // "splash" and the auth/profile routing hasn't run, so navigating now
+  // would land on a member screen with nothing loaded (and, for a signed-
+  // out device, skip sign-in entirely). Instead the target goes through
+  // pendingDeepLink, which SplashScreen's routeAfterAuthSuccess already
+  // honors after auth completes. A warm app (onNewIntent - the widget
+  // intent carries CLEAR_TOP|SINGLE_TOP so the running instance receives
+  // it instead of the system stacking a fresh one with fresh state) is
+  // already past auth, so there it navigates immediately.
+  private fun applyQuickLogWidgetAction(intent: Intent, coldStart: Boolean) {
+    when (intent.action) {
+      com.nirogbhumi.app.widget.ACTION_OPEN_QUICK_LOG_SUGAR -> {
+        nirogState.isQuickLogFastingOpen = true
+        if (coldStart) nirogState.pendingDeepLink = "dashboard"
+        else nirogState.currentScreen = "dashboard"
+      }
+      com.nirogbhumi.app.widget.ACTION_OPEN_QUICK_LOG_BP -> {
+        nirogState.checkinStartStep = 1
+        if (coldStart) nirogState.pendingDeepLink = "daily_checkin"
+        else nirogState.currentScreen = "daily_checkin"
+      }
+    }
   }
 }
 
@@ -292,7 +328,9 @@ fun ActiveScreenContent(state: NirogState) {
       })
     }
   }
-  UpdateLifecycleEffects(state)
+  // In-app self-update only runs in the tester (debug/App Distribution) build;
+  // the Play release relies on Play for updates (Device & Network Abuse policy).
+  if (BuildConfig.DEBUG) UpdateLifecycleEffects(state)
   // Single, high-leverage inset fix: every screen dispatched below used to
   // handle (or, in ~40 of 45 cases, simply not handle) its own status-bar/
   // nav-bar/keyboard insets individually, which is why headers looked "too
@@ -345,6 +383,10 @@ fun ActiveScreenContent(state: NirogState) {
       "announcements" -> AnnouncementsScreen(state)
       "program_chat" -> ProgramChatScreen(state)
       "chat_hub" -> ChatHubScreen(state)
+      "coach_inbox" -> CoachInboxScreen(state)
+      "program_resources" -> ProgramResourcesScreen(state)
+      "request_consultation" -> RequestConsultationScreen(state)
+      "my_consultations" -> MyConsultationsScreen(state)
 
       // Metrics Detailed screens
       "sugar_detail" -> BloodSugarDetailScreen(state)
@@ -377,7 +419,10 @@ fun ActiveScreenContent(state: NirogState) {
       QuickLogFastingOverlay(state)
     }
 
-    state.availableUpdate?.let { info ->
+    // availableUpdate is only ever set by UpdateManager.checkNow, which no-ops
+    // in a Play/release build - so this dialog never surfaces there. The
+    // explicit BuildConfig.DEBUG guard makes that guarantee local and obvious.
+    if (BuildConfig.DEBUG) state.availableUpdate?.let { info ->
       val currentVersionCode = remember { currentVersionCode(context) }
       com.nirogbhumi.app.ui.components.UpdateDialog(
         info = info,
@@ -499,6 +544,17 @@ private fun UpdateLifecycleEffects(state: NirogState) {
 
 @Composable
 fun QuickLogFastingOverlay(state: NirogState) {
+    // Right after saving, stays open one more beat showing a confirmation
+    // with an Edit action instead of dismissing immediately - fixing a
+    // typo'd value previously meant finding it again in the reading
+    // history screen. savedDocId tracks the real Firestore doc id so a
+    // correction updates that same reading rather than creating a
+    // duplicate one.
+    var savedDocId by remember { mutableStateOf<String?>(null) }
+    var confirming by remember { mutableStateOf(false) }
+    var saving by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val widgetScope = androidx.compose.runtime.rememberCoroutineScope()
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -537,80 +593,137 @@ fun QuickLogFastingOverlay(state: NirogState) {
                     }
                 }
 
-                Text(
-                    text = "Slide to record the fasting value displayed on your metabolic monitor.",
-                    fontSize = 13.sp,
-                    color = Color(0xFF737972)
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.Bottom
-                ) {
-                    Text(
-                        text = "${state.quickLogFastingValue}",
-                        fontSize = 44.sp,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Black,
-                        color = Color(0xFF1B3221)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = "mg/dL",
-                        fontSize = 14.sp,
-                        color = Color(0xFF737972),
-                        modifier = Modifier.padding(bottom = 8.dp)
-                    )
-                }
-
-                Slider(
-                    value = state.quickLogFastingValue.toFloat(),
-                    onValueChange = { state.quickLogFastingValue = it.toInt() },
-                    valueRange = 50f..250f,
-                    colors = SliderDefaults.colors(
-                        thumbColor = Color(0xFF314936),
-                        activeTrackColor = Color(0xFFBFEE95)
-                    )
-                )
-
-                Button(
-                    onClick = {
-                        state.fastingSugarValue = state.quickLogFastingValue
-                        state.sugarLogs.add(
-                            0,
-                            com.nirogbhumi.app.ui.SugarLog(
-                                state.sugarLogs.size + 1,
-                                state.quickLogFastingValue,
-                                "Fasting",
-                                "Today, Just Now",
-                                if (state.quickLogFastingValue > 125) "High" else if (state.quickLogFastingValue < 80) "Low" else "Normal"
-                            )
+                if (confirming) {
+                    // Just-saved confirmation, replacing the slider - the
+                    // whole point of this state is giving a moment to catch
+                    // a typo right here instead of after closing the sheet.
+                    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(imageVector = Icons.Filled.CheckCircle, contentDescription = null, tint = Color(0xFF3F7D58))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Logged ${state.quickLogFastingValue} mg/dL",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp,
+                            color = Color(0xFF1B3221),
                         )
-                        state.repository.addHealthLog(
-                            "glucoseReadings",
-                            mapOf(
+                    }
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        OutlinedButton(
+                            onClick = { confirming = false },
+                            modifier = Modifier.weight(1f).height(48.dp),
+                            shape = RoundedCornerShape(24.dp),
+                        ) { Text("Edit", fontWeight = FontWeight.Bold) }
+                        Button(
+                            onClick = { state.isQuickLogFastingOpen = false },
+                            modifier = Modifier.weight(1f).height(48.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF314936)),
+                            shape = RoundedCornerShape(24.dp),
+                        ) { Text("Done", fontWeight = FontWeight.Bold, color = Color.White) }
+                    }
+                } else {
+                    val voiceLaunch = com.nirogbhumi.app.ui.components.rememberVoiceInputLauncher(
+                        prompt = "Say your fasting sugar, e.g. \"110\"",
+                        onResult = { heard ->
+                            val value = com.nirogbhumi.app.ui.components.parseSpokenNumber(heard)?.toFloatOrNull()?.toInt()
+                            if (value != null) state.quickLogFastingValue = value.coerceIn(50, 250)
+                            else state.cloudMessage = "Didn't catch a number - try again or use the slider."
+                        },
+                        onUnavailable = { state.cloudMessage = "Voice entry isn't available on this device." },
+                    )
+                    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "Slide to record the fasting value displayed on your metabolic monitor.",
+                            fontSize = 13.sp,
+                            color = Color(0xFF737972),
+                            modifier = Modifier.weight(1f),
+                        )
+                        IconButton(onClick = voiceLaunch) {
+                            Icon(imageVector = Icons.Filled.Mic, contentDescription = "Say the value instead", tint = Color(0xFF314936))
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.Bottom
+                    ) {
+                        Text(
+                            text = "${state.quickLogFastingValue}",
+                            fontSize = 44.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Black,
+                            color = Color(0xFF1B3221)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "mg/dL",
+                            fontSize = 14.sp,
+                            color = Color(0xFF737972),
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+                    }
+
+                    Slider(
+                        value = state.quickLogFastingValue.toFloat(),
+                        onValueChange = { state.quickLogFastingValue = it.toInt() },
+                        valueRange = 50f..250f,
+                        colors = SliderDefaults.colors(
+                            thumbColor = Color(0xFF314936),
+                            activeTrackColor = Color(0xFFBFEE95)
+                        )
+                    )
+
+                    Button(
+                        enabled = !saving,
+                        onClick = {
+                            saving = true
+                            state.fastingSugarValue = state.quickLogFastingValue
+                            val status = if (state.quickLogFastingValue > 125) "High" else if (state.quickLogFastingValue < 80) "Low" else "Normal"
+                            val values = mapOf(
                                 "value" to state.quickLogFastingValue,
                                 "unit" to "mg/dL",
                                 "readingType" to "fasting",
                                 "measuredAt" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
                                 "source" to "manual"
                             )
-                        ) { result ->
-                            state.cloudMessage = when (result) {
-                                is com.nirogbhumi.app.data.CloudResult.Success -> "Synced securely"
-                                is com.nirogbhumi.app.data.CloudResult.Failure -> result.message
+                            fun onDone(result: com.nirogbhumi.app.data.CloudResult<*>) {
+                                saving = false
+                                if (result is com.nirogbhumi.app.data.CloudResult.Success<*>) {
+                                    state.cloudMessage = "Synced securely"
+                                    confirming = true
+                                    widgetScope.launch {
+                                        com.nirogbhumi.app.widget.updateHealthQuickLogWidget(context, state.quickLogFastingValue, status)
+                                    }
+                                } else if (result is com.nirogbhumi.app.data.CloudResult.Failure) {
+                                    state.cloudMessage = result.message
+                                }
                             }
+                            val existingDocId = savedDocId
+                            if (existingDocId == null) {
+                                state.sugarLogs.add(0, com.nirogbhumi.app.ui.SugarLog(state.sugarLogs.size + 1, state.quickLogFastingValue, "Fasting", "Today, Just Now", status))
+                                state.repository.addHealthLog("glucoseReadings", values) { result ->
+                                    if (result is com.nirogbhumi.app.data.CloudResult.Success) savedDocId = result.value
+                                    onDone(result)
+                                }
+                            } else {
+                                if (state.sugarLogs.isNotEmpty()) {
+                                    state.sugarLogs[0] = state.sugarLogs[0].copy(value = state.quickLogFastingValue, status = status)
+                                }
+                                state.repository.updateHealthLog("glucoseReadings", existingDocId, values, ::onDone)
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF314936)),
+                        shape = RoundedCornerShape(24.dp)
+                    ) {
+                        if (saving) {
+                            CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+                        } else {
+                            Text(text = if (savedDocId == null) "Save Fasting Sugar" else "Update Fasting Sugar", fontWeight = FontWeight.Bold, color = Color.White)
                         }
-                        state.isQuickLogFastingOpen = false
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF314936)),
-                    shape = RoundedCornerShape(24.dp)
-                ) {
-                    Text(text = "Save Fasting Sugar", fontWeight = FontWeight.Bold, color = Color.White)
+                    }
                 }
             }
         }

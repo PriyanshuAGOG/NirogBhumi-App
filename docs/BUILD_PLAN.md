@@ -736,3 +736,567 @@ by the user. Work sequentially, CI-verified per slice, small commits.
     its own delete button (staff-only, confirm dialog). New rules-tests
     cover both the source doc (staff-read-only, zero client writes) and the
     fan-out subcollection (owner-read-only, zero client writes).
+27. [x] **Full-platform security audit, round 2** — a deliberate re-pass
+    (`firebase/firestore.rules`, `firebase/storage.rules`,
+    `firebase/functions/src/index.ts`, the Android manifest/update-install
+    flow, and both npm dependency trees) covering everything added since
+    the round-1 audit (item... security items above): CSV bulk import,
+    manual/pre-invite enrollment, super-admin bootstrap, and the
+    announcements rebuild. Found and fixed one real, exploitable gap: the
+    `users/{uid}` **create** rule only ever locked down the `role` field
+    ("bootstrap self-enrollment bypass") - `programActive`, `activeProgramId`,
+    `activeProgramName`, `programDurationDays`, and `status` were all still
+    free for *any* signed-in client to set on their very first
+    `users/{uid}` write, because the existing **update** rule's "must equal
+    the already-stored value" guard has nothing to compare against on a
+    *create* (the doc doesn't exist yet). A scripted attacker (no app
+    needed, just a valid Firebase Auth account and the public Firestore SDK)
+    could sign up and, in the moment before `onUserCreate`'s merge-only
+    trigger writes its own fields, `setDoc` their own profile doc with
+    `programActive: true` and any `activeProgramId` they chose - free
+    Care+ enrollment into any program of their choosing, bypassing
+    `redeemProgramCode` entirely, since the trigger's merge never touches
+    those keys and would silently leave the attacker's version in place.
+    Fixed by requiring those fields be entirely *absent* on create (not
+    just role-restricted), mirroring the update rule's boundary - they can
+    now only ever be set by `admin()` or a Cloud Function via the Admin
+    SDK, matching the original intent. Four new rules-tests cover the
+    create path specifically (the existing "self-enrollment bypass fix"
+    describe block only ever covered *update*). One legitimate client call
+    (`WelcomeFlow.kt`'s onboarding-complete `saveProfile`) was echoing
+    `programActive` back on every completion - always redundant, since it's
+    only ever a local mirror of what `redeemProgramCode` already set
+    server-side - removed rather than special-cased, so the client no
+    longer depends on that field passing through at all.
+    - Also fixed, lower severity: `console`'s `firebase` dependency
+      (10.14.1, the latest available 10.x) carried a **High**-severity
+      transitive `undici` advisory plus 9 moderate ones; bumped to
+      `^11.10.0` (typecheck + build verified clean, no code changes
+      needed) - resolved all but the un-related dev-server-only
+      `esbuild`/`vite` moderate finding (affects `vite dev`, not the
+      deployed production build, left as-is rather than force-upgrading
+      Vite for a risk that doesn't reach production). A `firebase-admin`
+      13.4.0 → 14.1.0 bump in `firebase/functions` was attempted for the
+      same reason but reverted - `npm install` accepted it locally, but CI's
+      `npm ci` correctly enforces the exact peer-dependency contract and
+      failed: `firebase-functions@6.6.0` only supports `firebase-admin@
+      ^11.10.0 || ^12.0.0 || ^13.0.0`, not 14.x yet. Left at `^13.4.0`; the
+      remaining moderate findings there are several layers deep inside
+      Google's own `@google-cloud`/`google-gax` dependency chain, already
+      at the latest version `firebase-admin@13.x` can pull in - not
+      independently fixable from this repo without also bumping
+      `firebase-functions` past what it currently supports.
+    - Everything else checked and found clean: every `onCall` in
+      `index.ts` requires `requireUser()` and checks the server-issued
+      role custom claim (never a client-supplied role/uid); ownership
+      checks (`getHealthFileShareLink`, `requestDataExport`,
+      `exportUserData`) are all path/uid-prefix-scoped so one member can
+      never reach another's private Storage files or export data;
+      `storage.rules`'s `safeType()`/`safeAudioType()` content-type regexes
+      are full-string matches (no substring-injection room to smuggle a
+      different MIME type through); `bootstrapSuperAdmin` is a hardcoded
+      single email + a transaction-guarded one-time marker (already
+      consumed, permanently disabled); the Android manifest has
+      `allowBackup="false"`, full `data_extraction_rules`/`backup_rules`
+      exclusions, a narrow `FileProvider` path config, no custom deep-link
+      scheme, and the self-update install flow's checksum verification and
+      `FileProvider`/`FLAG_GRANT_READ_URI_PERMISSION` usage are sound; the
+      app has no `WebView`/`addJavascriptInterface` anywhere, and nothing
+      sensitive (health values, tokens) ever reaches `Log.*` or
+      `SharedPreferences` (only UI-state flags and update-channel bookkeeping
+      live there).
+    - Round 2 continued: found and fixed a real **CSV injection** hole
+      (CWE-1236) in `console/src/lib/csv.ts`'s shared `csvCell()` - a
+      member's self-editable `fullName` flows straight into the Members
+      roster CSV export (`Members.tsx:downloadRosterCsv`) with no formula
+      escaping, so a value like `=HYPERLINK("http://evil","click")` would
+      execute/render as a live formula/link the moment staff opened the
+      exported file in Excel or Sheets. Fixed at the one shared choke point
+      (every CSV export in the console - roster, Calendar/Programs/Batches
+      templates - goes through `toCsv`/`csvCell`): any cell starting with
+      `=`, `+`, `-`, `@`, tab, or CR now gets a leading single quote, Excel's
+      own "treat as literal text" escape, applied before the existing
+      comma/quote/newline RFC4180 quoting so it survives either way the cell
+      ends up wrapped.
+    - Also added baseline security headers to the console's Firebase
+      Hosting config (`firebase.json`): `X-Frame-Options: DENY` (this admin
+      console does one-click destructive actions - role changes, bulk
+      notify, delete announcement - with no header set before, an attacker
+      could iframe it on a decoy page for a clickjacking attack against a
+      signed-in admin), `X-Content-Type-Options: nosniff`, and
+      `Referrer-Policy: strict-origin-when-cross-origin`. A
+      Content-Security-Policy is deliberately *not* added yet - getting it
+      wrong (missing an origin Firebase Auth/Firestore/Functions/Google
+      Sign-In actually needs) fails silently in a real browser with no way
+      to catch it from this sandbox's CI, so it needs real-browser
+      verification before being added rather than being guessed at here.
+    - Console npm audit re-checked clean (`dangerouslySetInnerHTML`/
+      `innerHTML` don't appear anywhere; the one dynamic `<a href>`
+      render - Calendar's "Join link" - is already scheme-validated via
+      `safeHttpUrl()`, confirmed still in place and confirmed it's the
+      *only* such render site in the whole console); `AuthProvider.tsx`'s
+      role always comes from a real `getIdTokenResult()` claim, never
+      cached/trusted client state.
+    - CI/CD: every workflow already has an explicit, minimally-scoped
+      `permissions:` block (`contents: read`, plus `id-token: write` only
+      where WIF is actually used) - no workflow relies on the broad
+      default token. `ci.yml`'s `pull_request` trigger (not the riskier
+      `pull_request_target`) never exposes secrets to a fork's code. One
+      real but lower-priority recommendation left as a follow-up rather
+      than guessed at: `google-github-actions/auth@v3` (the step that
+      receives the WIF provider/service-account secrets as input) is
+      pinned to a mutable major-version tag, not a commit SHA - the
+      standard supply-chain hardening step, but this sandbox's outbound
+      web access couldn't verify the real current SHA to pin against, and
+      guessing one wrong would break every future deploy outright, which
+      is worse than the tag-pin status quo.
+    - Round 3 (end-to-end flow/abuse audit, not just single-file rule
+      review): fixed four real gaps, all zero-risk to the legitimate flow
+      since the callables they protect already write via the Admin SDK
+      (which bypasses rules regardless):
+      - `dataExportRequests`/`deletionRequests`: client `create` was only
+        gated by `validCreate()` (ownership + timestamp), with zero
+        awareness of `requestDataExport`'s 60-minute cooldown - a script
+        could skip the callable and write either collection directly,
+        unthrottled (each `dataExportRequests` doc alone triggers ~19
+        collection reads plus a permanent Storage file write via
+        `exportUserData`). Now `allow create: if false` on both - forces
+        every request through the callable. `requestAccountDeletion` had
+        *no* cooldown of its own even inside the callable (unlike its
+        sibling); given the matching cooldown now.
+      - `errorReports`: rule was `staff()` (any coach), but the console's
+        Error Reports page is labeled and route-gated admin-only
+        (`Protected adminOnly`) - a coach could bypass that UI gate and
+        read/resolve platform-wide crash telemetry directly via the
+        Firestore SDK. Tightened to `admin()` to match the page's actual
+        intent.
+      - `programCodes`: rule was `staff()` with no `programId` scoping,
+        unlike every sibling program-scoped collection (`programs`,
+        `programEvents`, `programMembers`) - any coach could read or
+        rewrite *any other coach's* program join code, not just their
+        own. Scoped to `programStaff(programId)`, matching the existing
+        pattern (each code doc already carries a `programId` field).
+      - Added rules-tests for all four.
+    - Two further Critical findings surfaced by this round were put to
+      the owner rather than fixed unilaterally, since both would reverse
+      a previously deliberate, *tested* design decision rather than close
+      an oversight: any `coach` can currently read (a) every platform
+      user's profile doc (`users/{uid}`'s `staff()`-wide read, exploitable
+      today via the shipped Members/Dashboard/Users console pages, not
+      just devtools) and (b) any member's full health-log history
+      (glucose/BP/sleep/meds/labs) plus private `coachNotes`, regardless
+      of program assignment - both already explicitly asserted as
+      intentional in existing rules-tests (`firestore.rules.test.mjs`'s
+      `'lets any staff (coach or admin) read - not yet program-scoped, by
+      design'` and the `coachNotes` "documented, not per-program scoped"
+      tests). **Owner decision: leave both as-is** - confirmed intentional,
+      not a bug, presumably to keep cross-program/emergency-coverage
+      visibility simple for coaches. Not changing these. The code's own
+      comments still document the alternative (chain member uid ->
+      `activeProgramId` -> that program's `coachId`) if this is ever
+      revisited.
+    - Also surfaced, not yet actioned (needs an owner decision/action,
+      not a code fix from this sandbox): Firebase App Check is installed
+      client-side (`NirogBhumiApplication.kt`, Play Integrity in release,
+      Debug provider in debug) but never enforced on any of the 17
+      callables or in `firestore.rules`/`storage.rules` - meaning any
+      script holding a valid Firebase Auth ID token from a disposable
+      account reaches the backend exactly as the real app would. This is
+      the single highest-leverage remaining fix, but flipping
+      `enforceAppCheck: true` on blind would break every existing tester's
+      app instantly unless their device's debug token is first registered
+      in Firebase Console's App Check allow-list (the debug provider's
+      own code comment already documents this exact prerequisite) - an
+      owner action, not something to guess at from here. Lower-priority,
+      same audit: `redeemProgramCode` has no attempt cooldown/lockout
+      (cost is trivial per attempt; real risk scales with program-code
+      entropy, not independently verifiable from this repo), and the
+      `sendPendingNotifications` 100-doc/15-minute shared queue can be
+      indirectly flooded by submitting fake critical-range glucose/BP
+      readings (each unconditionally queues a `critical_alert`), which
+      could measurably delay genuine critical alerts platform-wide under
+      sustained abuse - both flagged for a future round rather than
+      fixed here given the added complexity of a real fix (attempt
+      counters, anomaly detection) relative to this round's scope.
+27. [x] **Onboarding + daily-logging UX pass** — four of a seven-item
+    backlog (the other three - populated-preview empty states, voice-entry,
+    and a home-screen widget - are larger and tracked separately):
+    - **Skip-and-fill-later health profile**: `HealthProfileSetupScreen`
+      already had a working "Skip" button - the actual gap was no way to
+      tell "genuinely chose None/Normal/No/Yes" apart from "skipped and
+      those are just the defaults," and nothing surfaced the gap
+      afterward. New `NirogState.healthProfileCompleted` (persisted as
+      `users/{uid}.healthProfileCompleted`) is set true only via that
+      screen's real Continue button; Profile now shows a "Complete your
+      health profile" nudge card whenever it's false, re-entering the same
+      screen via a new `healthProfileReturnRoute` field so back/Continue
+      land back on Profile instead of continuing into `goal_selection`
+      (which wouldn't make sense long after onboarding).
+    - **Time-of-signup-aware reminder defaults**: `checkinHourHint` used to
+      stay null (falling back to a flat 7pm - see
+      `ReminderScheduler.scheduleSmart`) until a member's first real
+      check-in. `OnboardingCompleteScreen`'s existing `saveProfile` call
+      now seeds it from the actual signup hour, clamped to a 7am-9pm
+      window so an off-hours signup doesn't lock in a 2am daily reminder.
+      Needed no new scheduling call - Notification Settings' existing
+      "turn on Daily check-in" toggle already reads this same field.
+    - **"You usually log by now" nudge**: a dismissible banner on the
+      Today tab (reusing the same `checkinHourHint`) that appears once
+      the member's typical check-in hour has passed and they haven't
+      checked in yet today, tapping straight into Daily Check-in.
+    - **Quick-edit/undo on the last logged reading**: new
+      `HealthRepository.updateHealthLog()` (narrower allow-list than
+      `addHealthLog`, targets a real doc id, never stamps a fresh
+      `createdAt`) needed no rules change - the existing health-log
+      update rule (`ownsResource() && ownsRequest() && preservesUserId()`)
+      already covers a member correcting their own reading. Wired into
+      both the primary logging surfaces: `QuickLogFastingOverlay` now
+      shows a "Logged ✓" confirmation with Edit/Done instead of closing
+      immediately, and `CheckInDone`'s per-metric summary rows are
+      tappable, jumping back to that exact step (`editingFromSummary`)
+      and correcting the same document instead of creating a duplicate
+      one when re-saved.
+    - **Populated-preview empty states**: new shared `PreviewRhythmChart`
+      composable (fixed, non-randomized sample values, deliberately muted/
+      grayscale rather than the real chart's forest-green palette, plus an
+      "EXAMPLE" badge overlay) replaces the plain icon+text placeholder in
+      both the Today tab's Weekly Rhythm card and the Insights tab's
+      "No insights yet" card - shows what logging unlocks instead of a
+      bare "nothing here yet," while staying visually unmistakable from a
+      member's own real readings (a real concern for a diabetes app -
+      never showing a fabricated-but-plausible-looking glucose number
+      undistinguished from a genuine one).
+    - **Voice-entry for readings**: new shared
+      `rememberVoiceInputLauncher`/`parseSpokenNumber`/
+      `parseSpokenTwoNumbers` (`ui/components/VoiceInput.kt`), built on the
+      system speech-recognition UI (`RecognizerIntent.ACTION_RECOGNIZE_SPEECH`)
+      rather than a new on-device model - needs no new manifest permission
+      (`RECORD_AUDIO` was already declared for Health Connect; the
+      recognizer app itself owns the mic, not this app's process), and
+      `resolveActivity()` guards against the rare device with no
+      recognizer installed at all, surfacing a plain "voice entry isn't
+      available" message instead of silently doing nothing. Wired into
+      `QuickLogFastingOverlay`'s slider and, via a new optional
+      `onVoiceInput` parameter on `CheckInFlow`'s shared `BigInput`, into
+      all three numeric Daily Check-in steps (sugar, weight, and blood
+      pressure - `parseSpokenTwoNumbers` handles "120 over 80" style
+      phrasing for the latter). The system recognizer already normalizes
+      spoken numbers into digit form in its transcript, so a plain regex
+      for "the first number(s) heard" covers real speech without needing
+      a spelled-out-numbers parser.
+    - **Home screen widget**: new `widget/HealthQuickLogWidget.kt` built on
+      Jetpack Glance (`androidx.glance:glance-appwidget`, first use of this
+      dependency in the app). Deliberately rejected a true "log a value
+      with zero taps and no app open at all" tile - a home-screen surface
+      has no numeric keypad and no way to review or correct a fat-fingered
+      value before it's saved, the same safety reasoning already applied
+      to the populated-preview empty states. Instead the widget shows the
+      last-logged fasting sugar reading (from a small per-widget
+      `PreferencesGlanceStateDefinition` cache, refreshed by a new
+      `updateHealthQuickLogWidget()` call wired into both save-success
+      paths - `QuickLogFastingOverlay` and `CheckInFlow`'s sugar step) and
+      two tappable rows that jump straight into this app's existing
+      quick-log entry points via two fixed custom Intent actions
+      (`ACTION_OPEN_QUICK_LOG_SUGAR`/`ACTION_OPEN_QUICK_LOG_BP`, read back
+      in `MainActivity.onCreate`/`onNewIntent`) - chosen over Glance's
+      `ActionParameters` marshalling to keep the new API surface small and
+      predictable. `HealthQuickLogWidgetReceiver` is `exported="true"`
+      (mandatory - the launcher process, not this app, sends
+      `APPWIDGET_UPDATE`, and Android 12+ silently drops that delivery to
+      a non-exported receiver) but exposes nothing beyond that fixed
+      update action and the two internal navigation intents.
+28. [x] **Navigation & findability, part 1** — first two of a three-item
+    backlog (global search and a deeper trend-graphs/insights pass are
+    tracked separately as larger changes):
+    - **Resume-mid-flow for Daily Check-in**: previously, `checkinStartStep`
+      only ever lived in memory - if the OS reclaimed the process mid
+      check-in (a call, a notification, low memory), reopening the app
+      restarted at the dashboard with no memory of the in-progress flow,
+      even though every completed step had already been saved to
+      Firestore. `CheckInFlow.kt`'s `DailyCheckInScreen` now writes
+      `{checkin_resume_daykey, checkin_resume_step}` to the existing
+      `nirog_prefs` SharedPreferences on every step change (cleared once
+      the flow reaches the closing summary), and `WelcomeFlow.kt`'s
+      `routeAfterAuthSuccess` - the single function all four sign-in/
+      splash paths already funnel through - reads it back on the next cold
+      start and lands on `daily_checkin` at that exact step instead of the
+      dashboard, but only for the same local calendar day (`localDayKey`)
+      and only when nothing else (an explicit deep link) already claims
+      the launch. Tapping Close explicitly clears the pref, so a
+      deliberate exit is never mistaken for an interruption on the next
+      launch.
+    - **Nav-parity audit**: Care+, Learn, and Insights are already
+      top-level `NirogBottomNavigationBar` items exactly one tap away,
+      the same tier as Today and Track - structurally at parity, not
+      buried. The one real (if minor) asymmetry found: Today already
+      carries contextual shortcuts into Insights (the Weekly Rhythm card)
+      and Care (the first-week checklist's "Meet your batch" row), but
+      had none pointed at Learn. Added a matching link card on Today,
+      styled identically to the existing Health File card, so all three
+      secondary tabs get equal contextual surfacing rather than just
+      equal bottom-nav placement.
+29. [x] **Trend graphs, deeper correlations, and a weekly rollup** — three
+    more of the insights-focused backlog (doctor-visit PDF and the
+    Care+/search items are tracked separately):
+    - **Trend graphs on metric detail screens**: new shared
+      `RangeTrendChart` (`OverviewScreens.kt`, reused from `DetailsScreens.kt`
+      too) replaces three near-identical bespoke Canvas blocks with one
+      7/30/90-day range-toggle chart. Buckets raw readings into one point
+      per local calendar day (the latest reading that day) rather than
+      plotting every raw reading, since 90 days of readings would otherwise
+      be unreadable - days with nothing logged simply produce no point,
+      matching the same evenly-spaced-points simplification the app's other
+      hand-rolled charts already use (no new charting library). Needed the
+      BP/Sleep/Sugar Firestore listeners bumped from a 30-doc cap to
+      120-180, and a new `measuredAtMillis` field on the in-memory
+      `SugarLog` (defaulted to "now" so the two optimistic quick-log call
+      sites didn't need touching - only the Firestore-sync call sites pass
+      the reading's real timestamp).
+    - **Deeper correlation insights**: extended `TrendInsights.kt` with two
+      more conservative pattern-matchers alongside the existing sleep↔sugar
+      one - `computeMedicationGlucoseInsight` (same-day medication taken/
+      missed vs. fasting sugar) and `computeMealTimingInsight` (buckets
+      post-meal readings by hour-of-day into breakfast/lunch/dinner windows,
+      since there's no explicit "which meal" field, only a timestamp).
+      Both use the same bar as the original: null unless both sides of the
+      comparison have enough data and the difference is large enough to be
+      worth surfacing, never a fabricated pattern from noise. Today's
+      pattern card now shows whichever one of the three is available (never
+      more than one, to stay minimal); `insight_detail` shows all three,
+      each with its own "not enough data yet" fallback.
+    - **One-line weekly score**: new `computeWeeklySummary` turns the last
+      7 days of glucose/BP/sleep into a plain-language headline ("A great
+      week" / "A steady week" / "A tougher week" / "Building your rhythm")
+      plus a one-line factual detail - framed around logging consistency
+      and typical-range percentages, deliberately not a clinical verdict.
+      Returns null only when nothing at all was logged that week, so a
+      brand-new member never sees a hollow judgment about a week that
+      hasn't happened. Rendered as `WeeklyScoreCard` right below the
+      streak chip on Today, above the first-week checklist.
+30. [x] **@mention autocomplete with roster picker** (`ProgramChatScreen`,
+    `DetailsScreens.kt`): typing "@" now shows a row of tappable name chips
+    instead of only highlighting a finished "@Name" after the fact. The
+    suggestion list is deliberately NOT a new read of the `programMembers`
+    roster (that collection is staff-only by design - see its rules
+    comment: "member names never leak between members") - it's built from
+    `senderName` values already visible in this same chat's own messages
+    (`chatRosterNames`), so a member can only autocomplete someone who's
+    actually posted here. Needed zero rules changes. `activeMentionQuery`
+    detects an unterminated "@token" at the end of the typed text (same
+    boundary as the existing `MENTION_REGEX`); picking a suggestion inserts
+    only its first name, matching the existing single-token mention
+    highlighter (`@Priya`, never `@Priya Sharma`) so anything picked always
+    actually renders as a highlighted mention afterward.
+31. [x] **Opt-in batch leaderboard + "Seen by N" on announcements** - a
+    matched full-stack pair (both touch `functions/index.ts`,
+    `firestore.rules`, and rules-tests, so shipped together):
+    - **Opt-in batch leaderboard**: `ProgramStatusHero`'s existing
+      `collectiveMinutes` team total was deliberately never a per-member
+      ranking ("no rankings, just the team total"). `generateDailyContent`'s
+      existing daily walk-minutes aggregation now also accumulates a
+      per-uid breakdown in the same loop (no new Firestore query - it
+      already fetches every `walkLogs` doc for the team total), and writes
+      a `leaderboard: [{name, minutes}]` array onto the same `batchStats`
+      doc, but populated ONLY from `programMembers` docs with
+      `leaderboardOptIn === true` - nobody's name appears until they flip
+      it on themselves. Self-service opt-in needed one field added to
+      `programMembers`'s existing self-update allow-list (`markProgramRead`'s
+      pattern: `lastReadGeneralAt`/`lastReadAnnouncementsAt`, now also
+      `leaderboardOptIn`) - two new rules tests cover it (self opt-in
+      succeeds, opting in someone else's doc fails). No new collections,
+      no new Cloud Function callable.
+    - **"Seen by N" on announcements**: new `seenCount` field on the master
+      `announcements/{id}` doc (staff-readable only, per existing rules),
+      incremented via a new `markAnnouncementSeen` callable using a
+      `seenMarkers/{uid}` marker subcollection under the announcement doc to
+      dedup repeat views - the exact same pattern `batchStats/{id}/
+      checkedInMembers` already uses for the same reason (count each member
+      once, not once per view). No new rules needed for the marker
+      subcollection - it's covered by the existing `match /{document=**}
+      { allow read, write: if false; }` catch-all, since only the Cloud
+      Function (Admin SDK) ever touches it. Android's `AnnouncementsScreen`
+      calls `markAnnouncementSeen` once per rendered announcement for
+      member viewers (deduped client-side too, via a remembered id set);
+      staff viewers instead one-shot-fetch `seenCount`/`recipientCount` from
+      the master doc and see "Seen by N of M" inline - a coach previewing
+      their own broadcast is explicitly excluded from inflating their own
+      seen count.
+32. [x] **Doctor-visit-ready PDF summary**: `HealthFileScreen` already had a
+    real, working PDF generator (`buildAndSaveHealthFilePdf`, no external
+    libs) with a Share action - but it was a single current-snapshot
+    ("latest reading") summary, not an actual weekly/monthly report.
+    Added a "Doctor-visit report" card with a Weekly/Monthly toggle and a
+    new `computeHealthFilePeriodReport` (days logged, sugar avg + %-in-
+    range, BP reading count + how many ran high, weight change start-to-
+    end) scoped to the selected period, rendered both on-screen and as a
+    new section in the generated PDF - distinct from the raw JSON data
+    export already reachable from Privacy & Consent (`requestDataExport`),
+    which is a machine-readable full account dump for GDPR-style requests,
+    not something meant to be handed to a doctor. Bumped the screen's
+    Firestore fetch limits (30/10/5 → 90/60/30) so a 30-day report has
+    enough history to actually cover the period, and while doing that also
+    fixed the existing "Vitals summary (last 30 days)" card to filter by
+    real timestamp instead of just however many docs the old, smaller
+    limit happened to return - a latent inaccuracy that would have gotten
+    worse, not better, if left in place after the limit bump.
+33. [x] **Widget redesign + in-app "add widget" flow** (user follow-up after
+    seeing the first version of the home-screen widget): the original
+    widget worked but looked plain. Redesigned `HealthQuickLogWidget` with
+    a branded header row, a status-color-coded value (reusing the exact
+    High/Normal/Low palette `SugarLogHistoryRow` already uses in-app, so a
+    reading looks the same in the widget as it does inside the app), a
+    status pill badge, hairline dividers, and a primary/secondary button
+    pair instead of two identical green buttons. `updateHealthQuickLogWidget`
+    now also takes the already-computed status string from each caller
+    (`QuickLogFastingOverlay`, `CheckInFlow`'s sugar step) rather than
+    recomputing thresholds a third way inside the widget module. (A
+    `LocalSize`-based responsive layout for narrow placements was attempted
+    but reverted after CI caught an unresolved import for this Glance
+    version - not worth a second guess for a nice-to-have; the fixed
+    layout still looks right at the widget's minimum declared size.)
+
+    Widget discovery was previously "know to long-press your home screen
+    and find it in the widget picker" - added `requestPinQuickLogWidget`
+    (`AppWidgetManager.requestPinAppWidget`, API 26+) so the app can ask
+    the launcher to offer pinning it directly, surfaced two places: a
+    dismissible card on `OnboardingCompleteScreen` (the last screen before
+    a new member reaches the dashboard) and a permanent "Add home screen
+    widget" row in Profile's Account settings for anyone who dismissed it
+    or wants to add it again later. `isPinWidgetSupported` gates both -
+    older/unsupported launchers just don't see the offer rather than
+    tapping a button that silently does nothing. The launcher still shows
+    its own confirmation dialog either way; this can only request pinning,
+    never place a widget without the user's explicit action.
+34. [x] **Widget round 3 - taps did nothing + still looked flat** (user
+    report). Four root causes found and fixed together:
+    - **Vertical clipping**: the provider XML declared `targetCellHeight=2`
+      (~120dp) but the composed content needs ~200dp - most launchers
+      clipped the bottom of the widget, cutting into (or entirely
+      swallowing) the two action buttons' hit areas. Now 3×3 cells with
+      honest min/resize bounds. Note: an already-placed widget keeps its
+      old user-set size after an app update - it needs a re-add (or a
+      long-press → resize taller) to get the full layout back.
+    - **Dead zone everywhere except the buttons**: only the two small
+      buttons were tappable; tapping the big number or header did nothing,
+      which reads as "broken" instantly. The whole widget surface now
+      opens the app (a plain `MainActivity` launch); the buttons keep
+      their more-specific actions - a child's click wins over the parent's.
+    - **Warm-tap stacking**: the launch Intent only carried `NEW_TASK`, so
+      tapping while the app was already running made the system stack a
+      second `MainActivity` instance with its own fresh `NirogState`
+      (re-splash, re-routing, action applied to a state object that then
+      gets re-initialized). Added `CLEAR_TOP|SINGLE_TOP` so the running
+      instance receives the tap in `onNewIntent` and reacts instantly.
+    - **Cold-start auth bypass**: the BP action used to set
+      `currentScreen = "daily_checkin"` directly from `onCreate`, skipping
+      splash/auth/profile routing entirely. Widget actions on cold start
+      now go through `pendingDeepLink` (with `daily_checkin` added to the
+      route allowlist), which `routeAfterAuthSuccess` already honors after
+      auth completes; only a warm app navigates immediately.
+    Visually: every Text previously rendered at the ~14sp default because
+    no `fontSize` was ever set - the whole widget was one flat text size.
+    Now a real type scale (34sp hero value, 13sp title, 9-11sp labels/
+    meta) plus tuned spacing, which is most of what "premium" reads as at
+    a glance.
+35. [x] **Async "ask your coach" inbox** (`coachInboxMessages`): a private
+    two-way thread per (program, member) pair for non-urgent questions -
+    deliberately separate from the live group chat (where a personal
+    question sits in front of the whole batch) and from consultations
+    (scheduled sessions). Deliberately NOT built on the dormant
+    `coachMessages` collection: its rule shape is one-directional
+    coach→member notes with no member create path, and repurposing it
+    would have meant loosening an existing rule instead of adding a
+    purpose-built one. Schema: `programId`, `memberUid` (whose thread),
+    `fromUid` (who wrote it), `senderName`, `senderRole` ("member"/
+    "coach"), `text`, `createdAt`. Rules: a member reads/writes only
+    their own thread (`memberUid == auth.uid` + `ownProgram()`), program
+    staff read/reply to any thread in their own program only
+    (`programStaff()`), and messages are immutable once sent - 7 new
+    rules tests cover the full matrix including the
+    batchmate-reading-another-thread and unassigned-coach cases. Two new
+    composite indexes (programId+memberUid+createdAt for a thread,
+    programId+createdAt for the staff list). Android:
+    `CoachInboxScreen` (new `CoachInbox.kt`) renders as the member's own
+    thread, or - for `canManageProgram` staff - as a thread list grouped
+    client-side from the same collection (thread title comes from the
+    member's own messages, never a staff reply's name), reached via a
+    third "Ask your coach" room in Chat Hub. Repository functions follow
+    the existing `listenProgramChat`/`sendProgramChatMessage`
+    CloudResult-callback conventions.
+36. [x] **Play-launch readiness audit** — a full QA/security/policy pass
+    across the Android app, Cloud Functions, Firestore/Storage rules and
+    the admin console, ahead of a Play Store launch. Findings and fixes:
+    - **BLOCKER (Google Play policy): in-app self-update.** The app could
+      fetch a newer APK and hand it to the package installer. Google
+      Play's Device & Network Abuse policy forbids an app distributed
+      through Play from downloading executable code and self-updating
+      outside of Play. Self-update is really the *tester* sideload channel
+      (Firebase App Distribution debug builds), so it's now compiled out
+      of the release/Play build end to end: `UpdateManager.isEnabled`
+      (= `BuildConfig.DEBUG`) is the single gate; `checkNow()` /
+      `schedulePeriodicCheck()` no-op in release; MainActivity's
+      foreground update loop + the update dialog are `BuildConfig.DEBUG`-
+      gated; both "Check for updates" rows (Settings, Developer settings)
+      are hidden in release; and `REQUEST_INSTALL_PACKAGES` moved out of
+      the main manifest into a new `app/src/debug/AndroidManifest.xml`, so
+      it's absent from the Play AAB and never has to be declared on the
+      store listing.
+    - **HIGH (health-data confidentiality): cross-program coach reads.**
+      The health-log collection-group read and `coachNotes` rules were
+      `staff()`-wide, so *any* coach could read *every* member's glucose/
+      BP/sleep/medication/lab history and case notes platform-wide, not
+      just their own batch. Added `coachAssignedToUser(uid)` (member uid →
+      that user's `activeProgramId` → that program's `coachId` ==
+      `request.auth.uid`) and scoped both to `admin() ||
+      coachAssignedToUser(...)`. Member still reads own; admin reads any;
+      the expert-assigned path is preserved. Rules unit tests extended
+      with unassigned-coach-denied cases; full suite (95 tests) green.
+    - **LOW: `markAnnouncementSeen` had no recipient check** — any
+      signed-in caller could inflate the "Seen by N" count on any
+      announcement they could name by id. Now verifies the caller is in
+      the announcement's `recipientUids` before writing the seen marker /
+      incrementing the count.
+    - **Doc fix:** the `VoiceInput` comment wrongly attributed
+      `RECORD_AUDIO` to Health Connect; it's declared for chat voice notes.
+    Owner-blocked launch items are unchanged and tracked in
+    `docs/RELEASE_CHECKLIST.md` (private upload key + Play App Signing,
+    `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` secret, Data Safety + Health apps
+    declaration, Indian privacy/health-law review + hosting the legal
+    text, clinician sign-off on the sugar/BP caution thresholds, and the
+    store listing assets).
+37. [x] **Release build verified in CI + R8 keep rules** — added an
+    `android-release` CI job that runs `bundleRelease` on every push, the
+    first thing to ever compile the shipping artifact. It caught two
+    latent release-only blockers (a debug-only `DebugAppCheckProviderFactory`
+    referenced from `main/` so the release AAB never compiled - fixed with
+    per-variant `installVariantAppCheckProvider` source sets; and an R8
+    OOM from a 1 GB Gradle heap - raised to 4 GB, dropped serial GC,
+    disabled the redundant release lint-vital). Wrote real `proguard-rules.pro`
+    (deobfuscatable Crashlytics traces, reflection attributes). All four CI
+    jobs green.
+38. [x] **DPDP Act 2023 + Play legal/consent readiness.**
+    - **Hosted legal pages** (`console/public/legal/`): privacy-policy,
+      terms, medical-disclaimer, account-deletion, grievance, index -
+      self-contained static HTML served at `/legal/...`. Gives Play the
+      publicly-reachable Privacy Policy URL and the account-deletion URL
+      (reachable without installing the app - a hard Play requirement).
+    - **Consent receipts**: `recordConsentReceipt()` writes immutable,
+      server-timestamped, versioned records to `users/{uid}/consentReceipts`
+      (rules append-only, `acceptedAt == request.time`; owner+admin read;
+      5 new rules tests, 100 total green). `CONSENT_VERSION` stamps every
+      receipt for future re-consent.
+    - **Granular consents**: optional 'Anonymized research' + 'Product
+      updates' consents, off by default, separately withdrawable in Privacy
+      & consent; consent hydrated from `users/{uid}.consent` across sessions.
+    - **Children's data (s.9)**: Add Family Member detects under-18 and
+      captures explicit guardian consent (`isMinor`/`guardianConsent`/
+      `guardianConsentAt`); no tracking/ads for children.
+    - **In-app notice**: onboarding consent screen + Legal Center now carry
+      DPDP rights, Grievance Officer contact, Data Protection Board
+      escalation, withdrawal, retention, children, and breach notice.
+    - **Docs**: `docs/DPDP_COMPLIANCE.md` (obligation map + owner actions),
+      `docs/DATA_SAFETY_MAPPING.md` (Play Data Safety declaration from the
+      real data inventory), updated `RELEASE_CHECKLIST.md` and
+      `LEGAL_DRAFTS.md`. Owner-only: appoint a Grievance Officer, finalize
+      entity/contacts/retention with counsel, host the pages, and fill the
+      Play Data Safety + Health declarations.

@@ -3,11 +3,15 @@ import { FieldValue, getFirestore, Timestamp } from 'firebase-admin/firestore';
 import { getAuth } from 'firebase-admin/auth';
 import { getStorage } from 'firebase-admin/storage';
 import { getMessaging } from 'firebase-admin/messaging';
-import { onDocumentCreated, onDocumentWritten } from 'firebase-functions/v2/firestore';
+import { onDocumentCreated, onDocumentUpdated, onDocumentWritten } from 'firebase-functions/v2/firestore';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import * as functions from 'firebase-functions/v1';
 import { createHash, randomBytes } from 'node:crypto';
+import { processPendingNotifications } from './notificationSender.js';
+import { cancelOwnConsultation, handleConsultationChange } from './consultations.js';
+import { dayKeyIST, isMondayIST, sendWeeklyDigests, updateBatchPulse } from './scheduledJobs.js';
+import { DELETION_GRACE_DAYS, cancelAccountDeletion as cancelDeletionRequest, processDueDeletions, scheduleAccountDeletion } from './accountDeletion.js';
 
 initializeApp();
 const db = getFirestore();
@@ -109,10 +113,6 @@ function glucoseStatus(value: number, type: string) {
   return 'in_range';
 }
 
-function dayKeyIST(date = new Date()): string {
-  // en-CA formats as YYYY-MM-DD, which is exactly the sortable key we want.
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
-}
 
 // Batch Pulse (PRD v2, Care+): a PII-free "N of M checked in today" count for
 // the member's program. Deliberately does NOT expose which members checked
@@ -167,95 +167,107 @@ export const onBPReadingCreate = onDocumentCreated({ document: 'bpReadings/{read
 // programId field can't express). See resolveAudienceUids and
 // deleteAnnouncementDoc.
 
-// Daily maintenance job. Runs once a day; on Mondays it also builds weekly
-// reports. Keeping daily + weekly in one schedule keeps us to 3 Cloud
-// Scheduler jobs total (this + notifications + deletions), inside the free tier.
-export const generateDailyContent = onSchedule({ schedule: '0 5 * * *', timeZone: 'Asia/Kolkata', region }, async () => {
-  const users = await db.collection('users').where('status', '==', 'active').get();
-  const day = new Date().toISOString().slice(0, 10); const batch = db.batch();
-  users.docs.forEach(user => batch.set(db.doc(`dailyActions/${user.id}_${day}`), { userId: user.id, profileId: user.id, dateKey: day, title: 'Walk 15 minutes after dinner', reason: 'A short post-meal walk can support your health rhythm.', status: 'pending', createdAt: FieldValue.serverTimestamp() }, { merge: true }));
-  await batch.commit();
+// Two-way coach <-> member inbox (coachInboxMessages, written by the app's
+// "Ask your coach" screen and by the console's roster "Message" action).
+// Pushes the message to whoever did NOT write it, immediately rather than
+// waiting for the 15-minute notification sweep - a reply from a coach is a
+// human conversation, not a batchable reminder. Every send is recorded in
+// `notifications` so it shows in the member's notification inbox and audit.
+export const onCoachInboxMessageCreate = onDocumentCreated({ document: 'coachInboxMessages/{messageId}', region }, async event => {
+  const message = event.data?.data();
+  if (!message) return;
+  const memberUid = String(message.memberUid ?? '');
+  const fromUid = String(message.fromUid ?? '');
+  const programId = String(message.programId ?? '');
+  const text = String(message.text ?? '').trim();
+  if (!memberUid || !fromUid || !text) return;
 
-  // Batch Pulse collective goal: minutes walked together this month, per
-  // active program. Runs daily (not per-log) since a monthly total doesn't
-  // need intraday freshness, keeping this inside the existing job budget.
-  const programsSnap = await db.collection('programs').get();
-  const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
-  const monthStartTs = Timestamp.fromDate(monthStart);
-  const today = dayKeyIST();
-  for (const programDoc of programsSnap.docs) {
-    const programId = programDoc.id;
-    const membersSnap = await db.collection('programMembers').where('programId', '==', programId).get();
-    const uids = membersSnap.docs.map(m => String(m.get('uid') ?? '')).filter(Boolean);
-    if (!uids.length) continue;
-    let totalMinutes = 0;
-    for (let i = 0; i < uids.length; i += 30) {
-      const chunk = uids.slice(i, i + 30);
-      const walks = await db.collection('walkLogs').where('userId', 'in', chunk).where('createdAt', '>=', monthStartTs).get();
-      walks.docs.forEach(w => { totalMinutes += Number(w.get('minutes') ?? 0); });
-    }
-    await db.doc(`batchStats/${programId}_${today}`).set({ programId, dayKey: today, collectiveMinutes: Math.round(totalMinutes), memberCount: uids.length, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  let recipientUid = memberUid;
+  let title = `${String(message.senderName ?? 'Your coach')} replied`;
+  if (fromUid === memberUid) {
+    // Member asked a question: notify the program's coach, if one is assigned.
+    const program = await db.doc(`programs/${programId}`).get();
+    recipientUid = String(program.get('coachId') ?? '');
+    title = `${String(message.senderName ?? 'A member')} asked a question`;
   }
+  if (!recipientUid || recipientUid === fromUid) return;
 
-  const weekdayIST = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', weekday: 'short' }).format(new Date());
-  if (weekdayIST !== 'Mon') return;
-  const end = Timestamp.now(); const start = Timestamp.fromMillis(end.toMillis() - 7 * 86400000);
-  // Digest notifications are scheduled a few hours out (not sent immediately
-  // at this 5am run) so they land at a considerate mid-morning hour instead
-  // of during most users' default quiet hours (21:00-07:00).
-  const digestScheduledFor = Timestamp.fromMillis(Date.now() + 4 * 60 * 60000);
-  for (const user of users.docs) {
-    const [glucose, sleep] = await Promise.all([
-      db.collection('glucoseReadings').where('userId', '==', user.id).where('measuredAt', '>=', start).get(),
-      db.collection('sleepLogs').where('userId', '==', user.id).where('createdAt', '>=', start).get(),
-    ]);
-    const values = glucose.docs.map(x => Number(x.data().value)).filter(Number.isFinite);
-    const average = values.length ? Math.round(values.reduce((a,b) => a+b, 0) / values.length) : null;
-    await db.collection('weeklyReports').add({ userId: user.id, profileId: user.id, periodStart: start, periodEnd: end, glucoseAverage: average, glucoseLogCount: values.length, consistency: values.length >= 4 ? 'good' : 'building', recommendation: 'Focus on one consistent daily action this week.', createdAt: FieldValue.serverTimestamp() });
-
-    // Weekly logging-coverage digest: same "days with a reading/sleep log
-    // out of 7" coverage math the Insights screen already shows the member,
-    // sent as a nudge rather than left for them to discover on their own.
-    const loggedDayKeys = new Set<string>();
-    for (const doc of [...glucose.docs, ...sleep.docs]) {
-      const ts = (doc.get('measuredAt') ?? doc.get('createdAt')) as FirebaseFirestore.Timestamp | undefined;
-      if (ts) loggedDayKeys.add(dayKeyIST(ts.toDate()));
-    }
-    const daysLogged = loggedDayKeys.size;
-    if (daysLogged === 0) continue; // Never nag a fully inactive user with a "0/7" ping.
-    const body = daysLogged >= 4
-      ? `Great rhythm - you logged health data on ${daysLogged} of the last 7 days. Keep it up!`
-      : `You logged health data on ${daysLogged} of the last 7 days. Try logging one thing today to build your rhythm.`;
-    await db.collection('notifications').add({
-      userId: user.id, profileId: user.id, title: 'Your week in review', body,
-      type: 'weekly_digest', status: 'scheduled', scheduledFor: digestScheduledFor, createdAt: FieldValue.serverTimestamp(),
-    });
+  const body = text.length > 140 ? `${text.slice(0, 137)}...` : text;
+  const notificationRef = db.collection('notifications').doc();
+  const base = { userId: recipientUid, profileId: null, title, body, type: 'coach_message', createdAt: FieldValue.serverTimestamp() };
+  const token = (await db.doc(`users/${recipientUid}`).get()).get('fcmToken');
+  if (!token) { await notificationRef.set({ ...base, status: 'failed', failureReason: 'missing_token' }); return; }
+  try {
+    await getMessaging().send({ token, notification: { title, body }, data: { type: 'coach_message', notificationId: notificationRef.id } });
+    await notificationRef.set({ ...base, status: 'sent', sentAt: FieldValue.serverTimestamp() });
+  } catch (error) {
+    console.error('Coach inbox push failed', event.params.messageId, error);
+    await notificationRef.set({ ...base, status: 'failed', failureReason: 'send_failed' });
   }
 });
 
-export const sendPendingNotifications = onSchedule({ schedule: 'every 15 minutes', timeZone: 'Asia/Kolkata', region }, async () => {
-  const due = await db.collection('notifications').where('status', '==', 'scheduled').where('scheduledFor', '<=', Timestamp.now()).limit(100).get();
-  for (const doc of due.docs) {
-    const notification = doc.data(); const user = await db.doc(`users/${notification.userId}`).get();
-    const preferences = user.get('notificationPreferences') ?? {}; const timezone = String(user.get('timezone') ?? 'Asia/Kolkata');
-    const parts = new Intl.DateTimeFormat('en-GB', { timeZone: timezone, hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(new Date());
-    const currentMinutes = Number(parts.find(part => part.type === 'hour')?.value ?? 0) * 60 + Number(parts.find(part => part.type === 'minute')?.value ?? 0);
-    const toMinutes = (value: unknown, fallback: number) => { const match = String(value ?? '').match(/^(\d{1,2}):(\d{2})$/); return match ? Number(match[1]) * 60 + Number(match[2]) : fallback; };
-    const quietStart = toMinutes(preferences.quietHoursStart, 21 * 60); const quietEnd = toMinutes(preferences.quietHoursEnd, 7 * 60);
-    const inQuietHours = quietStart < quietEnd ? currentMinutes >= quietStart && currentMinutes < quietEnd : currentMinutes >= quietStart || currentMinutes < quietEnd;
-    if (notification.type === 'reminder' && inQuietHours) { await doc.ref.set({ scheduledFor: Timestamp.fromMillis(Date.now() + 60 * 60000), deferredReason: 'quiet_hours', updatedAt: FieldValue.serverTimestamp() }, { merge: true }); continue; }
-    if (notification.type === 'reminder') {
-      const startOfWindow = Timestamp.fromMillis(Date.now() - 24 * 60 * 60000); const sent = await db.collection('notifications').where('userId', '==', notification.userId).where('status', '==', 'sent').where('sentAt', '>=', startOfWindow).get();
-      const maxReminders = Math.max(0, Math.min(5, Number(preferences.maxHealthReminders ?? 3)));
-      if (sent.size >= maxReminders) { await doc.ref.set({ scheduledFor: Timestamp.fromMillis(Date.now() + 12 * 60 * 60000), deferredReason: 'daily_cap', updatedAt: FieldValue.serverTimestamp() }, { merge: true }); continue; }
-    }
-    const token = user.get('fcmToken');
-    if (!token) { await doc.ref.set({ status: 'failed', failureReason: 'missing_token' }, { merge: true }); continue; }
-    try {
-      await getMessaging().send({ token, notification: { title: notification.title, body: notification.body }, data: { type: String(notification.type ?? 'reminder'), notificationId: doc.id } });
-      await doc.ref.set({ status: 'sent', sentAt: FieldValue.serverTimestamp() }, { merge: true });
-    } catch (error) { console.error('FCM send failed', doc.id, error); await doc.ref.set({ status: 'failed', failureReason: 'send_failed', updatedAt: FieldValue.serverTimestamp() }, { merge: true }); }
+// Pushes and reminders for consultation requests as staff confirm, move, decline or
+// cancel them (see consultations.ts).
+export const onConsultationUpdate = onDocumentUpdated({ document: 'consultations/{consultationId}', region }, async event => {
+  await handleConsultationChange(db, event.params.consultationId, event.data?.before.data(), event.data?.after.data());
+});
+
+// A member withdraws their own consultation request or booking.
+export const cancelConsultation = onCall({ region }, async request => {
+  const auth = requireUser(request);
+  const id = String(request.data?.id ?? '');
+  if (!id) throw new HttpsError('invalid-argument', 'id is required');
+  try {
+    return await cancelOwnConsultation(db, auth.uid, id);
+  } catch (error) {
+    const code = (error as { code?: string }).code;
+    if (code === 'not-found') throw new HttpsError('not-found', 'That consultation was not found');
+    if (code === 'permission-denied') throw new HttpsError('permission-denied', 'You can only cancel your own consultation');
+    if (code === 'failed-precondition') throw new HttpsError('failed-precondition', 'This consultation can no longer be cancelled');
+    throw error;
   }
+});
+
+// A coach shared a new plan/routine/note with their batch: queue one push per
+// member (delivered by the notification sweep within ~15 minutes, not instantly -
+// unlike a personal reply this is a broadcast). Silent when the author unticked
+// "Notify the batch". Skips the author, in case a coach is also on the roster.
+const RESOURCE_LABELS: Record<string, string> = { diet: 'diet plan', yoga: 'yoga routine', naturopathy: 'naturopathy routine', guidance: 'guidance note', other: 'resource' };
+export const onProgramResourceCreate = onDocumentCreated({ document: 'programResources/{resourceId}', region }, async event => {
+  const resource = event.data?.data();
+  if (!resource || resource.notify === false) return;
+  const programId = String(resource.programId ?? '');
+  if (!programId) return;
+  const roster = await db.collection('programMembers').where('programId', '==', programId).get();
+  const uids = roster.docs.map(d => String(d.get('uid') ?? '')).filter(uid => uid && uid !== resource.createdBy);
+  const title = `New ${RESOURCE_LABELS[String(resource.category)] ?? 'resource'} from your coach`;
+  const body = String(resource.title ?? '').slice(0, 140);
+  for (let offset = 0; offset < uids.length; offset += 400) {
+    const batch = db.batch();
+    uids.slice(offset, offset + 400).forEach(uid => batch.set(db.collection('notifications').doc(), {
+      userId: uid, profileId: null, title, body, type: 'program_resource',
+      status: 'scheduled', scheduledFor: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp(),
+    }));
+    await batch.commit();
+  }
+});
+
+// Daily maintenance (05:00 IST): refreshes each batch's collective-walk pulse and,
+// on Mondays, queues the weekly "your week in review" nudge. The previous version
+// also wrote a hardcoded "Walk 15 minutes after dinner" dailyActions doc and a
+// stub weeklyReports doc for every user - nothing in the app ever read either (the
+// app computes today's focus and the weekly report on the device from the member's
+// own logs), and a single 500-write batch over all users would have failed at 501.
+export const generateDailyContent = onSchedule({ schedule: '0 5 * * *', timeZone: 'Asia/Kolkata', region, timeoutSeconds: 540, memory: '512MiB' }, async () => {
+  const pulses = await updateBatchPulse(db);
+  const digest = isMondayIST() ? await sendWeeklyDigests(db, { budgetMs: 420_000 }) : null;
+  console.log('Daily maintenance', JSON.stringify({ pulses, digest }));
+});
+
+
+export const sendPendingNotifications = onSchedule({ schedule: 'every 15 minutes', timeZone: 'Asia/Kolkata', region, timeoutSeconds: 540, memory: '512MiB' }, async () => {
+  const summary = await processPendingNotifications({ db, send: message => getMessaging().send(message) }, { limit: 1000, concurrency: 25, budgetMs: 420_000 });
+  if (summary.considered) console.log('Notifications processed', JSON.stringify(summary));
 
   // Piggybacks the 24-hour-default announcement expiry cleanup onto this
   // existing 15-minute schedule rather than adding a 4th Cloud Scheduler job
@@ -387,14 +399,14 @@ export const createAnnouncement = onCall({ region, timeoutSeconds: 120 }, async 
   const announcementRef = db.collection('announcements').doc();
   await announcementRef.set({
     title, body, authorId: auth.uid, authorName, createdAt: FieldValue.serverTimestamp(), expiresAt,
-    audience, channels, recipientUids: recipients, recipientCount: recipients.length,
+    audience, channels, recipientUids: recipients, recipientCount: recipients.length, seenCount: 0,
   });
 
   if (channels.inApp) {
     for (let offset = 0; offset < recipients.length; offset += 400) {
       const batch = db.batch();
       recipients.slice(offset, offset + 400).forEach(uid => {
-        batch.set(db.doc(`users/${uid}/announcements/${announcementRef.id}`), { announcementId: announcementRef.id, title, body, authorName, createdAt: now, expiresAt });
+        batch.set(db.doc(`users/${uid}/announcements/${announcementRef.id}`), { announcementId: announcementRef.id, title, body, authorName, authorId: auth.uid, createdAt: now, expiresAt });
       });
       await batch.commit();
     }
@@ -482,6 +494,38 @@ export const deleteAnnouncement = onCall({ region }, async request => {
   return { deleted: true };
 });
 
+// "Seen by N" for a coach, without a per-message read-receipt list on the
+// member-facing fan-out doc (users/{uid}/announcements/{id}) - a small
+// marker subcollection under the master doc dedups repeat views from the
+// same member, mirroring the exact pattern batchStats/{id}/checkedInMembers
+// already uses for the same reason (increment once per uid, not once per
+// view). Never throws on a bad/expired id - marking something as "seen"
+// that no longer exists shouldn't surface an error to the member's UI.
+export const markAnnouncementSeen = onCall({ region }, async request => {
+  const auth = requireUser(request);
+  const announcementId = String(request.data?.announcementId ?? '');
+  if (!announcementId) throw new HttpsError('invalid-argument', 'announcementId is required');
+  const announcementRef = db.doc(`announcements/${announcementId}`);
+  const markerRef = announcementRef.collection('seenMarkers').doc(auth.uid);
+  await db.runTransaction(async tx => {
+    const [announcementSnap, markerSnap] = await Promise.all([tx.get(announcementRef), tx.get(markerRef)]);
+    if (!announcementSnap.exists || markerSnap.exists) return;
+    // Only an actual recipient may mark an announcement seen and bump its
+    // "Seen by N" count. recipientUids is always written on the announcement
+    // doc (createAnnouncement, regardless of channel), so it's the
+    // authoritative audience. Without this, any signed-in user who learned an
+    // announcementId could inflate the seenCount on an announcement never
+    // targeted to them (and plant a seenMarker under their uid).
+    const recipientUids = announcementSnap.get('recipientUids');
+    if (!Array.isArray(recipientUids) || !recipientUids.includes(auth.uid)) {
+      throw new HttpsError('permission-denied', 'You are not a recipient of this announcement');
+    }
+    tx.set(markerRef, { seenAt: FieldValue.serverTimestamp() });
+    tx.update(announcementRef, { seenCount: FieldValue.increment(1) });
+  });
+  return { ok: true };
+});
+
 // The console's program editor (Programs.tsx) only ever sets durationWeeks -
 // durationDays has never actually been written by anything, so reading it
 // directly always silently resolved to 0 and every enrolled member's
@@ -507,35 +551,85 @@ export const redeemProgramCode = onCall({ region }, async request => {
   const auth = requireUser(request);
   const code = String(request.data?.code ?? '').trim().toUpperCase();
   if (!code) throw new HttpsError('invalid-argument', 'A program code is required');
+  if (code.length > 64 || code.includes('/')) throw new HttpsError('not-found', "That program code wasn't recognized");
 
-  const matches = await db.collection('programs').where('code', '==', code).limit(1).get();
-  const programDoc = matches.docs[0];
-  if (!programDoc) throw new HttpsError('not-found', "That program code wasn't recognized");
+  // Two sources of codes, checked in order:
+  //  1. programCodes/{code} - what the console's "Access codes" panel creates,
+  //     with active / expiry / max-uses controls. Doc id is the upper-cased
+  //     code text. Uses are counted here, transactionally, so two people
+  //     racing for the last seat can't both get in.
+  //  2. programs.code - the single legacy code stored on the program itself.
+  //     Kept so batches created before access codes existed keep working.
+  // Codes created by older console builds were stored under whatever casing
+  // the coach typed, so fall back to the raw input as a doc id before giving up.
+  const rawCode = String(request.data?.code ?? '').trim();
+  let codeRef = db.doc(`programCodes/${code}`);
+  if (rawCode !== code && !rawCode.includes('/') && !(await codeRef.get()).exists) {
+    const rawRef = db.doc(`programCodes/${rawCode}`);
+    if ((await rawRef.get()).exists) codeRef = rawRef;
+  }
+  const redemptionRef = codeRef.collection('redemptions').doc(auth.uid);
+  const userRef = db.doc(`users/${auth.uid}`);
 
-  const programId = programDoc.id;
-  const programName = String(programDoc.get('name') ?? 'Nirog Bhumi Program');
-  const durationDays = programDurationDays(programDoc);
+  const result = await db.runTransaction(async tx => {
+    const [codeSnap, userSnap] = await Promise.all([tx.get(codeRef), tx.get(userRef)]);
 
-  const userDoc = await db.doc(`users/${auth.uid}`).get();
-  const memberName = String(userDoc.get('fullName') ?? '').trim() || 'Member';
+    let programSnap: FirebaseFirestore.DocumentSnapshot | undefined;
+    let countsUse = false;
+    if (codeSnap.exists) {
+      if (codeSnap.get('active') === false) throw new HttpsError('failed-precondition', 'This code is no longer active. Ask your coach for a new one.');
+      const expiresAt = codeSnap.get('expiresAt');
+      if (expiresAt && typeof expiresAt.toMillis === 'function' && expiresAt.toMillis() < Date.now()) throw new HttpsError('failed-precondition', 'This code has expired. Ask your coach for a new one.');
+      programSnap = await tx.get(db.doc(`programs/${String(codeSnap.get('programId') ?? '_')}`));
+      if (!programSnap.exists) throw new HttpsError('not-found', "That program code wasn't recognized");
+      countsUse = true;
+    } else {
+      const legacy = await tx.get(db.collection('programs').where('code', '==', code).limit(1));
+      programSnap = legacy.docs[0];
+      if (!programSnap) throw new HttpsError('not-found', "That program code wasn't recognized");
+    }
 
-  // Enrollment and the roster entry the coach console reads from must land
-  // together, or the console shows a phantom program with no members.
-  const batch = db.batch();
-  batch.set(db.doc(`users/${auth.uid}`), {
-    programActive: true,
-    activeProgramId: programId,
-    activeProgramName: programName,
-    programDurationDays: durationDays,
-    programStartedAt: FieldValue.serverTimestamp(),
-    updatedAt: FieldValue.serverTimestamp(),
-  }, { merge: true });
-  batch.set(db.doc(`programMembers/${programId}_${auth.uid}`), {
-    programId, uid: auth.uid, name: memberName, status: 'active', joinedAt: FieldValue.serverTimestamp(),
-  }, { merge: true });
-  await batch.commit();
+    const programId = programSnap.id;
+    const alreadyIn = userSnap.get('programActive') === true && userSnap.get('activeProgramId') === programId;
 
-  return { activeProgramId: programId, activeProgramName: programName, programDurationDays: durationDays, programActive: true };
+    if (countsUse && !alreadyIn) {
+      // Re-redeeming after a partial/failed earlier attempt must not burn a
+      // second seat, so a per-user marker makes the count idempotent.
+      const marker = await tx.get(redemptionRef);
+      if (!marker.exists) {
+        const maxUses = Number(codeSnap.get('maxUses') ?? 0);
+        const uses = Number(codeSnap.get('uses') ?? 0);
+        if (maxUses > 0 && uses >= maxUses) throw new HttpsError('resource-exhausted', 'This code has reached its limit. Ask your coach for a new one.');
+        tx.update(codeRef, { uses: FieldValue.increment(1), lastUsedAt: FieldValue.serverTimestamp() });
+        tx.set(redemptionRef, { uid: auth.uid, redeemedAt: FieldValue.serverTimestamp() });
+      }
+    }
+
+    const programName = String(programSnap.get('name') ?? 'Nirog Bhumi Program');
+    const durationDays = programDurationDays(programSnap);
+    const memberName = String(userSnap.get('fullName') ?? '').trim() || 'Member';
+
+    // Enrollment and the roster entry the coach console reads from must land
+    // together, or the console shows a phantom program with no members.
+    if (!alreadyIn) {
+      tx.set(userRef, {
+        programActive: true,
+        activeProgramId: programId,
+        activeProgramName: programName,
+        programDurationDays: durationDays,
+        programStartedAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      }, { merge: true });
+    }
+    tx.set(db.doc(`programMembers/${programId}_${auth.uid}`), {
+      programId, uid: auth.uid, name: memberName, status: 'active',
+      ...(alreadyIn ? {} : { joinedAt: FieldValue.serverTimestamp() }),
+    }, { merge: true });
+
+    return { activeProgramId: programId, activeProgramName: programName, programDurationDays: durationDays, programActive: true };
+  });
+
+  return result;
 });
 
 // Self-heals a missing programMembers roster doc for an account that Firestore
@@ -772,23 +866,99 @@ export const requestDataExport = onCall({ region }, async request => {
   if (!recent.empty) throw new HttpsError('resource-exhausted', 'You can request one export per hour - please try again later.');
   await db.collection('dataExportRequests').add({ userId: auth.uid, status: 'requested', createdAt: FieldValue.serverTimestamp() }); return { accepted: true };
 });
+// Schedules the caller's own account for deletion after a grace period (see
+// accountDeletion.ts for the full lifecycle and what gets removed). Idempotent:
+// asking again while a request is pending just reports the existing one.
 export const requestAccountDeletion = onCall({ region }, async request => {
-  const auth = requireUser(request); await db.collection('deletionRequests').add({ userId: auth.uid, status: 'requested', createdAt: FieldValue.serverTimestamp() }); return { accepted: true };
+  const auth = requireUser(request);
+  const result = await scheduleAccountDeletion(db, auth.uid, 'app');
+  if (!result.alreadyPending) {
+    await db.collection('auditLogs').add({ actorId: auth.uid, actorRole: String(auth.token.role ?? 'user'), action: 'request_account_deletion', entityType: 'deletionRequest', entityId: result.requestId, metadata: { scheduledFor: result.scheduledFor.toDate().toISOString() }, createdAt: FieldValue.serverTimestamp() });
+    await db.collection('notifications').add({
+      userId: auth.uid, profileId: null, title: 'Account deletion scheduled',
+      body: `Your account will be permanently deleted on ${result.scheduledFor.toDate().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Kolkata' })}. Open Privacy & data to cancel any time before then.`,
+      type: 'privacy', status: 'scheduled', scheduledFor: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp(),
+    });
+  }
+  return { accepted: true, alreadyPending: result.alreadyPending, status: result.status, scheduledForMillis: result.scheduledFor.toMillis(), graceDays: DELETION_GRACE_DAYS };
 });
+export const cancelAccountDeletion = onCall({ region }, async request => {
+  const auth = requireUser(request);
+  const cancelled = await cancelDeletionRequest(db, auth.uid);
+  if (cancelled) await db.collection('auditLogs').add({ actorId: auth.uid, actorRole: String(auth.token.role ?? 'user'), action: 'cancel_account_deletion', entityType: 'user', entityId: auth.uid, createdAt: FieldValue.serverTimestamp() });
+  return { cancelled };
+});
+// Admin side of data-protection requests: approve a scheduled deletion now
+// (e.g. the member emailed privacy@ and was verified), reject one, or start one
+// for a member identified by email/phone/uid. Never on your own account or on
+// another admin - use the in-app flow for that.
+export const adminManageDeletion = onCall({ region }, async request => {
+  const auth = requireUser(request);
+  const role = auth.token.role;
+  if (role !== 'admin' && role !== 'super_admin') throw new HttpsError('permission-denied', 'Admins only');
+  const action = String(request.data?.action ?? '');
+  if (!['approve', 'reject', 'start'].includes(action)) throw new HttpsError('invalid-argument', 'Unknown action');
 
+  const guardTarget = async (uid: string) => {
+    if (uid === auth.uid) throw new HttpsError('failed-precondition', 'Use the in-app flow to delete your own account');
+    const target = await getAuth().getUser(uid).catch(() => null);
+    const targetRole = target?.customClaims?.role;
+    if (targetRole === 'admin' || targetRole === 'super_admin') throw new HttpsError('failed-precondition', 'Demote this admin before deleting their account');
+  };
+
+  if (action === 'start') {
+    const email = String(request.data?.email ?? '').trim();
+    const phone = String(request.data?.phone ?? '').trim();
+    let uid = String(request.data?.uid ?? '').trim();
+    if (!uid) {
+      if (!email && !phone) throw new HttpsError('invalid-argument', 'Provide a uid, email or phone number');
+      const user = await (email ? getAuth().getUserByEmail(email) : getAuth().getUserByPhoneNumber(phone)).catch(() => null);
+      if (!user) throw new HttpsError('not-found', 'No account matches that email/phone');
+      uid = user.uid;
+    }
+    await guardTarget(uid);
+    const result = await scheduleAccountDeletion(db, uid, 'email');
+    // An emailed request has already been identity-verified by the admin, so skip the grace wait.
+    await db.doc(`deletionRequests/${result.requestId}`).set({ status: 'approved', approvedBy: auth.uid, approvedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    await db.collection('auditLogs').add({ actorId: auth.uid, actorRole: role, action: 'admin_start_account_deletion', entityType: 'deletionRequest', entityId: result.requestId, createdAt: FieldValue.serverTimestamp() });
+    return { requestId: result.requestId, status: 'approved' };
+  }
+
+  const requestId = String(request.data?.requestId ?? '');
+  if (!requestId) throw new HttpsError('invalid-argument', 'requestId is required');
+  const ref = db.doc(`deletionRequests/${requestId}`);
+  const snap = await ref.get();
+  if (!snap.exists) throw new HttpsError('not-found', 'Request not found');
+  const status = String(snap.get('status'));
+  if (!['scheduled', 'requested', 'awaiting_verification', 'failed'].includes(status)) throw new HttpsError('failed-precondition', `A request that is ${status} can no longer be changed`);
+  if (action === 'approve') {
+    await guardTarget(String(snap.get('userId') ?? ''));
+    await ref.set({ status: 'approved', approvedBy: auth.uid, approvedAt: FieldValue.serverTimestamp(), attempts: 0, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  } else {
+    await ref.set({ status: 'rejected', rejectedBy: auth.uid, rejectedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  }
+  await db.collection('auditLogs').add({ actorId: auth.uid, actorRole: role, action: `${action}_account_deletion`, entityType: 'deletionRequest', entityId: requestId, createdAt: FieldValue.serverTimestamp() });
+  return { requestId, status: action === 'approve' ? 'approved' : 'rejected' };
+});
 export const exportUserData = onDocumentCreated({ document: 'dataExportRequests/{requestId}', region }, async event => {
   const request = event.data; if (!request) return; const uid = request.get('userId'); if (!uid) return;
   await request.ref.set({ status: 'processing', updatedAt: FieldValue.serverTimestamp() }, { merge: true });
-  const names = ['users','profiles','glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','labReports','dailyCheckins','dailyActions','weeklyReports','sugarStories','consultations','userPrograms','programPlans','checklistLogs','expertNotes','notifications','deviceConnections','medicationLogs'];
+  const names = ['users','profiles','glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','labReports','dailyCheckins','dailyActions','weeklyReports','sugarStories','consultations','userPrograms','programPlans','checklistLogs','expertNotes','notifications','deviceConnections','medicationLogs','orders','supportRequests','programChatMessages'];
   const exported: Record<string, unknown> = { exportedAt: new Date().toISOString(), formatVersion: 1 };
   for (const name of names) {
     if (name === 'users') { const user = await db.doc(`users/${uid}`).get(); exported.users = user.exists ? [{ id: user.id, ...user.data() }] : []; continue; }
     const snapshot = await db.collection(name).where('userId', '==', uid).get(); exported[name] = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
   }
+  // Not keyed by `userId`, so gathered separately: the member's coach-inbox
+  // threads, program roster entries, and their consent receipts (the record of
+  // what they agreed to and when).
+  exported.coachInboxMessages = (await db.collection('coachInboxMessages').where('memberUid', '==', uid).get()).docs.map(doc => ({ id: doc.id, ...doc.data() }));
+  exported.programMembers = (await db.collection('programMembers').where('uid', '==', uid).get()).docs.map(doc => ({ id: doc.id, ...doc.data() }));
+  exported.consentReceipts = (await db.collection(`users/${uid}/consentReceipts`).get()).docs.map(doc => ({ id: doc.id, ...doc.data() }));
   const path = `users/${uid}/exports/${request.id}.json`; const file = getStorage().bucket().file(path);
   await file.save(JSON.stringify(exported, null, 2), { contentType: 'application/json', metadata: { cacheControl: 'private, max-age=0', metadata: { ownerUid: uid } } });
   await request.ref.set({ status: 'completed', storagePath: path, completedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
-  await db.collection('notifications').add({ userId: uid, profileId: null, title: 'Your data export is ready', body: 'Open Privacy and Data Controls to access your export.', type: 'report', status: 'scheduled', scheduledFor: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp() });
+  await db.collection('notifications').add({ userId: uid, profileId: null, title: 'Your data export is ready', body: 'Open Privacy and Data Controls to access your export.', type: 'privacy', status: 'scheduled', scheduledFor: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp() });
 });
 // Real, time-limited signed URL for the Health File "share link / QR code"
 // feature - the client previously used the Storage download-token URL
@@ -833,10 +1003,6 @@ export const createAuditLog = onCall({ region }, async request => {
   await db.collection('auditLogs').add({ actorId: auth.uid, actorRole: auth.token.role, action, entityType, entityId, metadata, createdAt: FieldValue.serverTimestamp() });
   return { logged: true };
 });
-export const queueDeletionRequest = onDocumentCreated({ document: 'deletionRequests/{requestId}', region }, async event => {
-  await event.data?.ref.set({ status: 'awaiting_verification', updatedAt: FieldValue.serverTimestamp() }, { merge: true });
-});
-
 // Feature areas a coach's console access can be scoped to. Admin/super_admin
 // always have full access regardless of this list (it only narrows coaches).
 const PERMISSION_KEYS = ['moderation', 'batches', 'announcements', 'calendar', 'programs', 'consultations', 'support', 'members'] as const;
@@ -1013,62 +1179,11 @@ export const sendBulkNotification = onCall({ region }, async request => {
 // collections on `resource.data.userId == request.auth.uid`, so once that
 // field is gone the record becomes unreadable by any individual user's
 // client - it only exists for internal, aggregate analysis from here on.
-export const processApprovedDeletions = onSchedule({ schedule: 'every 60 minutes', timeZone: 'Asia/Kolkata', region }, async () => {
-  const requests = await db.collection('deletionRequests').where('status', '==', 'approved').limit(10).get();
-
-  const personalCollections = ['profiles', 'dailyActions', 'weeklyReports', 'sugarStories', 'consultations', 'userPrograms', 'programPlans', 'expertNotes', 'notifications', 'deviceConnections'];
-  const anonymizeCollections = ['glucoseReadings', 'bpReadings', 'sleepLogs', 'walkLogs', 'weightLogs', 'medicationLogs', 'checklistLogs', 'dailyCheckins', 'labReports'];
-
-  for (const request of requests.docs) {
-    const uid = request.get('userId'); if (!uid) continue;
-    await request.ref.set({ status: 'processing', updatedAt: FieldValue.serverTimestamp() }, { merge: true });
-
-    for (const name of personalCollections) {
-      const docs = await db.collection(name).where('userId', '==', uid).get();
-      for (let offset = 0; offset < docs.docs.length; offset += 400) { const batch = db.batch(); docs.docs.slice(offset, offset + 400).forEach(doc => batch.delete(doc.ref)); await batch.commit(); }
-    }
-
-    for (const name of anonymizeCollections) {
-      const docs = await db.collection(name).where('userId', '==', uid).get();
-      for (let offset = 0; offset < docs.docs.length; offset += 400) {
-        const batch = db.batch();
-        docs.docs.slice(offset, offset + 400).forEach(doc => {
-          const update: Record<string, unknown> = { userId: FieldValue.delete(), profileId: FieldValue.delete(), anonymizedAt: FieldValue.serverTimestamp() };
-          // labReports carries free-text fields (lab name, notes) and a
-          // Storage fileUrl - the underlying file is deleted outright below
-          // (a scanned report shows a name on its face), so the dangling
-          // URL and any free text that could identify someone go with it.
-          if (name === 'labReports') { update.labName = FieldValue.delete(); update.notes = FieldValue.delete(); update.fileUrl = FieldValue.delete(); }
-          batch.set(doc.ref, update, { merge: true });
-        });
-        await batch.commit();
-      }
-    }
-
-    // programMembers and the batchStats/checkedInMembers marker are tied to
-    // program-membership identity (visible to a coach as roster rows), not
-    // a standalone health metric - deleted the same as the personal
-    // collections above, not anonymized.
-    const roster = await db.collection('programMembers').where('uid', '==', uid).get();
-    const programIds = new Set(roster.docs.map(doc => String(doc.get('programId') ?? '')).filter(Boolean));
-    for (let offset = 0; offset < roster.docs.length; offset += 400) { const batch = db.batch(); roster.docs.slice(offset, offset + 400).forEach(doc => batch.delete(doc.ref)); await batch.commit(); }
-    // Sweep this user's daily check-in marker out of every batchStats day for
-    // every program they were ever in (marker doc id is the uid itself -
-    // deleting a non-existent doc is a safe no-op).
-    for (const programId of programIds) {
-      const days = await db.collection('batchStats').where('programId', '==', programId).get();
-      for (let offset = 0; offset < days.docs.length; offset += 400) {
-        const batch = db.batch();
-        days.docs.slice(offset, offset + 400).forEach(day => batch.delete(day.ref.collection('checkedInMembers').doc(uid)));
-        await batch.commit();
-      }
-    }
-    // Raw uploaded files (lab scans, profile photos, consultation
-    // attachments, generated PDF reports) almost always show identifying
-    // detail on their face - deleted outright, never anonymized in place.
-    for (const prefix of [`users/${uid}/`, `lab-reports/${uid}/`, `consultation-attachments/${uid}/`, `reports/${uid}/`]) await getStorage().bucket().deleteFiles({ prefix });
-    await db.doc(`users/${uid}`).delete();
-    await getAuth().deleteUser(uid);
-    await request.ref.set({ status: 'completed', completedAt: FieldValue.serverTimestamp(), userIdHash: createHash('sha256').update(uid).digest('hex'), userId: FieldValue.delete() }, { merge: true });
-  }
+export const processApprovedDeletions = onSchedule({ schedule: 'every 60 minutes', timeZone: 'Asia/Kolkata', region, timeoutSeconds: 540 }, async () => {
+  const summary = await processDueDeletions({
+    db,
+    deleteFiles: async prefix => { await getStorage().bucket().deleteFiles({ prefix }); },
+    deleteAuthUser: async uid => { try { await getAuth().deleteUser(uid); } catch (error) { if ((error as { code?: string }).code !== 'auth/user-not-found') throw error; } },
+  });
+  if (summary.completed || summary.retrying || summary.failed) console.log('Account deletions processed', JSON.stringify(summary));
 });

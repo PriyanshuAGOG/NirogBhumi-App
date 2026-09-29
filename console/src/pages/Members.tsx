@@ -3,7 +3,8 @@ import { Link } from 'react-router-dom'
 import { collection, limit, onSnapshot, orderBy, query, where } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
 import { db, functions } from '../lib/firebase'
-import { usePrograms } from '../lib/usePrograms'
+import { chunk } from '../lib/usePrograms'
+import { useScope } from '../lib/scope'
 import { errText } from '../lib/errors'
 import { consistencyTag } from '../lib/health'
 import { toCsv, downloadCsv } from '../lib/csv'
@@ -47,7 +48,7 @@ function downloadRosterCsv(rows: RosterEntry[], programName: (id?: string) => st
 }
 
 export default function Members() {
-  const { programs } = usePrograms()
+  const { programs, programIds, programKey, isAdmin, loading: scopeLoading } = useScope()
   const [members, setMembers] = useState<RosterEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -63,6 +64,45 @@ export default function Members() {
 
   useEffect(() => {
     setLoading(true)
+    if (!isAdmin) {
+      // A coach can't list the `users` collection (Firestore rejects any list
+      // query the rules can't prove is limited to their own members), so their
+      // roster comes from the program rosters they coach. Only what a roster
+      // row holds is shown (name, program, last check-in) - contact details
+      // stay admin-only.
+      if (scopeLoading) return
+      const ids = programFilter === 'all' ? programIds : programIds.filter((id) => id === programFilter)
+      if (ids.length === 0) {
+        setMembers([])
+        setLoading(false)
+        return
+      }
+      const perChunk = new Map<number, RosterEntry[]>()
+      const unsubs = chunk(ids).map((group, index) =>
+        onSnapshot(
+          query(collection(db, 'programMembers'), where('programId', 'in', group)),
+          (snap) => {
+            perChunk.set(
+              index,
+              snap.docs.map((d) => {
+                const data = d.data() as { uid?: string; name?: string; programId?: string; lastCheckinAt?: unknown }
+                return { id: data.uid ?? d.id, name: data.name, programActive: true, activeProgramId: data.programId, lastCheckinAt: data.lastCheckinAt }
+              }),
+            )
+            const next = Array.from(perChunk.values()).flat()
+            next.sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''))
+            setMembers(next)
+            setLoading(false)
+            setError(null)
+          },
+          (err) => {
+            setLoading(false)
+            setError(errText(err, 'Could not load members'))
+          },
+        ),
+      )
+      return () => unsubs.forEach((u) => u())
+    }
     // Scoped to one program when a batch is picked (mirrors Batches.tsx's
     // own per-program listener); "all" and "not enrolled" are bounded by
     // limit() the same way Users.tsx bounds its own full-roster listener,
@@ -74,7 +114,11 @@ export default function Members() {
     const unsub = onSnapshot(
       query(collection(db, 'users'), ...constraints),
       (snap) => {
-        const next = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<RosterEntry, 'id'>) }))
+        const next = snap.docs.map((d) => {
+          // The app stores the name as `fullName`; fall back to legacy `name`.
+          const data = d.data() as Omit<RosterEntry, 'id'> & { fullName?: string }
+          return { id: d.id, ...data, name: data.fullName?.trim() || data.name?.trim() || undefined }
+        })
         next.sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''))
         setMembers(next)
         setLoading(false)
@@ -86,7 +130,8 @@ export default function Members() {
       },
     )
     return unsub
-  }, [programFilter])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [programFilter, isAdmin, programKey, scopeLoading])
 
   const programName = useMemo(() => {
     const map = new Map(programs.map((p) => [p.id, p.name ?? 'Program']))
@@ -148,8 +193,9 @@ export default function Members() {
         <span className="overline">Members</span>
         <h1>All members</h1>
         <p className="page-lede">
-          Everyone on the platform, enrolled or not. Open a member to see their full history -
-          every reading, log, and report they've ever recorded.
+          {isAdmin
+            ? "Everyone on the platform, enrolled or not. Open a member to see their full history - every reading, log, and report they've ever recorded."
+            : 'The members of the batches you coach. Open a member to see their history and leave private care notes.'}
         </p>
       </header>
 
@@ -165,8 +211,8 @@ export default function Members() {
           value={programFilter}
           onChange={(e) => setProgramFilter(e.target.value)}
         >
-          <option value="all">Everyone</option>
-          <option value={NOT_ENROLLED}>Not enrolled</option>
+          <option value="all">{isAdmin ? 'Everyone' : 'All my batches'}</option>
+          {isAdmin && <option value={NOT_ENROLLED}>Not enrolled</option>}
           {programs.map((p) => (
             <option key={p.id} value={p.id}>
               {p.name ?? 'Program'}

@@ -1,7 +1,7 @@
 import { initializeApp, type FirebaseApp } from 'firebase/app'
-import { getAuth, type Auth } from 'firebase/auth'
-import { getFirestore, type Firestore } from 'firebase/firestore'
-import { getFunctions, type Functions } from 'firebase/functions'
+import { connectAuthEmulator, getAuth, type Auth } from 'firebase/auth'
+import { connectFirestoreEmulator, getFirestore, type Firestore } from 'firebase/firestore'
+import { connectFunctionsEmulator, getFunctions, type Functions } from 'firebase/functions'
 
 /**
  * Firebase config is read from Vite env vars (VITE_FIREBASE_*). Copy
@@ -42,3 +42,12 @@ export const db: Firestore = getFirestore(app)
 // Callable Cloud Functions live in the same region as the rest of the project
 // (asia-south1). Used e.g. for the super-admin `setUserRole` callable.
 export const functions: Functions = getFunctions(app, 'asia-south1')
+
+// End-to-end test builds (e2e/run.sh) point the console at the local Firebase
+// emulators instead of the real project. The flag is a build-time constant that
+// is never set for the production build, so this block is dead code there.
+if (import.meta.env.VITE_USE_EMULATORS === 'true') {
+  connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true })
+  connectFirestoreEmulator(db, '127.0.0.1', 8080)
+  connectFunctionsEmulator(functions, '127.0.0.1', 5001)
+}

@@ -29,7 +29,20 @@ interface HealthRepository {
     val isCloudConfigured: Boolean
     val userId: String?
     fun saveProfile(values: Map<String, Any?>, done: (CloudResult<Unit>) -> Unit)
+    // Writes an immutable, timestamped, versioned record of exactly what the
+    // user consented to - the "consent record" the DPDP Act 2023 expects a
+    // Data Fiduciary to keep. Append-only (users/{uid}/consentReceipts); the
+    // rules forbid updating or deleting a receipt once written.
+    fun recordConsentReceipt(purposes: Map<String, Boolean>, version: String, done: (CloudResult<Unit>) -> Unit)
     fun addHealthLog(collection: String, values: Map<String, Any?>, done: (CloudResult<String>) -> Unit)
+    // Corrects a reading logged moments ago (a typo'd value, the wrong meal
+    // context) without needing a full history screen - narrower than
+    // upsertUserRecord (that one's for device-sync records keyed by a stable
+    // caller-chosen id, and stamps a fresh createdAt every call, which would
+    // wrongly reset when this reading was actually taken). This targets the
+    // real Firestore-assigned doc id addHealthLog already returned, and never
+    // touches createdAt/measuredAt unless the caller explicitly includes it.
+    fun updateHealthLog(collection: String, documentId: String, values: Map<String, Any?>, done: (CloudResult<Unit>) -> Unit)
     fun uploadPrivateFile(folder: String, uri: Uri, done: (CloudResult<String>) -> Unit)
     // orderByField/descending default to unset (Firestore's own implementation-
     // defined order) to preserve every existing call site's behavior - only
@@ -40,12 +53,16 @@ interface HealthRepository {
     fun listenUserCollection(collection: String, limit: Long = 30, orderByField: String? = null, descending: Boolean = true, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription
     fun listenPublicCollection(collection: String, limit: Long = 30, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription
     fun requestDataExport(done: (CloudResult<Unit>) -> Unit)
-    // Despite the name (kept to avoid touching the deletionRequests
-    // collection/queue), this is now an anonymization request, not a full
-    // erase: identifying info is deleted, health readings are stripped of
-    // any link back to the person and kept for aggregate research - see
-    // processApprovedDeletions in firebase/functions/src/index.ts.
-    fun requestAccountDeletion(done: (CloudResult<Unit>) -> Unit)
+    // Schedules the account (and its data) for permanent deletion after a
+    // grace period; succeeds with the scheduled time in epoch millis. What is
+    // erased versus kept (health readings are only kept, de-identified, if the
+    // member opted into research) is decided server-side - see
+    // firebase/functions/src/accountDeletion.ts.
+    fun requestAccountDeletion(done: (CloudResult<Long>) -> Unit)
+    // Cancels a still-pending deletion; the Boolean is whether one was cancelled.
+    fun cancelAccountDeletion(done: (CloudResult<Boolean>) -> Unit)
+    // Epoch millis a pending deletion will run at, or null if none is pending.
+    fun getPendingAccountDeletion(done: (CloudResult<Long?>) -> Unit)
     fun upsertUserRecord(collection: String, documentId: String, values: Map<String, Any?>, done: (CloudResult<Unit>) -> Unit = {})
     fun deleteUserRecord(collection: String, documentId: String, done: (CloudResult<Unit>) -> Unit)
     fun getPrivateDownloadUrl(storagePath: String, done: (CloudResult<String>) -> Unit)
@@ -67,6 +84,16 @@ interface HealthRepository {
     fun listenAnnouncements(update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription
     fun postAnnouncement(programId: String, title: String, body: String, done: (CloudResult<Unit>) -> Unit)
     fun deleteAnnouncement(id: String, done: (CloudResult<Unit>) -> Unit)
+    // Fire-and-forget: a member's own view of an announcement, deduped
+    // server-side (see markAnnouncementSeen Cloud Function) so re-opening it
+    // doesn't inflate the count. Never surfaces a failure to the caller -
+    // this is a nice-to-have coach-facing stat, not something worth an error
+    // banner if it doesn't land.
+    fun markAnnouncementSeen(announcementId: String, done: (CloudResult<Unit>) -> Unit = {})
+    // Staff-only one-shot read of the master announcements/{id} doc's
+    // seenCount/recipientCount (the member-facing fan-out copy carries
+    // neither field) - first is seenCount, second is recipientCount.
+    fun fetchAnnouncementMeta(announcementId: String, done: (CloudResult<Pair<Int, Int>>) -> Unit)
     fun listenProgramChat(programId: String, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription
     fun sendProgramChatMessage(
         programId: String,
@@ -98,6 +125,23 @@ interface HealthRepository {
     // pinned=false clears pinnedBy/pinnedAt too, so an old pin can't linger with stale attribution.
     fun togglePinMessage(messageId: String, programId: String, pinned: Boolean, done: (CloudResult<Unit>) -> Unit)
 
+    // Async "ask your coach" inbox - one private two-way thread per member per
+    // program (coachInboxMessages), distinct from the live group chat. A member
+    // passes their own uid as memberUid; staff pass the member they're replying
+    // to. Rules keep each thread invisible to every other member.
+    fun listenCoachInboxThread(programId: String, memberUid: String, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription
+    // Coach-side thread list: recent messages across every thread in one
+    // program, grouped by memberUid client-side. Members can't use this -
+    // rules deny them reading anything beyond their own thread.
+    fun listenCoachInboxForProgram(programId: String, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription
+    // Coach-authored plans and guidance (diet, yoga, naturopathy, notes) for one
+    // batch - programResources, readable only by that batch's members and staff.
+    fun listenProgramResources(programId: String, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription
+    // Withdraws the member's own consultation request or booking (they can't edit
+    // its status directly); the server also drops any queued reminder.
+    fun cancelConsultation(id: String, done: (CloudResult<Unit>) -> Unit)
+    fun sendCoachInboxMessage(programId: String, memberUid: String, text: String, senderName: String, senderRole: String, done: (CloudResult<Unit>) -> Unit)
+
     // Batch Pulse: today's PII-free "N of M checked in" + collective walking
     // minutes for the caller's program. Written only by Cloud Functions.
     fun listenBatchPulse(programId: String, update: (CloudResult<CloudDocument?>) -> Unit): CloudSubscription
@@ -115,6 +159,10 @@ interface HealthRepository {
     // field is "lastReadGeneralAt" or "lastReadAnnouncementsAt" - marks the
     // caller's own roster doc read up to now. Called on entering that room.
     fun markProgramRead(programId: String, field: String, done: (CloudResult<Unit>) -> Unit = {})
+    // Opt-in batch leaderboard: a member chooses whether their own name and
+    // walking minutes appear in the next daily leaderboard recompute -
+    // rules-enforced self-only field, same shape as markProgramRead above.
+    fun setLeaderboardOptIn(programId: String, optIn: Boolean, done: (CloudResult<Unit>) -> Unit = {})
 
     // Smart reminder timing: called once a Daily Check-in completes. Blends
     // the hour of day into users/{uid}.checkinHourHint (a light exponential
@@ -185,6 +233,22 @@ class FirebaseHealthRepository : HealthRepository {
             ?: done(CloudResult.Failure("Firebase is not configured"))
     }
 
+    override fun recordConsentReceipt(purposes: Map<String, Boolean>, version: String, done: (CloudResult<Unit>) -> Unit) {
+        val done = reporting("recordConsentReceipt", done)
+        val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
+        val payload = mapOf(
+            "purposes" to purposes,
+            "version" to version,
+            "acceptedAt" to FieldValue.serverTimestamp(),
+            "platform" to "android",
+            "appVersion" to com.nirogbhumi.app.BuildConfig.VERSION_NAME,
+        )
+        db?.collection("users")?.document(uid)?.collection("consentReceipts")?.add(payload)
+            ?.addOnSuccessListener { done(CloudResult.Success(Unit)) }
+            ?.addOnFailureListener { done(CloudResult.Failure(it.message ?: "Consent could not be recorded", it)) }
+            ?: done(CloudResult.Failure("Firebase is not configured"))
+    }
+
     override fun addHealthLog(collection: String, values: Map<String, Any?>, done: (CloudResult<String>) -> Unit) {
         val done = reporting("addHealthLog:$collection", done)
         val allowed = setOf(
@@ -202,6 +266,22 @@ class FirebaseHealthRepository : HealthRepository {
                 done(CloudResult.Success(ref.id))
             }
             .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Log could not be saved", it)) }
+    }
+
+    override fun updateHealthLog(collection: String, documentId: String, values: Map<String, Any?>, done: (CloudResult<Unit>) -> Unit) {
+        val done = reporting("updateHealthLog:$collection", done)
+        // Deliberately narrower than addHealthLog's allow-list - only the
+        // readings a member could plausibly want to quick-correct right
+        // after logging; labReports/consultations/orders/etc go through
+        // their own dedicated edit flows, not this one.
+        val allowed = setOf("glucoseReadings", "bpReadings", "sleepLogs", "walkLogs", "weightLogs", "medicationLogs")
+        if (collection !in allowed) return done(CloudResult.Failure("Unsupported health log"))
+        if (userId == null) return done(CloudResult.Failure("Sign in is required"))
+        val ref = db?.collection(collection)?.document(documentId)
+            ?: return done(CloudResult.Failure("Firebase is not configured"))
+        ref.set(values, SetOptions.merge())
+            .addOnSuccessListener { done(CloudResult.Success(Unit)) }
+            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Could not update", it)) }
     }
 
     override fun uploadPrivateFile(folder: String, uri: Uri, done: (CloudResult<String>) -> Unit) {
@@ -253,8 +333,57 @@ class FirebaseHealthRepository : HealthRepository {
         return CloudSubscription { registration.remove() }
     }
 
-    override fun requestDataExport(done: (CloudResult<Unit>) -> Unit) = createRequest("dataExportRequests", reporting("requestDataExport", done))
-    override fun requestAccountDeletion(done: (CloudResult<Unit>) -> Unit) = createRequest("deletionRequests", reporting("requestAccountDeletion", done))
+    // Both requests go through Cloud Functions (which rate-limit and schedule
+    // them) - Firestore rules deny client-side creates on these collections, so
+    // writing them directly always failed with PERMISSION_DENIED.
+    override fun requestDataExport(done: (CloudResult<Unit>) -> Unit) {
+        val done = reporting("requestDataExport", done)
+        val callable = functions?.getHttpsCallable("requestDataExport") ?: return done(CloudResult.Failure("Firebase is not configured"))
+        callable.call()
+            .addOnSuccessListener { AnalyticsLogger.log("data_export_requested"); done(CloudResult.Success(Unit)) }
+            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Export could not be requested", it)) }
+    }
+
+    override fun requestAccountDeletion(done: (CloudResult<Long>) -> Unit) {
+        val done = reporting("requestAccountDeletion", done)
+        val callable = functions?.getHttpsCallable("requestAccountDeletion") ?: return done(CloudResult.Failure("Firebase is not configured"))
+        callable.call()
+            .addOnSuccessListener { result ->
+                val data = result.data as? Map<*, *>
+                val scheduledFor = (data?.get("scheduledForMillis") as? Number)?.toLong()
+                if (scheduledFor == null) done(CloudResult.Failure("Deletion could not be scheduled"))
+                else { AnalyticsLogger.log("account_deletion_requested"); done(CloudResult.Success(scheduledFor)) }
+            }
+            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Deletion could not be scheduled", it)) }
+    }
+
+    override fun cancelAccountDeletion(done: (CloudResult<Boolean>) -> Unit) {
+        val done = reporting("cancelAccountDeletion", done)
+        val callable = functions?.getHttpsCallable("cancelAccountDeletion") ?: return done(CloudResult.Failure("Firebase is not configured"))
+        callable.call()
+            .addOnSuccessListener { result ->
+                val cancelled = (result.data as? Map<*, *>)?.get("cancelled") as? Boolean ?: false
+                if (cancelled) AnalyticsLogger.log("account_deletion_cancelled")
+                done(CloudResult.Success(cancelled))
+            }
+            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Could not cancel the deletion", it)) }
+    }
+
+    override fun getPendingAccountDeletion(done: (CloudResult<Long?>) -> Unit) {
+        val done = reporting("getPendingAccountDeletion", done)
+        val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
+        val database = db ?: return done(CloudResult.Failure("Firebase is not configured"))
+        // No orderBy: a member has at most a handful of requests, and this keeps the query index-free.
+        database.collection("deletionRequests").whereEqualTo("userId", uid).get()
+            .addOnSuccessListener { snapshot ->
+                val pending = snapshot.documents
+                    .filter { it.getString("status") in setOf("scheduled", "approved", "processing") }
+                    .mapNotNull { it.getTimestamp("scheduledFor")?.toDate()?.time ?: System.currentTimeMillis() }
+                    .minOrNull()
+                done(CloudResult.Success(pending))
+            }
+            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Could not check deletion status", it)) }
+    }
 
     override fun getPrivateDownloadUrl(storagePath: String, done: (CloudResult<String>) -> Unit) {
         val done = reporting("getPrivateDownloadUrl", done)
@@ -327,6 +456,13 @@ class FirebaseHealthRepository : HealthRepository {
     }
 
     override fun ensureProgramMembership(done: (CloudResult<Boolean>) -> Unit) {
+        // Must never call the callable without a signed-in user. This is fired
+        // fire-and-forget from the users/{uid} snapshot listener, which can
+        // deliver from the offline cache before (or independently of) an auth
+        // token being attached - that call reaches the function with no auth
+        // and is rejected as UNAUTHENTICATED (and reported as a bogus error).
+        // Return quietly (nothing to repair) instead of hitting the network.
+        if (userId == null) return done(CloudResult.Success(false))
         val done = reporting("ensureProgramMembership", done)
         val callable = functions?.getHttpsCallable("ensureProgramMembership")
             ?: return done(CloudResult.Failure("Firebase is not configured"))
@@ -381,6 +517,27 @@ class FirebaseHealthRepository : HealthRepository {
         callable.call(mapOf("id" to id))
             .addOnSuccessListener { done(CloudResult.Success(Unit)) }
             .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Announcement could not be deleted", it)) }
+    }
+
+    override fun markAnnouncementSeen(announcementId: String, done: (CloudResult<Unit>) -> Unit) {
+        val done = reporting("markAnnouncementSeen", done)
+        val callable = functions?.getHttpsCallable("markAnnouncementSeen")
+            ?: return done(CloudResult.Failure("Firebase is not configured"))
+        callable.call(mapOf("announcementId" to announcementId))
+            .addOnSuccessListener { done(CloudResult.Success(Unit)) }
+            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Could not record view", it)) }
+    }
+
+    override fun fetchAnnouncementMeta(announcementId: String, done: (CloudResult<Pair<Int, Int>>) -> Unit) {
+        val done = reporting("fetchAnnouncementMeta", done)
+        val database = db ?: return done(CloudResult.Failure("Firebase is not configured"))
+        database.collection("announcements").document(announcementId).get()
+            .addOnSuccessListener { snap ->
+                val seenCount = (snap.get("seenCount") as? Number)?.toInt() ?: 0
+                val recipientCount = (snap.get("recipientCount") as? Number)?.toInt() ?: 0
+                done(CloudResult.Success(seenCount to recipientCount))
+            }
+            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Could not load view count", it)) }
     }
 
     override fun listenProgramChat(programId: String, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription {
@@ -500,6 +657,78 @@ class FirebaseHealthRepository : HealthRepository {
             .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Could not update pin", it)) }
     }
 
+    override fun listenCoachInboxThread(programId: String, memberUid: String, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription {
+        val update = reporting("listenCoachInboxThread", update)
+        val database = db ?: run { update(CloudResult.Failure("Firebase is not configured")); return CloudSubscription {} }
+        val registration = database.collection("coachInboxMessages")
+            .whereEqualTo("programId", programId)
+            .whereEqualTo("memberUid", memberUid)
+            .orderBy("createdAt", com.google.firebase.firestore.Query.Direction.DESCENDING)
+            .limit(100)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) update(CloudResult.Failure(error.message ?: "Could not load your questions", error))
+                else update(CloudResult.Success(snapshot?.documents.orEmpty().map { CloudDocument(it.id, it.data.orEmpty()) }))
+            }
+        return CloudSubscription { registration.remove() }
+    }
+
+    override fun cancelConsultation(id: String, done: (CloudResult<Unit>) -> Unit) {
+        val done = reporting("cancelConsultation", done)
+        val callable = functions?.getHttpsCallable("cancelConsultation") ?: return done(CloudResult.Failure("Firebase is not configured"))
+        callable.call(mapOf("id" to id))
+            .addOnSuccessListener { AnalyticsLogger.log("consultation_cancelled"); done(CloudResult.Success(Unit)) }
+            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Could not cancel this consultation", it)) }
+    }
+
+    override fun listenProgramResources(programId: String, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription {
+        val update = reporting("listenProgramResources", update)
+        val database = db ?: run { update(CloudResult.Failure("Firebase is not configured")); return CloudSubscription {} }
+        // Unordered on purpose (sorted on the device by week, then recency): an
+        // equality-only query needs no composite index that could be missing in a
+        // fresh project.
+        val registration = database.collection("programResources")
+            .whereEqualTo("programId", programId)
+            .limit(200)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) update(CloudResult.Failure(error.message ?: "Could not load plans", error))
+                else update(CloudResult.Success(snapshot?.documents.orEmpty().map { CloudDocument(it.id, it.data.orEmpty()) }))
+            }
+        return CloudSubscription { registration.remove() }
+    }
+
+    override fun listenCoachInboxForProgram(programId: String, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription {
+        val update = reporting("listenCoachInboxForProgram", update)
+        val database = db ?: run { update(CloudResult.Failure("Firebase is not configured")); return CloudSubscription {} }
+        val registration = database.collection("coachInboxMessages")
+            .whereEqualTo("programId", programId)
+            .orderBy("createdAt", com.google.firebase.firestore.Query.Direction.DESCENDING)
+            .limit(200)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) update(CloudResult.Failure(error.message ?: "Could not load the inbox", error))
+                else update(CloudResult.Success(snapshot?.documents.orEmpty().map { CloudDocument(it.id, it.data.orEmpty()) }))
+            }
+        return CloudSubscription { registration.remove() }
+    }
+
+    override fun sendCoachInboxMessage(programId: String, memberUid: String, text: String, senderName: String, senderRole: String, done: (CloudResult<Unit>) -> Unit) {
+        val done = reporting("sendCoachInboxMessage", done)
+        val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
+        val database = db ?: return done(CloudResult.Failure("Firebase is not configured"))
+        if (text.isBlank()) return done(CloudResult.Failure("Message cannot be empty"))
+        database.collection("coachInboxMessages").add(
+            mapOf(
+                "programId" to programId,
+                "memberUid" to memberUid,
+                "fromUid" to uid,
+                "senderName" to senderName,
+                "senderRole" to senderRole,
+                "text" to text.trim().take(2000),
+                "createdAt" to FieldValue.serverTimestamp(),
+            )
+        ).addOnSuccessListener { done(CloudResult.Success(Unit)) }
+            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Question could not be sent", it)) }
+    }
+
     override fun reportChatMessage(messageId: String, programId: String, reportedText: String, reportedUserId: String, done: (CloudResult<Unit>) -> Unit) {
         val done = reporting("reportChatMessage", done)
         val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
@@ -611,6 +840,16 @@ class FirebaseHealthRepository : HealthRepository {
             .update(field, FieldValue.serverTimestamp())
             .addOnSuccessListener { done(CloudResult.Success(Unit)) }
             .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Could not mark as read", it)) }
+    }
+
+    override fun setLeaderboardOptIn(programId: String, optIn: Boolean, done: (CloudResult<Unit>) -> Unit) {
+        val done = reporting("setLeaderboardOptIn", done)
+        val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
+        val database = db ?: return done(CloudResult.Failure("Firebase is not configured"))
+        database.collection("programMembers").document("${programId}_$uid")
+            .update("leaderboardOptIn", optIn)
+            .addOnSuccessListener { done(CloudResult.Success(Unit)) }
+            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Could not update leaderboard setting", it)) }
     }
 
     override fun recordCheckinCompletion(hourOfDay: Int, done: (CloudResult<Int>) -> Unit) {
@@ -753,17 +992,6 @@ class FirebaseHealthRepository : HealthRepository {
         db?.collection(collection)?.document(documentId)?.delete()
             ?.addOnSuccessListener { done(CloudResult.Success(Unit)) }
             ?.addOnFailureListener { done(CloudResult.Failure(it.message ?: "Synced record could not be saved", it)) }
-            ?: done(CloudResult.Failure("Firebase is not configured"))
-    }
-
-    private fun createRequest(collection: String, done: (CloudResult<Unit>) -> Unit) {
-        val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
-        db?.collection(collection)?.add(mapOf("userId" to uid, "status" to "requested", "createdAt" to FieldValue.serverTimestamp()))
-            ?.addOnSuccessListener {
-                AnalyticsLogger.log(if (collection == "dataExportRequests") "data_export_requested" else "account_deletion_requested")
-                done(CloudResult.Success(Unit))
-            }
-            ?.addOnFailureListener { done(CloudResult.Failure(it.message ?: "Request failed", it)) }
             ?: done(CloudResult.Failure("Firebase is not configured"))
     }
 }

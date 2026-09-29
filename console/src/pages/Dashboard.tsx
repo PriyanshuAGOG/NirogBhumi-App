@@ -12,8 +12,8 @@ import {
   type Query,
 } from 'firebase/firestore'
 import { db } from '../lib/firebase'
-import { useAuth } from '../auth/AuthProvider'
-import { usePrograms } from '../lib/usePrograms'
+import { chunk } from '../lib/usePrograms'
+import { useScope } from '../lib/scope'
 import './Dashboard.css'
 
 interface TileState {
@@ -32,22 +32,36 @@ interface TileState {
 // same "feels live" tile without that cost.
 const COUNT_REFRESH_MS = 45_000
 
-/** Periodically refreshed aggregate count for a query; falls back to a second query on error. */
-function useCount(build: () => { primary: Query; fallback: Query }): TileState {
+/**
+ * Periodically refreshed aggregate count. `build` returns the queries to count
+ * (summed together - a coach's program-scoped counts are several chunked
+ * queries), or null when there is nothing to count yet (e.g. a coach with no
+ * program), which shows 0. Falls back to `fallback` if the primary fails.
+ */
+function useCount(build: () => { primary: Query[]; fallback?: Query[] } | null, deps: unknown[] = []): TileState {
   const [state, setState] = useState<TileState>({ count: null, error: false })
 
   useEffect(() => {
-    const { primary, fallback } = build()
+    const queries = build()
     let cancelled = false
+    if (!queries) {
+      setState({ count: 0, error: false })
+      return
+    }
+    const total = async (list: Query[]) => {
+      const snaps = await Promise.all(list.map((q) => getCountFromServer(q)))
+      return snaps.reduce((sum, snap) => sum + snap.data().count, 0)
+    }
 
     async function refresh() {
       try {
-        const snap = await getCountFromServer(primary)
-        if (!cancelled) setState({ count: snap.data().count, error: false })
+        const count = await total(queries!.primary)
+        if (!cancelled) setState({ count, error: false })
       } catch {
         try {
-          const snap = await getCountFromServer(fallback)
-          if (!cancelled) setState({ count: snap.data().count, error: false })
+          if (!queries!.fallback) throw new Error('no fallback')
+          const count = await total(queries!.fallback)
+          if (!cancelled) setState({ count, error: false })
         } catch {
           if (!cancelled) setState({ count: null, error: true })
         }
@@ -60,9 +74,8 @@ function useCount(build: () => { primary: Query; fallback: Query }): TileState {
       cancelled = true
       clearInterval(interval)
     }
-    // build is stable per-call; deps intentionally empty (one-time wiring).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, deps)
 
   return state
 }
@@ -111,73 +124,103 @@ const QUIET_AFTER_MS = 4 * 24 * 60 * 60 * 1000
  * so without this bound the widget would re-fire for every admin on every
  * single check-in from every member, not just the ones actually going quiet.
  */
-function useQuietMembers(): { list: RosterEntry[]; loading: boolean } {
+function useQuietMembers(scope: { isAdmin: boolean; programIds: string[]; programKey: string; loading: boolean }): { list: RosterEntry[]; loading: boolean } {
   const [list, setList] = useState<RosterEntry[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const cutoff = Timestamp.fromDate(new Date(Date.now() - QUIET_AFTER_MS))
-    const unsub = onSnapshot(
-      query(
-        collection(db, 'programMembers'),
-        where('lastCheckinAt', '<=', cutoff),
-        orderBy('lastCheckinAt', 'asc'),
-        limit(6),
+    if (!scope.isAdmin && scope.loading) return
+    const cutoffMs = Date.now() - QUIET_AFTER_MS
+
+    if (scope.isAdmin) {
+      const unsub = onSnapshot(
+        query(collection(db, 'programMembers'), where('lastCheckinAt', '<=', Timestamp.fromMillis(cutoffMs)), orderBy('lastCheckinAt', 'asc'), limit(6)),
+        (snap) => {
+          setList(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<RosterEntry, 'id'>) })))
+          setLoading(false)
+        },
+        () => setLoading(false),
+      )
+      return unsub
+    }
+
+    // A coach can only list rosters of their own programs, so read those and
+    // pick out the quiet members here (a batch roster is small).
+    if (!scope.programIds.length) {
+      setList([])
+      setLoading(false)
+      return
+    }
+    const perChunk = new Map<number, RosterEntry[]>()
+    const publish = () => {
+      const all = Array.from(perChunk.values()).flat()
+      const quiet = all
+        .filter((m) => {
+          const last = (m.lastCheckinAt as { toMillis?: () => number } | undefined)?.toMillis?.()
+          return last != null && last <= cutoffMs
+        })
+        .sort((a, b) => ((a.lastCheckinAt as { toMillis: () => number }).toMillis()) - ((b.lastCheckinAt as { toMillis: () => number }).toMillis()))
+        .slice(0, 6)
+      setList(quiet)
+      setLoading(false)
+    }
+    const unsubs = chunk(scope.programIds).map((ids, index) =>
+      onSnapshot(
+        query(collection(db, 'programMembers'), where('programId', 'in', ids)),
+        (snap) => {
+          perChunk.set(index, snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<RosterEntry, 'id'>) })))
+          publish()
+        },
+        () => setLoading(false),
       ),
-      (snap) => {
-        setList(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<RosterEntry, 'id'>) })))
-        setLoading(false)
-      },
     )
-    return unsub
+    return () => unsubs.forEach((u) => u())
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [scope.isAdmin, scope.programKey, scope.loading])
 
   return { list, loading }
 }
 
 export default function Dashboard() {
-  const { role } = useAuth()
-  const isAdmin = role === 'admin' || role === 'super_admin'
-  const { programs } = usePrograms()
+  const scope = useScope()
+  const { isAdmin, programs, programIds, programKey } = scope
   const now = new Date()
   const weekEnd = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000)
   const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
 
-  const reports = useCount(() => ({
-    primary: query(collection(db, 'reportedMessages'), where('status', '==', 'open')),
-    fallback: query(collection(db, 'reportedMessages')),
-  }))
-  const members = useCount(() => ({
-    primary: query(collection(db, 'users')),
-    fallback: query(collection(db, 'users')),
-  }))
-  const careMembers = useCount(() => ({
-    primary: query(collection(db, 'users'), where('programActive', '==', true)),
-    fallback: query(collection(db, 'programMembers')),
-  }))
-  const newMembers = useCount(() => ({
-    primary: query(collection(db, 'users'), where('createdAt', '>=', Timestamp.fromDate(weekAgo))),
-    fallback: query(collection(db, 'users')),
-  }))
-  const events = useCount(() => ({
-    primary: query(
-      collection(db, 'programEvents'),
-      where('startsAt', '>=', now),
-      where('startsAt', '<=', weekEnd),
-    ),
-    fallback: query(collection(db, 'programEvents')),
-  }))
-  const support = useCount(() => ({
-    primary: query(collection(db, 'supportRequests'), where('status', '==', 'open')),
-    fallback: query(collection(db, 'supportRequests')),
-  }))
-  const team = useCount(() => ({
-    primary: query(collection(db, 'users'), where('role', 'in', ['admin', 'coach', 'super_admin'])),
-    fallback: query(collection(db, 'users')),
-  }))
+  // Coaches can only count data tied to programs they coach (see lib/scope.ts);
+  // an admin counts platform-wide. `scoped(...)` is null for a coach who has
+  // no program yet, which the tiles show as 0.
+  const scoped = (build: (ids: string[]) => Query) =>
+    isAdmin ? null : programIds.length ? chunk(programIds).map(build) : undefined
+  const scopeDeps = [isAdmin, programKey, scope.loading]
+  const waiting = !isAdmin && scope.loading
 
-  const { list: quiet, loading: quietLoading } = useQuietMembers()
+  const reports = useCount(() => {
+    if (waiting) return { primary: [] }
+    if (isAdmin) return { primary: [query(collection(db, 'reportedMessages'), where('status', '==', 'open'))], fallback: [query(collection(db, 'reportedMessages'))] }
+    const list = scoped((ids) => query(collection(db, 'reportedMessages'), where('programId', 'in', ids), where('status', '==', 'open')))
+    return list ? { primary: list } : null
+  }, scopeDeps)
+  const members = useCount(() => (isAdmin ? { primary: [query(collection(db, 'users'))] } : null), scopeDeps)
+  const careMembers = useCount(() => {
+    if (waiting) return { primary: [] }
+    if (isAdmin) return { primary: [query(collection(db, 'users'), where('programActive', '==', true))], fallback: [query(collection(db, 'programMembers'))] }
+    const list = scoped((ids) => query(collection(db, 'programMembers'), where('programId', 'in', ids)))
+    return list ? { primary: list } : null
+  }, scopeDeps)
+  const newMembers = useCount(() => (isAdmin ? { primary: [query(collection(db, 'users'), where('createdAt', '>=', Timestamp.fromDate(weekAgo)))] } : null), scopeDeps)
+  const events = useCount(() => {
+    if (waiting) return { primary: [] }
+    if (isAdmin) return { primary: [query(collection(db, 'programEvents'), where('startsAt', '>=', now), where('startsAt', '<=', weekEnd))], fallback: [query(collection(db, 'programEvents'))] }
+    const list = scoped((ids) => query(collection(db, 'programEvents'), where('programId', 'in', ids), where('startsAt', '>=', now), where('startsAt', '<=', weekEnd)))
+    return list ? { primary: list } : null
+  }, scopeDeps)
+  const consults = useCount(() => (isAdmin ? { primary: [query(collection(db, 'consultations'), where('status', 'in', ['pending', 'payment_pending']))] } : null), scopeDeps)
+  const support = useCount(() => ({ primary: [query(collection(db, 'supportRequests'), where('status', '==', 'open'))], fallback: [query(collection(db, 'supportRequests'))] }))
+  const team = useCount(() => (isAdmin ? { primary: [query(collection(db, 'users'), where('role', 'in', ['admin', 'coach', 'super_admin']))] } : null), scopeDeps)
+
+  const { list: quiet, loading: quietLoading } = useQuietMembers(scope)
   const programName = useMemo(() => {
     const map = new Map(programs.map((p) => [p.id, p.name ?? 'Program']))
     return (id?: string) => (id ? map.get(id) ?? 'Program' : '—')
@@ -200,6 +243,16 @@ export default function Dashboard() {
       accent: 'var(--status-attention)',
       state: support,
     },
+    ...(isAdmin
+      ? [{
+          key: 'consults',
+          label: 'Consultation requests',
+          hint: 'Members waiting for a confirmed time',
+          to: '/consultations',
+          accent: 'var(--gold)',
+          state: consults,
+        }]
+      : []),
     {
       key: 'quiet',
       label: 'Needs attention',

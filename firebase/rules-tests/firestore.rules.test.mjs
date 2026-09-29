@@ -119,6 +119,74 @@ describe('programMembers self-update (unread badge read markers)', () => {
       lastReadGeneralAt: serverTimestamp(),
     }));
   });
+
+  it('lets a member opt themselves into the batch leaderboard', async () => {
+    await assertSucceeds(updateDoc(doc(member('mem1'), 'programMembers/progA_mem1'), {
+      leaderboardOptIn: true,
+    }));
+  });
+
+  it('denies a member opting someone else into the leaderboard', async () => {
+    await assertFails(updateDoc(doc(member('someone-else'), 'programMembers/progA_mem1'), {
+      leaderboardOptIn: true,
+    }));
+  });
+});
+
+describe('coachInboxMessages (private ask-your-coach threads)', () => {
+  beforeEach(async () => {
+    await seed(async (db) => {
+      await setDoc(doc(db, 'programs/progA'), { name: 'Program A', coachId: 'coach-a' });
+      await setDoc(doc(db, 'users/mem1'), { userId: 'mem1', activeProgramId: 'progA', programActive: true });
+      await setDoc(doc(db, 'users/mem2'), { userId: 'mem2', activeProgramId: 'progA', programActive: true });
+      await setDoc(doc(db, 'coachInboxMessages/q1'), {
+        programId: 'progA', memberUid: 'mem1', fromUid: 'mem1',
+        senderName: 'Member One', senderRole: 'member', text: 'Is walking after dinner okay?',
+        createdAt: serverTimestamp(),
+      });
+    });
+  });
+
+  it('lets a member post a question to their own thread', async () => {
+    await assertSucceeds(setDoc(doc(member('mem1'), 'coachInboxMessages/q2'), {
+      programId: 'progA', memberUid: 'mem1', fromUid: 'mem1',
+      senderName: 'Member One', senderRole: 'member', text: 'Another question',
+      createdAt: serverTimestamp(),
+    }));
+  });
+
+  it("denies a member posting into another member's thread", async () => {
+    await assertFails(setDoc(doc(member('mem2'), 'coachInboxMessages/q3'), {
+      programId: 'progA', memberUid: 'mem1', fromUid: 'mem2',
+      senderName: 'Member Two', senderRole: 'member', text: 'Snooping in',
+      createdAt: serverTimestamp(),
+    }));
+  });
+
+  it('lets a member read their own thread', async () => {
+    await assertSucceeds(getDoc(doc(member('mem1'), 'coachInboxMessages/q1')));
+  });
+
+  it("denies a batchmate reading another member's thread", async () => {
+    await assertFails(getDoc(doc(member('mem2'), 'coachInboxMessages/q1')));
+  });
+
+  it("lets the program's coach read and reply to a member thread", async () => {
+    await assertSucceeds(getDoc(doc(coach('coach-a'), 'coachInboxMessages/q1')));
+    await assertSucceeds(setDoc(doc(coach('coach-a'), 'coachInboxMessages/r1'), {
+      programId: 'progA', memberUid: 'mem1', fromUid: 'coach-a',
+      senderName: 'Coach A', senderRole: 'coach', text: 'Yes, 15 minutes is great.',
+      createdAt: serverTimestamp(),
+    }));
+  });
+
+  it("denies an unassigned coach reading another program's threads", async () => {
+    await assertFails(getDoc(doc(coach('coach-b'), 'coachInboxMessages/q1')));
+  });
+
+  it('denies editing a sent message (immutable thread)', async () => {
+    await assertFails(updateDoc(doc(member('mem1'), 'coachInboxMessages/q1'), { text: 'edited' }));
+  });
 });
 
 describe('programChatMessages reactions-only update', () => {
@@ -278,13 +346,71 @@ describe('users/{uid} program-field lock (self-enrollment bypass fix)', () => {
   });
 });
 
-describe('health-log collection group (glucoseReadings as representative)', () => {
+describe('users/{uid} program-field lock also applies on create (not just update)', () => {
+  it('denies a brand-new user creating their own doc with programActive included', async () => {
+    await assertFails(setDoc(doc(member('newmem'), 'users/newmem'), {
+      userId: 'newmem', programActive: true, activeProgramId: 'progA',
+    }));
+  });
+
+  it('denies a brand-new user creating their own doc with a forged status', async () => {
+    await assertFails(setDoc(doc(member('newmem'), 'users/newmem'), {
+      userId: 'newmem', status: 'active',
+    }));
+  });
+
+  it('denies a brand-new user creating their own doc with the admin role', async () => {
+    await assertFails(setDoc(doc(member('newmem'), 'users/newmem'), {
+      userId: 'newmem', role: 'admin',
+    }));
+  });
+
+  it('still lets a brand-new user create their own doc without those fields', async () => {
+    await assertSucceeds(setDoc(doc(member('newmem'), 'users/newmem'), {
+      userId: 'newmem', fullName: 'New Member',
+    }));
+  });
+});
+
+// Regression: onUserCreate (async Auth trigger) can land AFTER the client's
+// own first onboarding write, leaving a users/{uid} doc with no role/status.
+// Owner updates on such a doc must still succeed (this was the new-device
+// "signed up but every saveProfile is PERMISSION_DENIED" bug), while the
+// role/status/enrollment escalation guard stays intact.
+describe('users/{uid} owner update when role/status not yet set (onUserCreate race)', () => {
+  beforeEach(async () => {
+    await seed(async (db) => {
+      // Created as the client's first write would: userId only, no role/status.
+      await setDoc(doc(db, 'users/raceuser'), { userId: 'raceuser', fullName: 'Race User' });
+    });
+  });
+
+  it('lets the owner write consent/profile fields on a role-less doc', async () => {
+    await assertSucceeds(updateDoc(doc(member('raceuser'), 'users/raceuser'), {
+      consent: { healthData: true, version: '2025-07' }, city: 'Jaipur',
+    }));
+  });
+
+  it('still denies self-granting admin on a role-less doc', async () => {
+    await assertFails(updateDoc(doc(member('raceuser'), 'users/raceuser'), { role: 'admin' }));
+  });
+
+  it('still denies self-enrolling (programActive) on a status-less doc', async () => {
+    await assertFails(updateDoc(doc(member('raceuser'), 'users/raceuser'), {
+      programActive: true, activeProgramId: 'progA',
+    }));
+  });
+});
+
+describe('health-log collection group - coach read scoped to assigned members', () => {
+  // mem1 is in progA (coach-a's batch); coach-b runs a different batch and
+  // has no relationship to mem1 - the core PII-scoping check is that
+  // coach-b can NOT read mem1's health data.
   beforeEach(async () => {
     await seed(async (db) => {
       await setDoc(doc(db, 'programs/progA'), { name: 'Program A', coachId: 'coach-a' });
-      await setDoc(doc(db, 'users/mem1'), {
-        userId: 'mem1', role: 'user', status: 'active', programActive: true, activeProgramId: 'progA',
-      });
+      await setDoc(doc(db, 'programs/progB'), { name: 'Program B', coachId: 'coach-b' });
+      await setDoc(doc(db, 'users/mem1'), { userId: 'mem1', activeProgramId: 'progA', programActive: true });
       await setDoc(doc(db, 'glucoseReadings/r1'), {
         userId: 'mem1', value: 110, createdAt: serverTimestamp(),
       });
@@ -295,8 +421,15 @@ describe('health-log collection group (glucoseReadings as representative)', () =
     await assertSucceeds(getDoc(doc(member('mem1'), 'glucoseReadings/r1')));
   });
 
-  it('lets the assigned coach and admin read the reading', async () => {
+  it("lets the member's assigned coach read it", async () => {
     await assertSucceeds(getDoc(doc(coach('coach-a'), 'glucoseReadings/r1')));
+  });
+
+  it("denies a coach who is NOT assigned to the member's program", async () => {
+    await assertFails(getDoc(doc(coach('coach-b'), 'glucoseReadings/r1')));
+  });
+
+  it('lets admin read any reading', async () => {
     await assertSucceeds(getDoc(doc(admin(), 'glucoseReadings/r1')));
   });
 
@@ -309,9 +442,8 @@ describe('health-log collection group (glucoseReadings as representative)', () =
     await assertFails(getDoc(doc(anon(), 'glucoseReadings/r1')));
   });
 
-  it('keeps assigned-coach access read-only', async () => {
+  it("denies even the assigned coach deleting a member's reading (admin-only)", async () => {
     await assertFails(deleteDoc(doc(coach('coach-a'), 'glucoseReadings/r1')));
-    await assertFails(updateDoc(doc(coach('coach-a'), 'glucoseReadings/r1'), { value: 999 }));
   });
 
   it('lets admin delete a reading', async () => {
@@ -319,35 +451,41 @@ describe('health-log collection group (glucoseReadings as representative)', () =
   });
 });
 
-describe('coachNotes are scoped to the target member program', () => {
+describe('coachNotes - scoped to the member\'s assigned coach', () => {
   beforeEach(async () => {
     await seed(async (db) => {
       await setDoc(doc(db, 'programs/progA'), { name: 'Program A', coachId: 'coach-a' });
-      await setDoc(doc(db, 'users/mem1'), {
-        userId: 'mem1', role: 'user', status: 'active', programActive: true, activeProgramId: 'progA',
+      await setDoc(doc(db, 'users/mem1'), { userId: 'mem1', activeProgramId: 'progA', programActive: true });
+      await setDoc(doc(db, 'coachNotes/existing'), {
+        targetUid: 'mem1', authorId: 'coach-a', text: 'Baseline', createdAt: serverTimestamp(),
       });
     });
   });
 
-  it('lets the assigned coach create a note with themselves as author', async () => {
-    const db = coach('coach-a');
-    await assertSucceeds(setDoc(doc(db, 'coachNotes/note1'), {
+  it("lets the member's assigned coach create a note authored by themselves", async () => {
+    await assertSucceeds(setDoc(doc(coach('coach-a'), 'coachNotes/note1'), {
       targetUid: 'mem1', authorId: 'coach-a', text: 'Doing well', createdAt: serverTimestamp(),
     }));
   });
 
-  it('denies an unassigned coach creating a note for the member', async () => {
-    const db = coach('coach-b');
-    await assertFails(setDoc(doc(db, 'coachNotes/note2'), {
-      targetUid: 'mem1', authorId: 'coach-b', text: 'Cross-program note', createdAt: serverTimestamp(),
+  it('denies an unassigned coach creating a note on that member', async () => {
+    await assertFails(setDoc(doc(coach('coach-b'), 'coachNotes/note1'), {
+      targetUid: 'mem1', authorId: 'coach-b', text: 'Snooping', createdAt: serverTimestamp(),
     }));
   });
 
   it('denies creating a note claiming to be authored by someone else', async () => {
-    const db = coach('coach-a');
-    await assertFails(setDoc(doc(db, 'coachNotes/note3'), {
-      targetUid: 'mem1', authorId: 'someone-else', text: 'Doing well', createdAt: serverTimestamp(),
+    await assertFails(setDoc(doc(coach('coach-a'), 'coachNotes/note1'), {
+      targetUid: 'mem1', authorId: 'someone-else', text: 'x', createdAt: serverTimestamp(),
     }));
+  });
+
+  it("lets the assigned coach read a note on their member", async () => {
+    await assertSucceeds(getDoc(doc(coach('coach-a'), 'coachNotes/existing')));
+  });
+
+  it('denies an unassigned coach reading a note on that member', async () => {
+    await assertFails(getDoc(doc(coach('coach-b'), 'coachNotes/existing')));
   });
 });
 
@@ -431,8 +569,13 @@ describe('announcements (staff-only source doc, never client-writable)', () => {
     await assertSucceeds(getDoc(doc(admin(), 'announcements/ann1')));
   });
 
-  it('lets a coach read the source announcement', async () => {
-    await assertSucceeds(getDoc(doc(coach('coach-a'), 'announcements/ann1')));
+  it('denies a coach reading an announcement someone else wrote (it lists every recipient uid)', async () => {
+    await assertFails(getDoc(doc(coach('coach-a'), 'announcements/ann1')));
+  });
+
+  it('lets a coach read an announcement they wrote themselves', async () => {
+    await seed(async (db) => { await setDoc(doc(db, 'announcements/annOwn'), { title: 'Mine', authorId: 'coach-a', recipientUids: ['mem1'] }); });
+    await assertSucceeds(getDoc(doc(coach('coach-a'), 'announcements/annOwn')));
   });
 
   it('denies a plain member reading the source announcement (only their own fan-out copy)', async () => {
@@ -471,6 +614,110 @@ describe('users/{uid}/announcements fan-out copy (own-only, never client-writabl
 
   it('denies an admin writing a fan-out copy directly (must go through createAnnouncement)', async () => {
     await assertFails(setDoc(doc(admin(), 'users/mem1/announcements/ann2'), { title: 'x' }));
+  });
+});
+
+describe('dataExportRequests/deletionRequests (callable-only, never client-writable)', () => {
+  it('denies a member creating a dataExportRequests doc directly (must go through requestDataExport)', async () => {
+    await assertFails(setDoc(doc(member('mem1'), 'dataExportRequests/req1'), {
+      userId: 'mem1', status: 'requested', createdAt: serverTimestamp(),
+    }));
+  });
+
+  it('denies a member creating a deletionRequests doc directly (must go through requestAccountDeletion)', async () => {
+    await assertFails(setDoc(doc(member('mem1'), 'deletionRequests/req1'), {
+      userId: 'mem1', status: 'requested', createdAt: serverTimestamp(),
+    }));
+  });
+
+  it('still lets the owner read their own request once it exists', async () => {
+    await seed(async (db) => {
+      await setDoc(doc(db, 'dataExportRequests/req1'), { userId: 'mem1', status: 'requested' });
+    });
+    await assertSucceeds(getDoc(doc(member('mem1'), 'dataExportRequests/req1')));
+  });
+});
+
+describe('errorReports (admin-only, matching the console route gating)', () => {
+  beforeEach(async () => {
+    await seed(async (db) => {
+      await setDoc(doc(db, 'errorReports/err1'), { userId: 'mem1', message: 'boom', resolved: false });
+    });
+  });
+
+  it('denies a coach reading error telemetry', async () => {
+    await assertFails(getDoc(doc(coach('coach-a'), 'errorReports/err1')));
+  });
+
+  it('lets an admin read error telemetry', async () => {
+    await assertSucceeds(getDoc(doc(admin(), 'errorReports/err1')));
+  });
+});
+
+describe('programCodes (per-program staff scoping)', () => {
+  beforeEach(async () => {
+    await seed(async (db) => {
+      await setDoc(doc(db, 'programs/progA'), { name: 'Program A', coachId: 'coach-a' });
+      await setDoc(doc(db, 'programs/progB'), { name: 'Program B', coachId: 'coach-b' });
+      await setDoc(doc(db, 'programCodes/CODEA'), { code: 'CODEA', programId: 'progA', active: true });
+    });
+  });
+
+  it('lets the assigned coach read their own program code', async () => {
+    await assertSucceeds(getDoc(doc(coach('coach-a'), 'programCodes/CODEA')));
+  });
+
+  it('denies a different coach reading that code', async () => {
+    await assertFails(getDoc(doc(coach('coach-b'), 'programCodes/CODEA')));
+  });
+
+  it('denies a different coach creating a code for a program they do not own', async () => {
+    await assertFails(setDoc(doc(coach('coach-b'), 'programCodes/CODEB'), {
+      code: 'CODEB', programId: 'progA', active: true,
+    }));
+  });
+
+  it('lets admin read any program code', async () => {
+    await assertSucceeds(getDoc(doc(admin(), 'programCodes/CODEA')));
+  });
+});
+
+describe('consentReceipts (DPDP immutable consent record)', () => {
+  beforeEach(async () => {
+    await seed(async (db) => {
+      await setDoc(doc(db, 'users/mem1/consentReceipts/seed'), {
+        version: '2025-07', purposes: { healthData: true }, acceptedAt: serverTimestamp(),
+      });
+    });
+  });
+
+  it('lets the owner append a consent receipt stamped with the server time', async () => {
+    await assertSucceeds(setDoc(doc(member('mem1'), 'users/mem1/consentReceipts/r1'), {
+      version: '2025-07', purposes: { healthData: true, marketing: false }, acceptedAt: serverTimestamp(),
+    }));
+  });
+
+  it('rejects a back-dated (non-server-time) acceptedAt', async () => {
+    await assertFails(setDoc(doc(member('mem1'), 'users/mem1/consentReceipts/r2'), {
+      version: '2025-07', purposes: { healthData: true }, acceptedAt: new Date('2020-01-01'),
+    }));
+  });
+
+  it("forbids writing a receipt under another user's path", async () => {
+    await assertFails(setDoc(doc(member('mem2'), 'users/mem1/consentReceipts/r3'), {
+      version: '2025-07', purposes: { healthData: true }, acceptedAt: serverTimestamp(),
+    }));
+  });
+
+  it('lets the owner and an admin read receipts, but not another member', async () => {
+    await assertSucceeds(getDoc(doc(member('mem1'), 'users/mem1/consentReceipts/seed')));
+    await assertSucceeds(getDoc(doc(admin(), 'users/mem1/consentReceipts/seed')));
+    await assertFails(getDoc(doc(member('mem2'), 'users/mem1/consentReceipts/seed')));
+  });
+
+  it('is immutable - no update or delete', async () => {
+    await assertFails(updateDoc(doc(member('mem1'), 'users/mem1/consentReceipts/seed'), { version: 'hacked' }));
+    await assertFails(deleteDoc(doc(member('mem1'), 'users/mem1/consentReceipts/seed')));
   });
 });
 

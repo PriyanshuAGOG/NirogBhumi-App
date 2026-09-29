@@ -5,18 +5,23 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
-    <!-- Self-update system: without this, the ACTION_VIEW install intent for
-         a sideloaded APK is silently blocked by the OS on API 26+ (this is
-         the modern per-app-source replacement for the old, device-wide
-         "Unknown sources" toggle). The user still has to grant it once via
-         Settings (canRequestPackageInstalls() gates the flow), and still
-         taps through the system installer's own confirmation - this
-         permission alone does not enable fully silent installs. -->
-    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- No advertising, so the advertising-ID permission that Firebase
+         Analytics / Play Services would otherwise merge in is removed. This
+         keeps the Data Safety form truthful ("no advertising ID"). -->
+    <uses-permission android:name="com.google.android.gms.permission.AD_ID" tools:node="remove" />
+    <uses-permission android:name="android.permission.ACCESS_ADSERVICES_AD_ID" tools:node="remove" />
+    <uses-permission android:name="android.permission.ACCESS_ADSERVICES_ATTRIBUTION" tools:node="remove" />
+    <uses-permission android:name="android.permission.ACCESS_ADSERVICES_TOPICS" tools:node="remove" />
+    <!-- REQUEST_INSTALL_PACKAGES is declared ONLY in the debug source set's
+         manifest (app/src/debug/AndroidManifest.xml), not here. It's needed
+         solely by the tester self-update flow (sideloaded Firebase App
+         Distribution APKs), which is compiled out of the release/Play build;
+         Google Play's Device & Network Abuse policy forbids self-updating
+         outside of Play, and this keeps the permission out of the Play AAB
+         entirely so the listing never has to declare it. -->
     <uses-permission android:name="android.permission.health.READ_STEPS" />
     <uses-permission android:name="android.permission.health.READ_SLEEP" />
     <uses-permission android:name="android.permission.health.READ_WEIGHT" />
-    <uses-permission android:name="android.permission.health.READ_HEART_RATE" />
     <uses-permission android:name="android.permission.health.READ_BLOOD_GLUCOSE" />
     <uses-permission android:name="android.permission.health.READ_BLOOD_PRESSURE" />
 
@@ -81,6 +86,23 @@
             android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
         </provider>
+        <!-- exported="true" is required here, not a broad-access oversight -
+             the home-screen launcher (a different app/process) is the one
+             that sends APPWIDGET_UPDATE; Android would block that delivery
+             entirely on API 31+ if this were exported="false". The widget
+             itself has no other surface: its buttons only ever launch this
+             app's own MainActivity with a fixed internal action string. -->
+        <receiver
+            android:name=".widget.HealthQuickLogWidgetReceiver"
+            android:exported="true"
+            android:label="@string/quick_log_widget_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/health_quick_log_widget_info" />
+        </receiver>
     </application>
 
 </manifest>

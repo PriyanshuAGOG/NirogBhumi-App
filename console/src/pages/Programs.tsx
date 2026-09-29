@@ -10,11 +10,13 @@ import {
   setDoc,
   Timestamp,
   updateDoc,
+  where,
 } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
 import { FirebaseError } from 'firebase/app'
 import { db, functions } from '../lib/firebase'
-import { usePrograms, type Program } from '../lib/usePrograms'
+import { chunk, type Program } from '../lib/usePrograms'
+import { useScope } from '../lib/scope'
 import { errText } from '../lib/errors'
 import { formatDate, toDate, toInputDateTime, fromInputDateTime } from '../lib/time'
 import { parseCsvRecords, toCsv, downloadCsv } from '../lib/csv'
@@ -88,7 +90,7 @@ const emptyProgram: ProgramDraft = {
 }
 
 export default function Programs() {
-  const { programs, loading, error } = usePrograms()
+  const { programs, programIds, programKey, isAdmin, loading, error } = useScope()
 
   // Program editor
   const [pDraft, setPDraft] = useState<ProgramDraft | null>(null)
@@ -102,6 +104,7 @@ export default function Programs() {
   const [cSaving, setCSaving] = useState(false)
   const [cError, setCError] = useState<string | null>(null)
   const [busyCode, setBusyCode] = useState<string | null>(null)
+  const [copiedCode, setCopiedCode] = useState<string | null>(null)
 
   // Invites - pre-enroll by phone/email, consumed automatically at signup
   const [invites, setInvites] = useState<ProgramInvite[]>([])
@@ -115,31 +118,58 @@ export default function Programs() {
   const [csvError, setCsvError] = useState<string | null>(null)
   const [csvSummary, setCsvSummary] = useState<string | null>(null)
 
+  // Invites and codes are tied to a program. An admin reads them all; a coach
+  // must ask only for the programs they coach (Firestore rejects a list query it
+  // can't prove is limited to those), so those are read per program (chunked
+  // `in`) and ordered here.
   useEffect(() => {
-    const unsub = onSnapshot(
-      query(collection(db, 'programInvites'), orderBy('createdAt', 'desc')),
-      (snap) => {
-        setInvites(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<ProgramInvite, 'id'>) })))
-        setInvitesError(null)
-      },
-      (err) => setInvitesError(errText(err, 'Could not load invites')),
+    if (!isAdmin && (loading || programIds.length === 0)) {
+      setInvites([])
+      return
+    }
+    const createdMillis = (i: ProgramInvite) => (i.createdAt as { toMillis?: () => number } | undefined)?.toMillis?.() ?? 0
+    const queries = isAdmin
+      ? [query(collection(db, 'programInvites'), orderBy('createdAt', 'desc'))]
+      : chunk(programIds).map((ids) => query(collection(db, 'programInvites'), where('programId', 'in', ids)))
+    const perChunk = new Map<number, ProgramInvite[]>()
+    const unsubs = queries.map((q, index) =>
+      onSnapshot(
+        q,
+        (snap) => {
+          perChunk.set(index, snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<ProgramInvite, 'id'>) })))
+          setInvites(Array.from(perChunk.values()).flat().sort((a, b) => createdMillis(b) - createdMillis(a)))
+          setInvitesError(null)
+        },
+        (err) => setInvitesError(errText(err, 'Could not load invites')),
+      ),
     )
-    return unsub
-  }, [])
+    return () => unsubs.forEach((u) => u())
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin, programKey, loading])
 
   useEffect(() => {
-    const unsub = onSnapshot(
-      query(collection(db, 'programCodes')),
-      (snap) => {
-        const next = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<ProgramCode, 'id'>) }))
-        next.sort((a, b) => (a.code ?? '').localeCompare(b.code ?? ''))
-        setCodes(next)
-        setCodesError(null)
-      },
-      (err) => setCodesError(errText(err, 'Could not load codes')),
+    if (!isAdmin && (loading || programIds.length === 0)) {
+      setCodes([])
+      return
+    }
+    const queries = isAdmin
+      ? [query(collection(db, 'programCodes'))]
+      : chunk(programIds).map((ids) => query(collection(db, 'programCodes'), where('programId', 'in', ids)))
+    const perChunk = new Map<number, ProgramCode[]>()
+    const unsubs = queries.map((q, index) =>
+      onSnapshot(
+        q,
+        (snap) => {
+          perChunk.set(index, snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<ProgramCode, 'id'>) })))
+          setCodes(Array.from(perChunk.values()).flat().sort((a, b) => (a.code ?? '').localeCompare(b.code ?? '')))
+          setCodesError(null)
+        },
+        (err) => setCodesError(errText(err, 'Could not load codes')),
+      ),
     )
-    return unsub
-  }, [])
+    return () => unsubs.forEach((u) => u())
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin, programKey, loading])
 
   const programName = (id?: string) => programs.find((p) => p.id === id)?.name ?? id ?? '—'
 
@@ -176,8 +206,20 @@ export default function Programs() {
   }
 
   async function saveCode() {
-    if (!cDraft || !cDraft.code.trim() || !cDraft.programId) {
+    if (!cDraft) return
+    // Codes are matched case-insensitively by the redeem function, which looks
+    // the code up by its upper-cased text - so it is stored that way here.
+    const code = cDraft.code.trim().toUpperCase()
+    if (!code || !cDraft.programId) {
       setCError('A code and a target program are required.')
+      return
+    }
+    if (!/^[A-Z0-9_-]{4,24}$/.test(code)) {
+      setCError('Use 4–24 letters, numbers, dashes or underscores (no spaces).')
+      return
+    }
+    if (codes.some((c) => (c.code ?? c.id).toUpperCase() === code)) {
+      setCError('That code already exists. Pick a different one, or reactivate the existing code.')
       return
     }
     setCSaving(true)
@@ -186,11 +228,11 @@ export default function Programs() {
     const exp = fromInputDateTime(cDraft.expiresAt ? `${cDraft.expiresAt}T23:59` : '')
     try {
       // Use the code text as the doc id so codes are unique & directly lookupable.
-      await setDoc(doc(db, 'programCodes', cDraft.code.trim()), {
-        code: cDraft.code.trim(),
+      await setDoc(doc(db, 'programCodes', code), {
+        code,
         programId: cDraft.programId,
         active: true,
-        maxUses: Number.isFinite(max) ? max : null,
+        maxUses: Number.isFinite(max) && max > 0 ? max : null,
         uses: 0,
         expiresAt: exp ? Timestamp.fromDate(exp) : null,
         createdAt: serverTimestamp(),
@@ -200,6 +242,24 @@ export default function Programs() {
       setCError(errText(err, 'Code could not be created'))
     } finally {
       setCSaving(false)
+    }
+  }
+
+  // Unambiguous alphabet (no 0/O/1/I) so a code read out over a call or typed
+  // from a screenshot doesn't fail on a look-alike character.
+  function generateCode(): string {
+    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+    const bytes = crypto.getRandomValues(new Uint8Array(8))
+    return Array.from(bytes, (b) => alphabet[b % alphabet.length]).join('')
+  }
+
+  async function copyCode(c: ProgramCode) {
+    try {
+      await navigator.clipboard.writeText(c.code ?? c.id)
+      setCopiedCode(c.id)
+      window.setTimeout(() => setCopiedCode((cur) => (cur === c.id ? null : cur)), 1800)
+    } catch {
+      setCodesError('Could not copy - select the code and copy it manually.')
     }
   }
 
@@ -315,15 +375,17 @@ export default function Programs() {
       <div className="toolbar">
         <h2 className="section-h">Programs</h2>
         <div className="toolbar-spacer" />
-        <button
-          className="btn btn-forest"
-          onClick={() => {
-            setPDraft({ ...emptyProgram })
-            setPError(null)
-          }}
-        >
-          + New program
-        </button>
+        {isAdmin && (
+          <button
+            className="btn btn-forest"
+            onClick={() => {
+              setPDraft({ ...emptyProgram })
+              setPError(null)
+            }}
+          >
+            + New program
+          </button>
+        )}
       </div>
 
       {error && (
@@ -357,7 +419,7 @@ export default function Programs() {
               </div>
               <div className="prog-meta">
                 {p.code && <span className="tag tag-warn">{p.code}</span>}
-                <span className="prog-members">{p.memberCount ?? 0} members</span>
+                <span className="prog-members">{p.memberCount ?? 0} {(p.memberCount ?? 0) === 1 ? 'member' : 'members'}</span>
                 <button
                   className="btn btn-ghost btn-sm"
                   onClick={() => {
@@ -433,6 +495,9 @@ export default function Programs() {
                   ) : (
                     <span className="tag tag-neutral">Off</span>
                   )}
+                  <button className="btn btn-ghost btn-sm" onClick={() => void copyCode(c)}>
+                    {copiedCode === c.id ? 'Copied ✓' : 'Copy'}
+                  </button>
                   <button
                     className="btn btn-ghost btn-sm"
                     disabled={busyCode === c.id}
@@ -650,7 +715,13 @@ export default function Programs() {
             )}
             <div className="field">
               <span className="field-label">Code</span>
-              <input className="input" value={cDraft.code} onChange={(e) => setC('code', e.target.value)} placeholder="JULY26" />
+              <div className="field-row">
+                <input className="input" value={cDraft.code} onChange={(e) => setC('code', e.target.value.toUpperCase())} placeholder="JULY26" maxLength={24} autoCapitalize="characters" />
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setC('code', generateCode())}>
+                  Generate
+                </button>
+              </div>
+              <span className="field-hint">Members type this when they join. Not case-sensitive.</span>
             </div>
             <div className="field">
               <span className="field-label">Program</span>

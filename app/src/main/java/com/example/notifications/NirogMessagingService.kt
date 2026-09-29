@@ -24,11 +24,14 @@ class NirogMessagingService : FirebaseMessagingService() {
         val body = message.notification?.body ?: message.data["body"] ?: return
         val route = when (message.data["type"]) {
             "report" -> "weekly_report"
-            "consultation" -> "consultation_detail"
+            "consultation" -> "my_consultations"
             "program" -> "active_journey"
             "order" -> "order_detail"
             "expert_message" -> "expert_notes"
             "announcement" -> "announcements"
+            "coach_message" -> "coach_inbox"
+            "privacy" -> "data_controls"
+            "program_resource" -> "program_resources"
             else -> "dashboard"
         }
         val intent = Intent(this, MainActivity::class.java).putExtra("route", route).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)

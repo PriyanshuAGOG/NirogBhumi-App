@@ -1,0 +1,14 @@
+{
+  "name": "nirog-bhumi-e2e",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "End-to-end console tests: real browser + Firebase Auth/Firestore/Functions emulators (never production).",
+  "scripts": {
+    "test": "bash run.sh"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.48.0",
+    "firebase": "^11.10.0"
+  }
+}

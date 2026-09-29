@@ -6,6 +6,7 @@ import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
+import com.nirogbhumi.app.BuildConfig
 import java.util.concurrent.TimeUnit
 
 /**
@@ -24,11 +25,28 @@ object UpdateManager {
     private const val BACKSTOP_INTERVAL_HOURS = 6L
 
     /**
+     * Whether in-app self-update (download an APK + hand it to the package
+     * installer) is allowed to run at all. This is the TESTER sideload channel
+     * only - Firebase App Distribution debug builds that live OUTSIDE Google
+     * Play. Google Play's Device & Network Abuse policy forbids an app shipped
+     * through Play from downloading executable code and self-updating outside
+     * of Play, so in a release/Play (AAB) build the whole mechanism compiles to
+     * a no-op and Play itself owns updates. This is the single source of truth
+     * every self-update entry point gates on (foreground loop, WorkManager
+     * backstop, checkNow), so even a missed call site can't reach the network
+     * or the installer in a Play build. REQUEST_INSTALL_PACKAGES lives only in
+     * the debug source set's manifest, so it's absent from the Play AAB too.
+     */
+    val isEnabled: Boolean get() = BuildConfig.DEBUG
+
+    /**
      * Returns the UpdateInfo to show, or null if there's nothing worth
-     * surfacing right now (already up to date, or the member already tapped
-     * "Later" on this exact version and it isn't a forced update).
+     * surfacing right now (self-update disabled in this build, already up to
+     * date, or the member already tapped "Later" on this exact version and it
+     * isn't a forced update).
      */
     suspend fun checkNow(context: Context, currentVersionCode: Int): Result<UpdateInfo?> {
+        if (!isEnabled) return Result.success(null)
         UpdatePrefs.recordCheckNow(context)
         val channel = UpdatePrefs.channel(context)
         val result = UpdateRepository.fetchLatest(channel)
@@ -62,6 +80,7 @@ object UpdateManager {
      * backstop silently is far better than crashing app startup.
      */
     fun schedulePeriodicCheck(context: Context) {
+        if (!isEnabled) return
         runCatching {
             val request = PeriodicWorkRequestBuilder<UpdateCheckWorker>(BACKSTOP_INTERVAL_HOURS, TimeUnit.HOURS)
                 .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())

@@ -9,13 +9,25 @@ import com.nirogbhumi.app.data.FirebaseHealthRepository
 import com.nirogbhumi.app.data.HealthRepository
 import com.nirogbhumi.app.data.CloudDocument
 
+// Version of the consent notice/policies the user agrees to. Stored on every
+// consent receipt and on users/{uid}.consent so we can prove what was agreed
+// to and, when this bumps after a material policy change, ask for fresh
+// consent (DPDP Act 2023). Bump this string when the notice materially changes.
+const val CONSENT_VERSION = "2025-07"
+
 // Data Models
 data class SugarLog(
     val id: Int,
     val value: Int,
     val type: String, // "Fasting" or "Post-meal"
     val time: String,
-    val status: String // "High", "Normal" or "Low"
+    val status: String, // "High", "Normal" or "Low"
+    // Defaults to "now" so the existing optimistic quick-log call sites (which
+    // log the instant a reading is entered) don't need updating - only the
+    // Firestore-sync call sites pass the reading's real measuredAt, which the
+    // 7/30/90-day trend chart needs for real day-bucketing instead of relying
+    // on the pre-formatted display string in `time`.
+    val measuredAtMillis: Long = System.currentTimeMillis()
 )
 
 data class ConsultationSlot(
@@ -41,6 +53,18 @@ class NirogState {
     // straight to "Privacy Policy" from a specific link instead of always
     // landing on the default "Medical Disclaimer" section.
     var legalInitialSection by mutableStateOf<String?>(null)
+    // True only once the member has actually gone through
+    // HealthProfileSetupScreen's "Continue" (not "Skip") - the four
+    // selectedDiabetesStatus/selectedBpStatus/selectedOnMedication/
+    // selectedDoctorSupervision fields can't tell this apart on their own,
+    // since their skip-time defaults ("None"/"Normal"/"No"/"Yes") are also
+    // legitimate real answers someone could deliberately choose.
+    var healthProfileCompleted by mutableStateOf(false)
+    // Where HealthProfileSetupScreen's back/Continue/Skip should land when
+    // it's re-entered later from Profile's "Complete your health profile"
+    // nudge, instead of always continuing into goal_selection - blank means
+    // "still in the original onboarding chain."
+    var healthProfileReturnRoute by mutableStateOf("")
     var currentScreen by mutableStateOf("splash") // "splash", "welcome", "value_slides", "consent", "login_mobile", "login_otp", "email_auth", "password_reset", "setup_profile", "selection_caregiver", "health_profile_setup", "goal_selection", "program_code_optional", "onboarding_complete", "dashboard", "sugar_detail", "consult_stepper", "active_journey"
     var viewMode by mutableStateOf("mobile") // "mobile", "admin", "expert"
 
@@ -56,15 +80,20 @@ class NirogState {
     var consentHealthData by mutableStateOf(false)
     var consentExpertReview by mutableStateOf(false)
     var consentMedicalDisclaimer by mutableStateOf(false)
+    // Optional, separate, off-by-default consents (DPDP Act: optional consent
+    // must be distinct from required consent and independently withdrawable).
+    // Toggled in Privacy & consent; hydrated from users/{uid}.consent on load.
+    var consentResearch by mutableStateOf(false)
+    var consentMarketing by mutableStateOf(false)
     var isTrackingForSelf by mutableStateOf(true) // true for Myself, false for Family Member
 
     // Profile Details
     var profileName by mutableStateOf("")
-    var profileAge by mutableStateOf("28")
-    var profileGender by mutableStateOf("Male")
-    var profileHeight by mutableStateOf("174")
-    var profileWeight by mutableStateOf("72")
-    var profileCity by mutableStateOf("Jaipur")
+    var profileAge by mutableStateOf("")
+    var profileGender by mutableStateOf("")
+    var profileHeight by mutableStateOf("")
+    var profileWeight by mutableStateOf("")
+    var profileCity by mutableStateOf("")
     var profileLanguage by mutableStateOf("English")
     // Private (users/{uid}/profile-photo/... - readable only by the owner or
     // an admin, same as any other private upload). Not yet surfaced to other

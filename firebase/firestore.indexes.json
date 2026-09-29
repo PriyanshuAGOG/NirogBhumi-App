@@ -1,6 +1,9 @@
 {
   "indexes": [
     { "collectionGroup": "glucoseReadings", "queryScope": "COLLECTION", "fields": [{"fieldPath":"userId","order":"ASCENDING"},{"fieldPath":"measuredAt","order":"DESCENDING"}] },
+    { "collectionGroup": "glucoseReadings", "queryScope": "COLLECTION", "fields": [{"fieldPath":"userId","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}] },
+    { "collectionGroup": "deletionRequests", "queryScope": "COLLECTION", "fields": [{"fieldPath":"status","order":"ASCENDING"},{"fieldPath":"scheduledFor","order":"ASCENDING"}] },
+    { "collectionGroup": "deletionRequests", "queryScope": "COLLECTION", "fields": [{"fieldPath":"status","order":"ASCENDING"},{"fieldPath":"updatedAt","order":"ASCENDING"}] },
     { "collectionGroup": "consultations", "queryScope": "COLLECTION", "fields": [{"fieldPath":"expertId","order":"ASCENDING"},{"fieldPath":"scheduledAt","order":"ASCENDING"}] },
     { "collectionGroup": "notifications", "queryScope": "COLLECTION", "fields": [{"fieldPath":"status","order":"ASCENDING"},{"fieldPath":"scheduledFor","order":"ASCENDING"}] },
     { "collectionGroup": "notifications", "queryScope": "COLLECTION", "fields": [{"fieldPath":"userId","order":"ASCENDING"},{"fieldPath":"status","order":"ASCENDING"},{"fieldPath":"sentAt","order":"ASCENDING"}] },
@@ -22,7 +25,11 @@
     { "collectionGroup": "dailyCheckins", "queryScope": "COLLECTION", "fields": [{"fieldPath":"userId","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}] },
     { "collectionGroup": "coachNotes", "queryScope": "COLLECTION", "fields": [{"fieldPath":"targetUid","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}] },
     { "collectionGroup": "dataExportRequests", "queryScope": "COLLECTION", "fields": [{"fieldPath":"userId","order":"ASCENDING"},{"fieldPath":"createdAt","order":"ASCENDING"}] },
-    { "collectionGroup": "medicationLogs", "queryScope": "COLLECTION", "fields": [{"fieldPath":"userId","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}] }
+    { "collectionGroup": "deletionRequests", "queryScope": "COLLECTION", "fields": [{"fieldPath":"userId","order":"ASCENDING"},{"fieldPath":"createdAt","order":"ASCENDING"}] },
+    { "collectionGroup": "medicationLogs", "queryScope": "COLLECTION", "fields": [{"fieldPath":"userId","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}] },
+    { "collectionGroup": "medicationLogs", "queryScope": "COLLECTION", "fields": [{"fieldPath":"userId","order":"ASCENDING"},{"fieldPath":"measuredAt","order":"DESCENDING"}] },
+    { "collectionGroup": "coachInboxMessages", "queryScope": "COLLECTION", "fields": [{"fieldPath":"programId","order":"ASCENDING"},{"fieldPath":"memberUid","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}] },
+    { "collectionGroup": "coachInboxMessages", "queryScope": "COLLECTION", "fields": [{"fieldPath":"programId","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}] }
   ],
   "fieldOverrides": []
 }

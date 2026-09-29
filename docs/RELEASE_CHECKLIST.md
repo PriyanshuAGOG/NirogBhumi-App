@@ -2,6 +2,7 @@
 
 ## Firebase owner actions
 
+- **BLOCKER — lift the org policy blocking callable-function invoker.** The GCP org policy `iam.allowedPolicyMemberDomains` (Domain Restricted Sharing) prevents binding the public (`allUsers`) Cloud Run invoker that HTTPS **callable** functions require. Any *newly created* callable then fails to deploy at the "set invoker" step and returns 403 when called. This currently blocks `createAnnouncement`, `deleteAnnouncement`, `markAnnouncementSeen`, and `previewAnnouncementAudience` — so **posting announcements and "seen by N" are broken** until fixed. Fix (one-time): in GCP Console → IAM & Admin → Organization Policies → `iam.allowedPolicyMemberDomains`, add a **project-level override** for `nirog-bhumi-app` set to *Allow All* (or add your allowed values plus `allUsers`/`allAuthenticatedUsers`); alternatively grant the deploy service account `roles/run.admin` if the cause is a missing role. Then re-run the **Deploy Firebase** workflow — the invoker binds and the deploy goes green. This fixes every current and future callable at once; the alternative is refactoring those callables to the Firestore-trigger dispatch pattern (no public invoker).
 - Create production and staging Firebase projects in the India-compatible region selected by the owner.
 - Register `in.nirogbhumi.app`; add `app/google-services.json` and SHA-1/SHA-256 certificates.
 - Enable Phone and Email/Password Auth, Firestore, Storage, Functions, Messaging, Analytics, Crashlytics, and App Check.
@@ -9,12 +10,16 @@
 - Configure budget alerts, retention, backups, least-privilege IAM, staff custom claims, and audit-log monitoring.
 - Add Razorpay/UPI secrets through Firebase secret management; never commit them.
 
-## Health and privacy
+## Health and privacy (DPDP Act 2023 + Play)
 
 - Obtain Indian privacy/health-law review for the final legal text and consent records.
-- Publish Terms, Privacy Policy, Medical Disclaimer, Consent Notice, Data Deletion, Refund, Shipping, and Program Terms on the production domain.
-- Verify export and deletion fulfillment, incident response, staff access review, and vendor agreements.
-- Complete Google Play Data safety and Health apps declaration using the final SDK/data inventory.
+- The canonical legal pages now live as hosted static files in `console/public/legal/` (served at `<console-domain>/legal/...`). Replace every `[placeholder]` (operating entity, dates, retention periods, Grievance Officer) before publishing; ideally also publish at the primary domain. These cover Privacy Policy, Terms, Medical Disclaimer, Account Deletion, and the Grievance mechanism.
+- **Appoint a Grievance Officer** (DPDP s.13) and publish their name, working mailbox (e.g. `grievance@nirogbhumi.com`), and postal address in the legal pages and the in-app Legal Center.
+- Put the **hosted Privacy Policy URL** and the **hosted account-deletion URL** (`/legal/account-deletion.html`, reachable without installing the app) into the Play Console listing and Data Safety form — the deletion URL is a hard Play requirement.
+- Complete the Play **Data Safety** form and **Health apps declaration** using `docs/DATA_SAFETY_MAPPING.md`; confirm "no data shared for advertising".
+- `REQUEST_INSTALL_PACKAGES`, the advertising ID and any undeclared permission are blocked automatically: the CI "Android release build" job runs `scripts/verify_release_manifest.py` on the merged release manifest (also checks debuggable, cleartext, backup and exported components).
+- Verify export and deletion fulfillment end-to-end in production, incident response, staff access review, and processor (DPA) agreements.
+- On any material policy change, bump `CONSENT_VERSION` (`NirogModels.kt`) together with the hosted pages. See `docs/DPDP_COMPLIANCE.md` for the full obligation map.
 
 ## Device acceptance
 
@@ -22,8 +27,7 @@
 - All 86 screen routes at 390×844, small Android, tablet, font scale 1.3, dark system bars, TalkBack, Hindi text expansion, offline/reconnect, and process death.
 - Sugar/BP caution thresholds reviewed and signed off by a qualified clinician.
 - Private uploads cannot be accessed by another user or an unassigned expert.
-- Consultation payment/webhook idempotency, refund, reschedule, and failure recovery.
-- Order stock transaction, payment idempotency, cancellation, refund, and delivery updates.
+- Consultation requests (no payment in the app): request -> "waiting" -> confirmed in the console -> push + 1-hour reminder -> reschedule/decline/cancel; Plans & guidance from the coach; Data Controls (export, schedule/cancel deletion). Payments, a store and refunds are out of scope for v1.
 - Notification quiet hours, permissions, per-day cap, timezone, and medication safety copy.
 
 ## Play Console

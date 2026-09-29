@@ -7,8 +7,16 @@ on:
   # exactly the kind of manual step that silently stops happening. This is
   # the same gap (and same fix) as build-firebase-debug-apk.yml's push
   # trigger: deploy automatically the moment backend code actually changes.
+  #
+  # Production deploys ONLY from main. Feature branches used to deploy here
+  # too, which meant whichever branch pushed last silently overwrote
+  # production (Sep 2026 audit: live rules came from main while live
+  # functions came from a feature branch, re-opening a fixed security hole).
+  # Work on a branch is validated by ci.yml (rules emulator tests, functions
+  # build, console build) and reaches production by merging to main. A
+  # manual workflow_dispatch run remains available for emergencies.
   push:
-    branches: [main, 'claude/**']
+    branches: [main]
     paths:
       - 'firebase/**'
       - '.github/workflows/deploy-firebase.yml'
@@ -65,7 +73,63 @@ jobs:
           VITE_FIREBASE_MESSAGING_SENDER_ID: "126409331898"
           VITE_FIREBASE_APP_ID: "1:126409331898:web:62ba9137dd9781f0009e83"
         run: npm ci && npm run build
-      - name: Deploy rules, indexes, storage, functions, and hosting
+      # Split into two deploys on purpose:
+      #  1. firestore/storage/hosting WITHOUT --force. --force on a Firestore
+      #     deploy would DELETE any composite index present in the project but
+      #     missing from firestore.indexes.json - which could silently drop a
+      #     manually-created index the app depends on. Never force-delete
+      #     indexes; a missing one is added to the file, not pruned live.
+      #  2. functions WITH --force, so it can prune functions removed from
+      #     source (e.g. the long-renamed onAnnouncementCreate) instead of
+      #     aborting in non-interactive mode.
+      # Public invocation for callables is guaranteed by the dedicated step
+      # after this one, not left to firebase-tools (see its comment).
+      - name: Deploy Firestore rules, indexes, Storage rules, and Hosting
         env:
           PROJECT_ID: ${{ inputs.project_id || 'nirog-bhumi-app' }}
-        run: npx --yes firebase-tools@latest deploy --project "$PROJECT_ID" --only firestore,storage,functions,hosting --non-interactive
+        run: npx --yes firebase-tools@latest deploy --project "$PROJECT_ID" --only firestore,storage,hosting --non-interactive
+      - name: Deploy Cloud Functions
+        env:
+          PROJECT_ID: ${{ inputs.project_id || 'nirog-bhumi-app' }}
+        run: npx --yes firebase-tools@latest deploy --project "$PROJECT_ID" --only functions --non-interactive --force
+      # Callable functions are invoked directly over HTTPS by the app and the
+      # console, so each one's Cloud Run service must grant allUsers the
+      # run.invoker role (identity is then enforced INSIDE the function by
+      # Firebase Auth - requireUser() - not by Cloud Run IAM).
+      # firebase-tools only attempts this binding once, when a function is
+      # first created, and never retries if that attempt failed. That is how
+      # 13 callables ended up rejecting every request with 401/403, which the
+      # Firebase SDK reports as "UNAUTHENTICATED"/"PERMISSION_DENIED" even for
+      # signed-in admins (campaigns, add staff, enroll, invites, bulk import,
+      # program join). Re-applying it on every deploy is idempotent and makes
+      # the fleet self-heal.
+      # If this step fails with a "domain restricted sharing" /
+      # iam.allowedPolicyMemberDomains error, the project's organization
+      # policy is blocking public invokers - an owner-only fix, see
+      # docs/deploy-wif-setup.md ("Known issue: callable invoker").
+      - uses: google-github-actions/setup-gcloud@v2
+        if: ${{ !cancelled() }}
+      - name: Ensure public invoker on every callable function
+        if: ${{ !cancelled() }}
+        working-directory: firebase/functions
+        env:
+          PROJECT_ID: ${{ inputs.project_id || 'nirog-bhumi-app' }}
+          REGION: asia-south1
+        run: |
+          set -uo pipefail
+          failed=()
+          for fn in $(node scripts/list-callables.mjs); do
+            if out=$(gcloud functions add-invoker-policy-binding "$fn" \
+                  --project "$PROJECT_ID" --region "$REGION" \
+                  --member=allUsers --quiet 2>&1); then
+              echo "ok      $fn"
+            else
+              echo "FAILED  $fn"
+              echo "$out" | sed 's/^/        /'
+              failed+=("$fn")
+            fi
+          done
+          if [ ${#failed[@]} -gt 0 ]; then
+            echo "::error title=Callable functions not publicly invokable::${failed[*]} - the app/console will get UNAUTHENTICATED for these. If the error mentions iam.allowedPolicyMemberDomains, an org admin must allow allUsers for this project (docs/deploy-wif-setup.md)."
+            exit 1
+          fi

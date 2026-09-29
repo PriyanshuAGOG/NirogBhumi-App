@@ -29,7 +29,6 @@ class HealthConnectManager(private val context: Context, private val repository:
             HealthPermission.getReadPermission(StepsRecord::class),
             HealthPermission.getReadPermission(SleepSessionRecord::class),
             HealthPermission.getReadPermission(WeightRecord::class),
-            HealthPermission.getReadPermission(HeartRateRecord::class),
             HealthPermission.getReadPermission(BloodGlucoseRecord::class),
             HealthPermission.getReadPermission(BloodPressureRecord::class)
         )

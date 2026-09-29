@@ -49,7 +49,10 @@ import androidx.health.connect.client.PermissionController
 import com.nirogbhumi.app.health.HealthConnectManager
 import com.nirogbhumi.app.health.HealthConnectStatus
 import com.nirogbhumi.app.health.computeSleepGlucoseInsight
+import com.nirogbhumi.app.health.computeMedicationGlucoseInsight
+import com.nirogbhumi.app.health.computeMealTimingInsight
 import com.nirogbhumi.app.ui.NirogState
+import com.nirogbhumi.app.ui.CONSENT_VERSION
 import com.nirogbhumi.app.ui.canManageProgram
 import com.nirogbhumi.app.ui.SugarLog
 import com.nirogbhumi.app.ui.components.NirogCard
@@ -64,7 +67,9 @@ import kotlinx.coroutines.launch
 @Composable
 fun BloodSugarDetailScreen(state: NirogState) {
     DisposableEffect(Unit) {
-        val subscription = state.repository.listenUserCollection("glucoseReadings", 30, orderByField = "measuredAt", descending = true) { result ->
+        // 180, not 30 - a 90-day trend chart needs enough history even for
+        // members logging fasting+post-meal readings most days.
+        val subscription = state.repository.listenUserCollection("glucoseReadings", 180, orderByField = "measuredAt", descending = true) { result ->
             when (result) {
                 is com.nirogbhumi.app.data.CloudResult.Success -> {
                     val synced = result.value.mapIndexedNotNull { index, doc ->
@@ -80,7 +85,7 @@ fun BloodSugarDetailScreen(state: NirogState) {
                             java.text.SimpleDateFormat("MMM d, h:mm a", java.util.Locale.getDefault()).format(it)
                         } ?: "Synced"
                         val status = if (value > 130) "High" else if (value < 80) "Low" else "Normal"
-                        SugarLog(index + 1, value, type, time, status)
+                        SugarLog(index + 1, value, type, time, status, measuredAtMillis = timestamp?.toDate()?.time ?: System.currentTimeMillis())
                     }
                     if (synced.isNotEmpty()) {
                         state.sugarLogs.clear()
@@ -162,83 +167,10 @@ fun BloodSugarDetailScreen(state: NirogState) {
                 }
             }
 
-            // Trend chart built from real logged readings
+            // Trend chart built from real logged readings - shared 7/30/90-day
+            // range chart with BP/Sleep Overview (OverviewScreens.kt).
             Text("Recent Trend", fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
-
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.3f), shape = RoundedCornerShape(20.dp)),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                shape = RoundedCornerShape(20.dp)
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    val points = state.sugarLogs.take(7).reversed()
-                    if (points.size < 2) {
-                        Text(
-                            "Log at least 2 readings to see a trend line here.",
-                            fontSize = 13.sp,
-                            color = Color(0xFF737972),
-                            modifier = Modifier.padding(vertical = 24.dp)
-                        )
-                    } else {
-                        Canvas(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(140.dp)
-                        ) {
-                            val stepX = size.width / (points.size - 1)
-                            val maxY = (points.maxOf { it.value } + 10).toFloat()
-                            val minY = (points.minOf { it.value } - 10).coerceAtLeast(0).toFloat()
-                            val heightRange = (maxY - minY).coerceAtLeast(1f)
-
-                            val safeMinY = size.height - ((100f - minY) / heightRange * size.height)
-                            val safeMaxY = size.height - ((140f - minY) / heightRange * size.height)
-
-                            drawRect(
-                                color = Color(0xFFE5F1E2).copy(alpha = 0.5f),
-                                topLeft = androidx.compose.ui.geometry.Offset(0f, safeMaxY.coerceIn(0f, size.height)),
-                                size = androidx.compose.ui.geometry.Size(size.width, (safeMinY - safeMaxY).coerceIn(0f, size.height))
-                            )
-
-                            var lastX = 0f
-                            var lastY = 0f
-                            points.forEachIndexed { i, log ->
-                                val x = i * stepX
-                                val fraction = (log.value - minY) / heightRange
-                                val y = size.height - (fraction * size.height)
-
-                                drawCircle(color = Color(0xFF1B3221), radius = 4.dp.toPx(), center = androidx.compose.ui.geometry.Offset(x, y))
-
-                                if (i > 0) {
-                                    drawLine(
-                                        color = Color(0xFF1B3221),
-                                        start = androidx.compose.ui.geometry.Offset(lastX, lastY),
-                                        end = androidx.compose.ui.geometry.Offset(x, y),
-                                        strokeWidth = 2.dp.toPx()
-                                    )
-                                }
-                                lastX = x
-                                lastY = y
-                            }
-                        }
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            points.forEachIndexed { i, log ->
-                                Text(
-                                    log.type.take(4),
-                                    fontSize = 10.sp,
-                                    fontWeight = if (i == points.size - 1) FontWeight.Bold else FontWeight.Normal,
-                                    color = if (i == points.size - 1) Color(0xFF1B3221) else Color(0xFF737972)
-                                )
-                            }
-                        }
-                    }
-                }
-            }
+            RangeTrendChart(state.sugarLogs.map { it.measuredAtMillis to it.value.toFloat() }, "sugar")
 
             // High/Normal History Rows List
             Text("Logged History", fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
@@ -790,6 +722,7 @@ fun ActiveJourneyScreen(state: NirogState) {
 fun InsightDetailScreen(state: NirogState) {
     var sleepLogs by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>>(emptyList()) }
     var glucoseReadings by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>>(emptyList()) }
+    var medicationLogs by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>>(emptyList()) }
     DisposableEffect(state.repository.userId) {
         val sleepSub = state.repository.listenUserCollection("sleepLogs", limit = 60, orderByField = "createdAt", descending = true) { result ->
             if (result is CloudResult.Success) sleepLogs = result.value
@@ -797,9 +730,14 @@ fun InsightDetailScreen(state: NirogState) {
         val glucoseSub = state.repository.listenUserCollection("glucoseReadings", limit = 60, orderByField = "measuredAt", descending = true) { result ->
             if (result is CloudResult.Success) glucoseReadings = result.value
         }
-        onDispose { sleepSub.cancel(); glucoseSub.cancel() }
+        val medicationSub = state.repository.listenUserCollection("medicationLogs", limit = 60, orderByField = "measuredAt", descending = true) { result ->
+            if (result is CloudResult.Success) medicationLogs = result.value
+        }
+        onDispose { sleepSub.cancel(); glucoseSub.cancel(); medicationSub.cancel() }
     }
     val insight = remember(sleepLogs, glucoseReadings) { computeSleepGlucoseInsight(sleepLogs, glucoseReadings) }
+    val medicationInsight = remember(medicationLogs, glucoseReadings) { computeMedicationGlucoseInsight(medicationLogs, glucoseReadings) }
+    val mealInsight = remember(glucoseReadings) { computeMealTimingInsight(glucoseReadings) }
 
     Column(
         modifier = Modifier
@@ -874,6 +812,88 @@ fun InsightDetailScreen(state: NirogState) {
                             fontSize = 13.sp,
                             color = Color(0xFF737972),
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                    }
+                }
+            }
+
+            Divider(color = Color(0xFFC3C8C0).copy(alpha = 0.3f))
+
+            Text("How medication adherence can affect fasting sugar", fontSize = 22.sp, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+            Text(
+                "Missing a dose can show up as higher fasting sugar the same day. Keep logging both medication and sugar readings on the same days to see your own comparison here.",
+                fontSize = 14.sp, color = Color(0xFF434842), lineHeight = 20.sp
+            )
+            if (medicationInsight != null) {
+                Card(
+                    modifier = Modifier.fillMaxWidth().border(width = 0.5.dp, color = Color(0xFF9CB79F).copy(alpha = 0.3f), shape = RoundedCornerShape(20.dp)),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFF4E9D3)),
+                    shape = RoundedCornerShape(20.dp)
+                ) {
+                    Column(modifier = Modifier.padding(20.dp)) {
+                        Text("YOUR OWN DATA", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFFB9832B))
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            "Fasting sugar has averaged %.0f mg/dL on days you took your medication (%d logged) vs %.0f mg/dL on days it was missed (%d logged).".format(
+                                medicationInsight.takenAvg, medicationInsight.takenDays, medicationInsight.missedAvg, medicationInsight.missedDays
+                            ),
+                            fontSize = 14.sp, color = Color(0xFF4B3B1B), lineHeight = 20.sp,
+                        )
+                    }
+                }
+            } else {
+                Card(
+                    modifier = Modifier.fillMaxWidth().border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.35f), shape = RoundedCornerShape(20.dp)),
+                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    shape = RoundedCornerShape(20.dp)
+                ) {
+                    Column(modifier = Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Filled.Insights, contentDescription = null, tint = Color(0xFF9CB79F), modifier = Modifier.size(28.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            "Not enough logged medication + sugar days yet for your personal comparison.",
+                            fontSize = 13.sp, color = Color(0xFF737972), textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                    }
+                }
+            }
+
+            Divider(color = Color(0xFFC3C8C0).copy(alpha = 0.3f))
+
+            Text("How meal timing can affect post-meal sugar", fontSize = 22.sp, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+            Text(
+                "There's no single meal that always runs higher for everyone - it depends on what and when you eat. Keep logging post-meal readings across breakfast, lunch, and dinner to see if one of yours stands out.",
+                fontSize = 14.sp, color = Color(0xFF434842), lineHeight = 20.sp
+            )
+            if (mealInsight != null) {
+                Card(
+                    modifier = Modifier.fillMaxWidth().border(width = 0.5.dp, color = Color(0xFF9CB79F).copy(alpha = 0.3f), shape = RoundedCornerShape(20.dp)),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFF4E9D3)),
+                    shape = RoundedCornerShape(20.dp)
+                ) {
+                    Column(modifier = Modifier.padding(20.dp)) {
+                        Text("YOUR OWN DATA", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFFB9832B))
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            "Your post-${mealInsight.mealLabel.lowercase()} sugar has averaged %.0f mg/dL (%d readings), higher than after your other meals (%.0f mg/dL).".format(
+                                mealInsight.mealAvg, mealInsight.mealCount, mealInsight.otherAvg
+                            ),
+                            fontSize = 14.sp, color = Color(0xFF4B3B1B), lineHeight = 20.sp,
+                        )
+                    }
+                }
+            } else {
+                Card(
+                    modifier = Modifier.fillMaxWidth().border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.35f), shape = RoundedCornerShape(20.dp)),
+                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    shape = RoundedCornerShape(20.dp)
+                ) {
+                    Column(modifier = Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Filled.Insights, contentDescription = null, tint = Color(0xFF9CB79F), modifier = Modifier.size(28.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            "Not enough post-meal readings logged across different meals yet for your personal comparison.",
+                            fontSize = 13.sp, color = Color(0xFF737972), textAlign = androidx.compose.ui.text.style.TextAlign.Center
                         )
                     }
                 }
@@ -1265,12 +1285,45 @@ fun ProfileScreen(state: NirogState) {
             }
         }
 
+        // Shown only for members who tapped "Skip" on HealthProfileSetupScreen
+        // during onboarding - healthProfileCompleted only ever becomes true
+        // through that screen's actual Continue button, never implied by the
+        // (also-legitimate) skip-time default values themselves.
+        if (!state.healthProfileCompleted) {
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp)
+                    .clickable {
+                        state.healthProfileReturnRoute = "profile"
+                        state.currentScreen = "health_profile_setup"
+                    },
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFEBF3EC)),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.MedicalInformation, contentDescription = null, tint = Color(0xFF3F7D58), modifier = Modifier.size(22.dp))
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Complete your health profile", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFF1B2219))
+                        Text("Helps us personalize your reminders and insights - takes under a minute.", fontSize = 12.sp, color = Color(0xFF526057), lineHeight = 16.sp)
+                    }
+                    Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Color(0xFF3F7D58))
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+
         Spacer(modifier = Modifier.height(8.dp))
 
         SettingsSection(title = "Account") {
             SettingsRow(Icons.Filled.Person, "Personal details") { state.currentScreen = "profile_edit" }
             SettingsRow(Icons.Filled.FamilyRestroom, "Family profiles") { state.currentScreen = "family_profiles" }
             SettingsRow(Icons.Filled.Devices, "Devices & sync") { state.currentScreen = "device_hub" }
+            if (com.nirogbhumi.app.widget.isPinWidgetSupported(context)) {
+                SettingsRow(Icons.Filled.Widgets, "Add home screen widget", showDivider = false) {
+                    val sent = com.nirogbhumi.app.widget.requestPinQuickLogWidget(context)
+                    state.cloudMessage = if (sent) "Check your home screen to place the widget." else "Couldn't start the widget request - try long-pressing your home screen instead."
+                }
+            }
         }
 
         SettingsSection(title = "Activity") {
@@ -1280,32 +1333,39 @@ fun ProfileScreen(state: NirogState) {
         SettingsSection(title = "Notifications & Privacy") {
             SettingsRow(Icons.Filled.Notifications, "Notification settings") { state.currentScreen = "notification_settings" }
             SettingsRow(Icons.Filled.Shield, "Privacy & consent") { state.currentScreen = "privacy_consent" }
-            SettingsRow(Icons.Filled.DownloadForOffline, "Export or anonymize my data") { state.currentScreen = "data_controls" }
+            SettingsRow(Icons.Filled.DownloadForOffline, "Export or delete my data") { state.currentScreen = "data_controls" }
         }
 
         SettingsSection(title = "Support") {
             SettingsRow(Icons.Filled.HelpOutline, "Help & support") { state.currentScreen = "support" }
-            SettingsRow(Icons.Filled.Description, "Legal & policies") { state.currentScreen = "legal_center" }
-            SettingsRow(Icons.Filled.SystemUpdate, "Check for updates", showDivider = false) {
-                if (checkingUpdate) return@SettingsRow
-                checkingUpdate = true
-                val activity = context as? android.app.Activity
-                if (activity == null) {
-                    checkingUpdate = false
-                    updateCheckMessage = "Couldn't check for updates right now."
-                    return@SettingsRow
+            // "Check for updates" is the tester (Firebase App Distribution)
+            // channel only - shown in the debug build, hidden in the Play
+            // release where Google Play itself owns updates. Keeping the row
+            // out of the Play build (rather than letting it no-op) avoids
+            // Device & Network Abuse policy risk and a dead, confusing control.
+            SettingsRow(Icons.Filled.Description, "Legal & policies", showDivider = com.nirogbhumi.app.BuildConfig.DEBUG) { state.currentScreen = "legal_center" }
+            if (com.nirogbhumi.app.BuildConfig.DEBUG) {
+                SettingsRow(Icons.Filled.SystemUpdate, "Check for updates", showDivider = false) {
+                    if (checkingUpdate) return@SettingsRow
+                    checkingUpdate = true
+                    val activity = context as? android.app.Activity
+                    if (activity == null) {
+                        checkingUpdate = false
+                        updateCheckMessage = "Couldn't check for updates right now."
+                        return@SettingsRow
+                    }
+                    com.google.firebase.appdistribution.FirebaseAppDistribution.getInstance()
+                        .updateIfNewReleaseAvailable()
+                        .addOnSuccessListener {
+                            checkingUpdate = false
+                            updateCheckMessage = "You're on the latest build available to testers."
+                        }
+                        .addOnFailureListener { error ->
+                            checkingUpdate = false
+                            updateCheckMessage = "Update check failed: ${error.message ?: "unknown error"}. " +
+                                "If this is your first check, you may need to sign in as a tester in the browser tab that just opened."
+                        }
                 }
-                com.google.firebase.appdistribution.FirebaseAppDistribution.getInstance()
-                    .updateIfNewReleaseAvailable()
-                    .addOnSuccessListener {
-                        checkingUpdate = false
-                        updateCheckMessage = "You're on the latest build available to testers."
-                    }
-                    .addOnFailureListener { error ->
-                        checkingUpdate = false
-                        updateCheckMessage = "Update check failed: ${error.message ?: "unknown error"}. " +
-                            "If this is your first check, you may need to sign in as a tester in the browser tab that just opened."
-                    }
             }
         }
 
@@ -1462,40 +1522,45 @@ fun DeveloperSettingsScreen(state: NirogState) {
             }
         }
 
-        SettingsSection(title = "Updates") {
-            DeveloperInfoRow(
-                "Last checked",
-                if (lastCheckMillis > 0) android.text.format.DateUtils.getRelativeTimeSpanString(lastCheckMillis).toString() else "Never",
-            )
-            SettingsRow(
-                Icons.Filled.Refresh,
-                if (state.updateCheckBusy) "Checking…" else "Check for updates",
-                showDivider = state.availableUpdate != null || state.updateCheckError.isNotBlank(),
-            ) {
-                if (state.updateCheckBusy) return@SettingsRow
-                coroutineScope.launch {
-                    state.updateCheckBusy = true
-                    val result = com.nirogbhumi.app.update.UpdateManager.checkNow(context, currentVersionCode)
-                    state.updateCheckBusy = false
-                    lastCheckMillis = com.nirogbhumi.app.update.UpdatePrefs.lastCheckAtMillis(context)
-                    result.onSuccess { info ->
-                        state.updateCheckError = ""
-                        if (info != null) state.availableUpdate = info
-                    }.onFailure {
-                        state.updateCheckError = it.message ?: "Couldn't check for updates"
+        // The in-app self-update section is the tester (App Distribution)
+        // channel and is compiled out of the Play/release build - Play owns
+        // updates there, and UpdateManager.checkNow no-ops in release anyway.
+        if (com.nirogbhumi.app.BuildConfig.DEBUG) {
+            SettingsSection(title = "Updates") {
+                DeveloperInfoRow(
+                    "Last checked",
+                    if (lastCheckMillis > 0) android.text.format.DateUtils.getRelativeTimeSpanString(lastCheckMillis).toString() else "Never",
+                )
+                SettingsRow(
+                    Icons.Filled.Refresh,
+                    if (state.updateCheckBusy) "Checking…" else "Check for updates",
+                    showDivider = state.availableUpdate != null || state.updateCheckError.isNotBlank(),
+                ) {
+                    if (state.updateCheckBusy) return@SettingsRow
+                    coroutineScope.launch {
+                        state.updateCheckBusy = true
+                        val result = com.nirogbhumi.app.update.UpdateManager.checkNow(context, currentVersionCode)
+                        state.updateCheckBusy = false
+                        lastCheckMillis = com.nirogbhumi.app.update.UpdatePrefs.lastCheckAtMillis(context)
+                        result.onSuccess { info ->
+                            state.updateCheckError = ""
+                            if (info != null) state.availableUpdate = info
+                        }.onFailure {
+                            state.updateCheckError = it.message ?: "Couldn't check for updates"
+                        }
                     }
                 }
-            }
-            if (state.updateCheckError.isNotBlank()) {
-                Text(
-                    state.updateCheckError,
-                    fontSize = 12.sp,
-                    color = Color(0xFF8B2E2E),
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                )
-            } else if (state.availableUpdate != null) {
-                SettingsRow(Icons.Filled.Description, "View release notes", showDivider = false) {
-                    showReleaseNotes = true
+                if (state.updateCheckError.isNotBlank()) {
+                    Text(
+                        state.updateCheckError,
+                        fontSize = 12.sp,
+                        color = Color(0xFF8B2E2E),
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    )
+                } else if (state.availableUpdate != null) {
+                    SettingsRow(Icons.Filled.Description, "View release notes", showDivider = false) {
+                        showReleaseNotes = true
+                    }
                 }
             }
         }
@@ -1644,18 +1709,10 @@ fun ProfileEditScreen(state: NirogState) {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         OutlinedTextField(
                             value = editAge,
-                            onValueChange = { editAge = it },
+                            onValueChange = { editAge = com.nirogbhumi.app.ui.ProfileValidation.numericOnly(it, allowDecimal = false) },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             label = { Text("Age", color = Color(0xFF1B3221).copy(alpha = 0.7f)) },
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = Color(0xFF314936),
-                                unfocusedBorderColor = Color(0xFFD8D0C0)
-                            ),
-                            modifier = Modifier.weight(1f)
-                        )
-                        OutlinedTextField(
-                            value = editGender,
-                            onValueChange = { editGender = it },
-                            label = { Text("Gender", color = Color(0xFF1B3221).copy(alpha = 0.7f)) },
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedBorderColor = Color(0xFF314936),
                                 unfocusedBorderColor = Color(0xFFD8D0C0)
@@ -1664,10 +1721,26 @@ fun ProfileEditScreen(state: NirogState) {
                         )
                     }
 
+                    Text("Gender", fontSize = 12.sp, color = Color(0xFF1B3221).copy(alpha = 0.7f), fontWeight = FontWeight.SemiBold)
+                    Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        com.nirogbhumi.app.ui.ProfileValidation.GENDER_OPTIONS.forEach { option ->
+                            val selected = editGender == option
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(if (selected) Color(0xFF314936) else Color(0xFFEFE9DA))
+                                    .clickable { editGender = if (selected) "" else option }
+                                    .padding(horizontal = 14.dp, vertical = 9.dp)
+                            ) { Text(option, color = if (selected) Color.White else Color(0xFF1B2219), fontWeight = FontWeight.Bold, fontSize = 12.sp) }
+                        }
+                    }
+
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         OutlinedTextField(
                             value = editHeight,
-                            onValueChange = { editHeight = it },
+                            onValueChange = { editHeight = com.nirogbhumi.app.ui.ProfileValidation.numericOnly(it, allowDecimal = true) },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                             label = { Text("Height (cm)", color = Color(0xFF1B3221).copy(alpha = 0.7f)) },
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedBorderColor = Color(0xFF314936),
@@ -1677,7 +1750,9 @@ fun ProfileEditScreen(state: NirogState) {
                         )
                         OutlinedTextField(
                             value = editWeight,
-                            onValueChange = { editWeight = it },
+                            onValueChange = { editWeight = com.nirogbhumi.app.ui.ProfileValidation.numericOnly(it, allowDecimal = true) },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                             label = { Text("Weight (kg)", color = Color(0xFF1B3221).copy(alpha = 0.7f)) },
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedBorderColor = Color(0xFF314936),
@@ -1866,6 +1941,7 @@ fun ProfileEditScreen(state: NirogState) {
             Button(
                 onClick = {
                     if (editName.isBlank()) { state.cloudMessage = "Name cannot be empty"; return@Button }
+                    com.nirogbhumi.app.ui.ProfileValidation.validate(editAge, editWeight, editHeight)?.let { state.cloudMessage = it; return@Button }
                     state.profileName = editName
                     state.profileAge = editAge
                     state.profileGender = editGender
@@ -2094,13 +2170,29 @@ fun FamilyProfilesScreen(state: NirogState) {
                             }
                         }
                     }
+                    // DPDP Act 2023 s.9: a child's (under-18) data may be processed
+                    // only with verifiable parental/guardian consent, and never for
+                    // tracking or targeted advertising. When the entered age is under
+                    // 18 we ask specifically for guardian consent and record it.
+                    val isMinor = age.toIntOrNull()?.let { it in 1..17 } == true
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { consented = !consented }) {
                         Checkbox(checked = consented, onCheckedChange = { consented = it }, colors = CheckboxDefaults.colors(checkedColor = Color(0xFF314936)))
-                        Text("I have permission to manage this profile", fontSize = 12.5.sp, color = Color(0xFF434842))
+                        Text(
+                            if (isMinor) "I am the parent or lawful guardian of this child and consent to managing their health data."
+                            else "I have permission to manage this profile",
+                            fontSize = 12.5.sp, color = Color(0xFF434842)
+                        )
+                    }
+                    if (isMinor) {
+                        Text(
+                            "For under-18 profiles we never use the data for tracking or advertising.",
+                            fontSize = 11.sp, color = Color(0xFF697169)
+                        )
                     }
                 }
             },
             confirmButton = {
+                val isMinor = age.toIntOrNull()?.let { it in 1..17 } == true
                 Button(
                     enabled = !saving && name.isNotBlank() && consented,
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF314936)),
@@ -2111,7 +2203,10 @@ fun FamilyProfilesScreen(state: NirogState) {
                             "relationship" to relationship.trim().ifBlank { null },
                             "age" to age.toIntOrNull(),
                             "city" to city.trim().ifBlank { null },
-                            "selection" to diabetesStatus
+                            "selection" to diabetesStatus,
+                            "isMinor" to isMinor,
+                            "guardianConsent" to true,
+                            "guardianConsentAt" to com.google.firebase.firestore.FieldValue.serverTimestamp()
                         )) { result ->
                             saving = false
                             if (result is com.nirogbhumi.app.data.CloudResult.Success) showAdd = false
@@ -2383,29 +2478,37 @@ fun relativeTimeLabel(date: java.util.Date): String {
     }
 }
 
-// Data export & anonymization - both real, backed by the same Cloud
-// Functions/Firestore request-queue path (requestDataExport/
-// requestAccountDeletion -> dataExportRequests/deletionRequests, processed by
-// existing scheduled Functions) rather than a generic form that goes nowhere.
-// This used to be a full erase-everything account deletion. It's now an
-// anonymization: identifying info (name, contact, profile, uploaded files,
-// consultations) is permanently removed, but health readings themselves
-// (sugar, BP, sleep, walks, weight, medications) are kept with every link
-// back to the person stripped out - see processApprovedDeletions in
-// firebase/functions/src/index.ts for exactly what happens to each
-// collection. The client-facing name/copy changed to "anonymize" to match;
-// the underlying request-queue collection name is unchanged.
+// Data export & account deletion - both real, and both go through Cloud
+// Functions (requestDataExport / requestAccountDeletion), which rate-limit and
+// queue the work. Deletion is scheduled for 7 days out so an accidental tap or
+// a borrowed phone can't destroy an account instantly, and can be cancelled in
+// that window; after that it runs automatically. Everything that identifies the
+// member is erased. Health readings are erased too unless the member opted in
+// to anonymized research in Privacy & consent, in which case they stay with
+// every link back to the person removed. See
+// firebase/functions/src/accountDeletion.ts for exactly what happens to each
+// collection.
 @Composable
 fun DataControlsScreen(state: NirogState) {
     var exporting by remember { mutableStateOf(false) }
     var exportRequested by remember { mutableStateOf(false) }
     var confirmingDelete by remember { mutableStateOf(false) }
-    var deleting by remember { mutableStateOf(false) }
-    var deletionRequested by remember { mutableStateOf(false) }
-    var showAnonymizeExplainer by remember { mutableStateOf(false) }
+    var busy by remember { mutableStateOf(false) }
+    var showDeletionExplainer by remember { mutableStateOf(false) }
+    // null = none pending (or not loaded yet); otherwise the epoch millis the deletion will run at.
+    var scheduledForMillis by remember { mutableStateOf<Long?>(null) }
+    var statusLoaded by remember { mutableStateOf(false) }
 
-    Column(modifier = Modifier.fillMaxSize().background(Color(0xFFF8F6EF))) {
-        DetailScreenHeader("Export or anonymize my data", onBack = { state.currentScreen = "profile" })
+    LaunchedEffect(Unit) {
+        state.repository.getPendingAccountDeletion { result ->
+            statusLoaded = true
+            if (result is CloudResult.Success) scheduledForMillis = result.value
+        }
+    }
+    val dateLabel = scheduledForMillis?.let { java.text.SimpleDateFormat("d MMMM yyyy", java.util.Locale.getDefault()).format(java.util.Date(it)) }
+
+    Column(modifier = Modifier.fillMaxSize().background(Color(0xFFF8F6EF)).verticalScroll(rememberScrollState())) {
+        DetailScreenHeader("Export or delete my data", onBack = { state.currentScreen = "profile" })
         Column(modifier = Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -2419,7 +2522,7 @@ fun DataControlsScreen(state: NirogState) {
                     Text("Export your data", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF1B3221))
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        "A copy of everything you've logged - readings, reports, program activity - as a file you can keep or share with a doctor.",
+                        "A copy of everything you've logged - readings, reports, chats with your coach, program activity - as a file you can keep or share with a doctor.",
                         fontSize = 13.sp, color = Color(0xFF697169), lineHeight = 18.sp
                     )
                     Spacer(modifier = Modifier.height(14.dp))
@@ -2436,8 +2539,8 @@ fun DataControlsScreen(state: NirogState) {
                                 exporting = true
                                 state.repository.requestDataExport { result ->
                                     exporting = false
-                                    if (result is com.nirogbhumi.app.data.CloudResult.Success) exportRequested = true
-                                    else state.cloudMessage = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
+                                    if (result is CloudResult.Success) exportRequested = true
+                                    else state.cloudMessage = (result as CloudResult.Failure).message
                                 }
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF314936)),
@@ -2455,29 +2558,46 @@ fun DataControlsScreen(state: NirogState) {
                 Column(modifier = Modifier.padding(20.dp)) {
                     Icon(Icons.Filled.DeleteForever, contentDescription = null, tint = Color(0xFFB4472F))
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text("Anonymize my account", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF7B332E))
+                    Text("Delete my account", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF7B332E))
                     Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        "Removes your name, contact details, and login access after identity verification. Your health readings stay on file with no link back to you - see what that means below. This can't be undone.",
-                        fontSize = 13.sp, color = Color(0xFF7B332E), lineHeight = 18.sp
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    TextButton(
-                        onClick = { showAnonymizeExplainer = true },
-                        contentPadding = PaddingValues(0.dp),
-                        modifier = Modifier.height(28.dp)
-                    ) {
-                        Text("What does anonymizing mean?", fontSize = 12.5.sp, fontWeight = FontWeight.Bold, color = Color(0xFF7B332E), textDecoration = TextDecoration.Underline)
-                    }
-                    Spacer(modifier = Modifier.height(10.dp))
-                    if (deletionRequested) {
-                        Text("Anonymization requested - pending approval and identity verification.", fontSize = 13.sp, color = Color(0xFF7B332E), fontWeight = FontWeight.SemiBold)
+                    if (dateLabel != null) {
+                        Text(
+                            "Your account is scheduled to be permanently deleted on $dateLabel. Until then everything is still here and you can keep using the app.",
+                            fontSize = 13.sp, color = Color(0xFF7B332E), lineHeight = 18.sp, fontWeight = FontWeight.SemiBold
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Button(
+                            enabled = !busy,
+                            onClick = {
+                                busy = true
+                                state.repository.cancelAccountDeletion { result ->
+                                    busy = false
+                                    if (result is CloudResult.Success) { scheduledForMillis = null; state.cloudMessage = "Deletion cancelled - your account stays exactly as it was." }
+                                    else state.cloudMessage = (result as CloudResult.Failure).message
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF314936)),
+                            shape = RoundedCornerShape(20.dp)
+                        ) { Text(if (busy) "Cancelling..." else "Keep my account - cancel deletion", color = Color.White, fontWeight = FontWeight.Bold) }
                     } else {
+                        Text(
+                            "Permanently removes your account, name, contact details, reports, chats and login. You have 7 days to change your mind. This can't be undone afterwards.",
+                            fontSize = 13.sp, color = Color(0xFF7B332E), lineHeight = 18.sp
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        TextButton(
+                            onClick = { showDeletionExplainer = true },
+                            contentPadding = PaddingValues(0.dp),
+                            modifier = Modifier.height(28.dp)
+                        ) {
+                            Text("What exactly gets deleted?", fontSize = 12.5.sp, fontWeight = FontWeight.Bold, color = Color(0xFF7B332E), textDecoration = TextDecoration.Underline)
+                        }
+                        Spacer(modifier = Modifier.height(10.dp))
                         OutlinedButton(
-                            enabled = !deleting,
+                            enabled = !busy && statusLoaded,
                             onClick = { confirmingDelete = true },
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFB4472F))
-                        ) { Text("Request anonymization") }
+                        ) { Text("Delete my account") }
                     }
                 }
             }
@@ -2487,49 +2607,50 @@ fun DataControlsScreen(state: NirogState) {
 
     if (confirmingDelete) {
         AlertDialog(
-            onDismissRequest = { confirmingDelete = false },
-            title = { Text("Anonymize your account?", fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221)) },
-            text = { Text("Your name, contact details, and login access will be permanently removed after verification. Your health readings stay on file with no link back to you. This can't be undone.", fontSize = 13.sp, color = Color(0xFF434842)) },
+            onDismissRequest = { if (!busy) confirmingDelete = false },
+            title = { Text("Delete your account?", fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221)) },
+            text = { Text("In 7 days your account, name, contact details, uploaded reports, chats and login will be permanently deleted. You can cancel from this screen any time before then.", fontSize = 13.sp, color = Color(0xFF434842)) },
             confirmButton = {
                 Button(
+                    enabled = !busy,
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB4472F)),
                     onClick = {
-                        deleting = true
+                        busy = true
                         state.repository.requestAccountDeletion { result ->
-                            deleting = false
+                            busy = false
                             confirmingDelete = false
-                            if (result is com.nirogbhumi.app.data.CloudResult.Success) deletionRequested = true
-                            else state.cloudMessage = (result as com.nirogbhumi.app.data.CloudResult.Failure).message
+                            if (result is CloudResult.Success) scheduledForMillis = result.value
+                            else state.cloudMessage = (result as CloudResult.Failure).message
                         }
                     }
-                ) { Text("Anonymize my account", color = Color.White) }
+                ) { Text(if (busy) "Scheduling..." else "Delete my account", color = Color.White) }
             },
-            dismissButton = { TextButton(onClick = { confirmingDelete = false }) { Text("Cancel", color = Color(0xFF737972)) } }
+            dismissButton = { TextButton(enabled = !busy, onClick = { confirmingDelete = false }) { Text("Keep my account", color = Color(0xFF737972)) } }
         )
     }
 
-    if (showAnonymizeExplainer) {
+    if (showDeletionExplainer) {
         AlertDialog(
-            onDismissRequest = { showAnonymizeExplainer = false },
-            title = { Text("About anonymized health data", fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221)) },
+            onDismissRequest = { showDeletionExplainer = false },
+            title = { Text("What gets deleted", fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221)) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.verticalScroll(rememberScrollState())) {
                     Text(
-                        "When you anonymize your account, we permanently delete anything that identifies you - your name, email, phone number, profile, uploaded reports, and consultation history.",
+                        "Always deleted: your name, email, phone number, profile, family profiles, uploaded reports and photos, consultations, program activity, coach messages, chat messages and voice notes, support requests, notifications - and your login.",
                         fontSize = 13.sp, color = Color(0xFF434842), lineHeight = 18.sp
                     )
                     Text(
-                        "Your day-to-day health readings - blood sugar, blood pressure, sleep, walks, weight, medications - stay on file, but with every link back to you removed. No name, no contact info, nothing connecting a reading to a person.",
+                        "Your health readings (sugar, blood pressure, sleep, walks, weight, medications, check-ins) are deleted too - unless you've switched on \"Anonymized research\" in Privacy & consent. In that case they stay on file with every link back to you removed, and are only ever used in aggregate.",
                         fontSize = 13.sp, color = Color(0xFF434842), lineHeight = 18.sp
                     )
                     Text(
-                        "We use this anonymized data in aggregate - never about one specific person - to understand what habits and routines actually help people manage and reverse conditions like type-2 diabetes, and to keep improving the guidance Nirog Bhumi gives everyone.",
+                        "Kept only as the law requires: payment and invoice records (with your identity removed where possible) and security logs.",
                         fontSize = 13.sp, color = Color(0xFF434842), lineHeight = 18.sp
                     )
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showAnonymizeExplainer = false }) {
+                TextButton(onClick = { showDeletionExplainer = false }) {
                     Text("Got it", color = Color(0xFF314936), fontWeight = FontWeight.Bold)
                 }
             }
@@ -2549,6 +2670,26 @@ fun DataControlsScreen(state: NirogState) {
 @Composable
 fun PrivacyConsentScreen(state: NirogState) {
     var togglingExpertReview by remember { mutableStateOf(false) }
+    var togglingResearch by remember { mutableStateOf(false) }
+    var togglingMarketing by remember { mutableStateOf(false) }
+
+    // Shared handler for an optional consent toggle: optimistic UI, persist the
+    // single field on users/{uid}.consent, and write an immutable consent
+    // receipt capturing the change (DPDP: consent - and its withdrawal - is
+    // recorded and dated). Reverts the UI if the write fails.
+    fun toggleOptionalConsent(key: String, next: Boolean, setBusy: (Boolean) -> Unit, current: Boolean, apply: (Boolean) -> Unit) {
+        setBusy(true)
+        apply(next)
+        state.repository.saveProfile(mapOf("consent" to mapOf(key to next, "version" to CONSENT_VERSION))) { result ->
+            setBusy(false)
+            if (result is com.nirogbhumi.app.data.CloudResult.Failure) {
+                apply(current)
+                state.cloudMessage = result.message
+            } else {
+                state.repository.recordConsentReceipt(mapOf(key to next), CONSENT_VERSION) {}
+            }
+        }
+    }
 
     Column(modifier = Modifier.fillMaxSize().background(Color(0xFFF8F6EF))) {
         DetailScreenHeader("Privacy & consent", onBack = { state.currentScreen = "profile" })
@@ -2571,7 +2712,7 @@ fun PrivacyConsentScreen(state: NirogState) {
                 SectionLabel("Your consent")
                 ConsentRow(
                     title = "Health data storage",
-                    description = "Required to track your readings and reports. Withdraw by anonymizing your account.",
+                    description = "Required to track your readings and reports. Withdraw by deleting your account.",
                     granted = state.consentHealthData,
                     kind = ConsentKind.Required
                 )
@@ -2596,9 +2737,25 @@ fun PrivacyConsentScreen(state: NirogState) {
                 )
                 ConsentRow(
                     title = "Medical disclaimer acknowledgement",
-                    description = "You understand this app doesn't replace medical advice. Withdraw by anonymizing your account.",
+                    description = "You understand this app doesn't replace medical advice. Withdraw by deleting your account.",
                     granted = state.consentMedicalDisclaimer,
                     kind = ConsentKind.Required
+                )
+                ConsentRow(
+                    title = "Anonymized research",
+                    description = "Let us use your health data - with your name and contact permanently removed - in aggregate research to improve the program. Never about one person.",
+                    granted = state.consentResearch,
+                    kind = ConsentKind.Optional,
+                    busy = togglingResearch,
+                    onToggle = { next -> toggleOptionalConsent("research", next, { togglingResearch = it }, state.consentResearch) { state.consentResearch = it } }
+                )
+                ConsentRow(
+                    title = "Product updates",
+                    description = "Occasional messages about new features and health tips. Off by default; turn off any time.",
+                    granted = state.consentMarketing,
+                    kind = ConsentKind.Optional,
+                    busy = togglingMarketing,
+                    onToggle = { next -> toggleOptionalConsent("marketing", next, { togglingMarketing = it }, state.consentMarketing) { state.consentMarketing = it } }
                 )
             }
 
@@ -2614,7 +2771,7 @@ fun PrivacyConsentScreen(state: NirogState) {
                         Text("Anonymized data & research", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFF1B2219))
                     }
                     Text(
-                        "If you ever anonymize your account, your name and contact details are permanently deleted - but health readings (sugar, BP, sleep, walks, weight, medications) stay on file with no link back to you. We use this in aggregate, never about one person, to understand what actually helps people manage and reverse conditions like type-2 diabetes.",
+                        "If you delete your account while this is switched on, your name and contact details are permanently deleted - but your health readings (sugar, BP, sleep, walks, weight, medications) stay on file with no link back to you. If it is off, your readings are deleted too. We only ever use anonymized data in aggregate, never about one person.",
                         fontSize = 12.5.sp, color = Color(0xFF3F4A41), lineHeight = 18.sp
                     )
                     TextButton(
@@ -2632,7 +2789,7 @@ fun PrivacyConsentScreen(state: NirogState) {
                 LegalLinkRow("Privacy Policy", "What we collect and why") { state.legalInitialSection = "Privacy Policy"; state.legalReturnRoute = "privacy_consent"; state.currentScreen = "legal_center" }
                 LegalLinkRow("Terms of Use", "Your responsibilities using Nirog Bhumi") { state.legalInitialSection = "Terms of Use"; state.legalReturnRoute = "privacy_consent"; state.currentScreen = "legal_center" }
                 LegalLinkRow("Medical Disclaimer", "What this app is - and isn't") { state.legalInitialSection = "Medical Disclaimer"; state.legalReturnRoute = "privacy_consent"; state.currentScreen = "legal_center" }
-                LegalLinkRow("Data Deletion & Anonymization Policy", "What happens when you anonymize your account") { state.legalInitialSection = "Data Deletion Policy"; state.legalReturnRoute = "privacy_consent"; state.currentScreen = "legal_center" }
+                LegalLinkRow("Data Deletion Policy", "What happens when you delete your account") { state.legalInitialSection = "Data Deletion Policy"; state.legalReturnRoute = "privacy_consent"; state.currentScreen = "legal_center" }
                 LegalLinkRow("Program Terms", "What a Care+ program does and doesn't promise") { state.legalInitialSection = "Program Terms"; state.legalReturnRoute = "privacy_consent"; state.currentScreen = "legal_center" }
                 TextButton(onClick = { state.legalInitialSection = null; state.legalReturnRoute = "privacy_consent"; state.currentScreen = "legal_center" }) {
                     Text("See all legal documents", color = Color(0xFF314936), fontWeight = FontWeight.Bold, fontSize = 13.sp)
@@ -3202,6 +3359,15 @@ fun AnnouncementsScreen(state: NirogState) {
     var posting by remember { mutableStateOf(false) }
     var deletingId by remember { mutableStateOf("") }
     val canDelete = state.isAdmin || state.staffRole == "coach"
+    val isStaffViewer = state.canManageProgram(state.activeProgramId)
+    // "Seen by N": a coach can't tell from the member-facing fan-out doc alone
+    // whether an update actually landed - seenCount/recipientCount live only
+    // on the staff-readable master announcements/{id} doc (see
+    // markAnnouncementSeen/fetchAnnouncementMeta), fetched once per id here
+    // rather than a live listener since this is a glance-at stat, not
+    // something that needs to tick up in real time while the screen is open.
+    val alreadyMarkedSeen = remember { mutableSetOf<String>() }
+    var seenMetaByAnnouncementId by remember { mutableStateOf<Map<String, Pair<Int, Int>>>(emptyMap()) }
 
     DisposableEffect(Unit) {
         val subscription = state.repository.listenAnnouncements { result ->
@@ -3215,6 +3381,30 @@ fun AnnouncementsScreen(state: NirogState) {
         // for non-members - they have no roster doc to mark anyway).
         if (state.activeProgramId.isNotBlank()) state.repository.markProgramRead(state.activeProgramId, "lastReadAnnouncementsAt") {}
         onDispose { subscription.cancel() }
+    }
+
+    LaunchedEffect(records, isStaffViewer) {
+        val current = records ?: return@LaunchedEffect
+        if (isStaffViewer) {
+            // A coach viewing their own broadcast isn't "a member seeing it" -
+            // only fetch the count, never call markAnnouncementSeen below.
+            // Only an announcement's author (or an admin) may read its master doc -
+            // it lists every recipient - so don't ask for the count on anyone else's.
+            current.forEach { record ->
+                val mayReadMeta = state.isAdmin || (record.values["authorId"] as? String) == state.repository.userId
+                if (mayReadMeta && record.id !in seenMetaByAnnouncementId) {
+                    state.repository.fetchAnnouncementMeta(record.id) { result ->
+                        if (result is com.nirogbhumi.app.data.CloudResult.Success) {
+                            seenMetaByAnnouncementId = seenMetaByAnnouncementId + (record.id to result.value)
+                        }
+                    }
+                }
+            }
+        } else {
+            current.forEach { record ->
+                if (alreadyMarkedSeen.add(record.id)) state.repository.markAnnouncementSeen(record.id)
+            }
+        }
     }
 
     Column(modifier = Modifier.fillMaxSize().background(NirogColor.surface)) {
@@ -3284,9 +3474,20 @@ fun AnnouncementsScreen(state: NirogState) {
                             }
                             Spacer(modifier = Modifier.height(NirogSpace.sm))
                             Text(record.values["body"]?.toString().orEmpty(), style = NirogType.body, color = NirogColor.inkSecondary)
-                            if (timestamp != null) {
+                            if (timestamp != null || isStaffViewer) {
                                 Spacer(modifier = Modifier.height(NirogSpace.sm))
-                                Text(relativeTimeLabel(timestamp), style = NirogType.overline, color = NirogColor.inkMuted)
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    if (timestamp != null) {
+                                        Text(relativeTimeLabel(timestamp), style = NirogType.overline, color = NirogColor.inkMuted)
+                                    }
+                                    val meta = seenMetaByAnnouncementId[record.id]
+                                    if (isStaffViewer && meta != null) {
+                                        if (timestamp != null) {
+                                            Text(" · ", style = NirogType.overline, color = NirogColor.inkMuted)
+                                        }
+                                        Text("Seen by ${meta.first} of ${meta.second}", style = NirogType.overline, color = NirogColor.inkMuted)
+                                    }
+                                }
                             }
                         }
                     }
@@ -3350,10 +3551,38 @@ fun AnnouncementsScreen(state: NirogState) {
 
 private val QUICK_REACTIONS = listOf("👍", "❤️", "😂", "🙏")
 
-// Single-token @mentions ("@Priya", not "@Priya Sharma") - there's no roster
-// autocomplete yet, so this is rendering-only highlighting of whatever the
-// sender typed, not a validated reference to a real member.
+// Single-token @mentions ("@Priya", not "@Priya Sharma") - autocomplete
+// below only ever inserts a first name for exactly this reason, so what a
+// member picks from the roster picker always renders as a real highlighted
+// mention rather than silently only highlighting half of it.
 private val MENTION_REGEX = Regex("(?<=^|\\s)@[\\p{L}0-9_]+")
+
+// Rather than a new Firestore read of the batch roster (programMembers is
+// deliberately staff-only - see firestore.rules - so member names never leak
+// between members through that collection), the autocomplete list is built
+// from senderName values already visible in this same chat's own messages.
+// That means you can only @mention someone who's actually posted here, which
+// is a reasonable bar for a "who am I replying to" picker and needs zero
+// rules changes.
+private fun chatRosterNames(records: List<com.nirogbhumi.app.data.CloudDocument>, excludeName: String): List<String> =
+    records.mapNotNull { it.values["senderName"]?.toString()?.trim() }
+        .filter { it.isNotBlank() && it != "Member" && it != excludeName }
+        .distinct()
+        .sorted()
+
+// Null unless the caret is currently sitting right after an unterminated
+// "@token" (no whitespace between the @ and the end of the string, and the
+// @ itself preceded only by start-of-text or whitespace) - the same boundary
+// MENTION_REGEX uses, so anything picked from the dropdown below is
+// guaranteed to actually render as a highlighted mention afterward.
+private fun activeMentionQuery(text: String): String? {
+    val at = text.lastIndexOf('@')
+    if (at == -1) return null
+    if (at > 0 && !text[at - 1].isWhitespace()) return null
+    val after = text.substring(at + 1)
+    if (after.any { it.isWhitespace() }) return null
+    return after
+}
 
 private fun mentionAnnotatedText(text: String, mentionColor: Color): androidx.compose.ui.text.AnnotatedString =
     buildAnnotatedString {
@@ -3986,6 +4215,43 @@ fun ProgramChatScreen(state: NirogState) {
                 Text("Photo ready to send", style = NirogType.caption, color = NirogColor.inkSecondary, modifier = Modifier.weight(1f))
                 IconButton(onClick = { pendingPhotoUri = null }, enabled = !uploadingPhoto) {
                     Icon(Icons.Filled.Close, contentDescription = "Remove photo", tint = NirogColor.inkMuted, modifier = Modifier.size(18.dp))
+                }
+            }
+        }
+
+        // @mention autocomplete: suggests only names already seen in this
+        // same chat (see chatRosterNames doc comment for why), replacing the
+        // partial "@token" being typed with the picked first name plus a
+        // trailing space so typing can continue straight after.
+        val mentionQuery = remember(messageInput) { activeMentionQuery(messageInput) }
+        val mentionSuggestions = remember(mentionQuery, records) {
+            if (mentionQuery == null) emptyList()
+            else chatRosterNames(records ?: emptyList(), excludeName = state.profileName.ifBlank { "Member" })
+                .filter { it.startsWith(mentionQuery, ignoreCase = true) }
+                .take(5)
+        }
+        if (mentionSuggestions.isNotEmpty()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = NirogSpace.lg, vertical = NirogSpace.xs),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                mentionSuggestions.forEach { name ->
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(NirogColor.surfaceSunken)
+                            .clickable {
+                                val at = messageInput.lastIndexOf('@')
+                                val firstName = name.substringBefore(' ')
+                                messageInput = messageInput.substring(0, at + 1) + firstName + " "
+                            }
+                            .padding(horizontal = 14.dp, vertical = 8.dp),
+                    ) {
+                        Text("@${name.substringBefore(' ')}", style = NirogType.caption, fontWeight = FontWeight.Bold, color = NirogColor.forest)
+                    }
                 }
             }
         }

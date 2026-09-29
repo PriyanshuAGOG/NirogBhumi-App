@@ -13,7 +13,8 @@ import {
 } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import { useAuth } from '../auth/AuthProvider'
-import { usePrograms } from '../lib/usePrograms'
+import { chunk } from '../lib/usePrograms'
+import { useScope } from '../lib/scope'
 import { errText } from '../lib/errors'
 import { relativeTime, formatDateTime } from '../lib/time'
 import { consistencyTag, isAlertLog, LOG_COLLECTIONS, summarizeLog, type LogEntry, type LogKind } from '../lib/health'
@@ -71,7 +72,7 @@ function useLogFeed(kind: LogKind, uid: string | undefined): { entries: LogEntry
 export default function MemberDetail() {
   const { uid } = useParams<{ uid: string }>()
   const { user } = useAuth()
-  const { programs } = usePrograms()
+  const { programs, programIds, programKey, isAdmin, loading: scopeLoading } = useScope()
   const [profile, setProfile] = useState<MemberProfile | null>(null)
   const [profileLoading, setProfileLoading] = useState(true)
   const [profileError, setProfileError] = useState<string | null>(null)
@@ -102,11 +103,29 @@ export default function MemberDetail() {
 
   useEffect(() => {
     if (!uid) return
-    const unsub = onSnapshot(query(collection(db, 'programMembers'), where('uid', '==', uid)), (snap) => {
-      setRoster(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<RosterEntry, 'id'>) })))
-    })
-    return unsub
-  }, [uid])
+    // A coach may only list roster rows of programs they coach, so the query has
+    // to say so; an admin reads all of this member's roster entries.
+    if (!isAdmin && (scopeLoading || programIds.length === 0)) {
+      setRoster([])
+      return
+    }
+    const queries = isAdmin
+      ? [query(collection(db, 'programMembers'), where('uid', '==', uid))]
+      : chunk(programIds).map((ids) => query(collection(db, 'programMembers'), where('uid', '==', uid), where('programId', 'in', ids)))
+    const perChunk = new Map<number, RosterEntry[]>()
+    const unsubs = queries.map((q, index) =>
+      onSnapshot(
+        q,
+        (snap) => {
+          perChunk.set(index, snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<RosterEntry, 'id'>) })))
+          setRoster(Array.from(perChunk.values()).flat())
+        },
+        () => setRoster([]),
+      ),
+    )
+    return () => unsubs.forEach((u) => u())
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uid, isAdmin, programKey, scopeLoading])
 
   useEffect(() => {
     if (!uid) return

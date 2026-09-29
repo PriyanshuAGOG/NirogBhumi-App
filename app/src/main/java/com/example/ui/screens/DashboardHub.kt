@@ -29,6 +29,8 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.nirogbhumi.app.data.CloudResult
 import com.nirogbhumi.app.health.computeSleepGlucoseInsight
+import com.nirogbhumi.app.health.computeMedicationGlucoseInsight
+import com.nirogbhumi.app.health.computeMealTimingInsight
 import com.nirogbhumi.app.ui.NirogState
 import com.nirogbhumi.app.ui.SugarLog
 import com.nirogbhumi.app.ui.components.SectionLabel
@@ -427,7 +429,7 @@ fun TodayTab(state: NirogState) {
                         java.text.SimpleDateFormat("MMM d, h:mm a", java.util.Locale.getDefault()).format(it)
                     } ?: "Synced"
                     val status = if (value > 130) "High" else if (value < 80) "Low" else "Normal"
-                    SugarLog(index + 1, value, type, time, status)
+                    SugarLog(index + 1, value, type, time, status, measuredAtMillis = timestamp?.toDate()?.time ?: System.currentTimeMillis())
                 }
                 if (synced.isNotEmpty()) {
                     state.sugarLogs.clear()
@@ -488,6 +490,26 @@ fun TodayTab(state: NirogState) {
         state.repository.peekCheckinStreak { result ->
             if (result is CloudResult.Success) checkinStreak = result.value
         }
+    }
+
+    // "You usually log by now" - checkinHourHint is the same rolling-average
+    // hour ReminderScheduler.scheduleSmart() already schedules the push
+    // reminder around, surfaced here too as a same-session in-app nudge for
+    // anyone who has the push reminder toggled off (or just has the app open
+    // right now) rather than only ever reaching them as a notification.
+    // Re-peeked whenever a check-in completes so today's own hint update
+    // doesn't require a cold restart to take effect.
+    var checkinHourHint by remember { mutableStateOf<Int?>(null) }
+    LaunchedEffect(state.checkedInToday) {
+        state.repository.peekCheckinHourHint { result ->
+            if (result is CloudResult.Success) checkinHourHint = result.value
+        }
+    }
+    var lateNudgeDismissed by remember { mutableStateOf(false) }
+    val showLateNudge = remember(checkinHourHint, state.checkedInToday, lateNudgeDismissed) {
+        val hint = checkinHourHint
+        !state.checkedInToday && !lateNudgeDismissed && hint != null &&
+            java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY) >= hint
     }
 
     val focusAction = remember(state.isProgramActive, state.checkedInToday, loggedReadingToday, walkLoggedToday, state.dailyRitualsCompleted.contains("Walk")) {
@@ -553,7 +575,33 @@ fun TodayTab(state: NirogState) {
             }
         }
 
+        WeeklyScoreCard(state)
+
         FirstWeekChecklistCard(state, checkinStreak)
+
+        if (showLateNudge) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(NirogColor.statusAttentionBg)
+                    .clickable { state.currentScreen = "daily_checkin" }
+                    .padding(start = 16.dp, end = 6.dp, top = 12.dp, bottom = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Outlined.Schedule, contentDescription = null, tint = NirogColor.statusAttention, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(10.dp))
+                Text(
+                    "You usually log by now - a quick check-in takes under a minute.",
+                    style = NirogType.secondary,
+                    color = NirogColor.inkPrimary,
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(onClick = { lateNudgeDismissed = true }, modifier = Modifier.size(28.dp)) {
+                    Icon(Icons.Filled.Close, contentDescription = "Dismiss", tint = NirogColor.inkMuted, modifier = Modifier.size(16.dp))
+                }
+            }
+        }
 
         // Highlight daily task card - driven entirely by TodayFocusEngine, so
         // this card genuinely changes with real usage instead of always
@@ -808,10 +856,10 @@ fun TodayTab(state: NirogState) {
                         modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Icon(Icons.Outlined.Insights, contentDescription = null, tint = NirogColor.forestSofter, modifier = Modifier.size(28.dp))
-                        Spacer(modifier = Modifier.height(8.dp))
+                        PreviewRhythmChart(modifier = Modifier.fillMaxWidth())
+                        Spacer(modifier = Modifier.height(10.dp))
                         Text(
-                            "Start logging today to see your weekly rhythm here",
+                            "This is what your weekly rhythm will look like - start logging today to make it real.",
                             fontSize = 12.sp,
                             color = NirogColor.outline,
                             textAlign = TextAlign.Center
@@ -901,6 +949,39 @@ fun TodayTab(state: NirogState) {
             }
         }
 
+        // Nav-parity: Today already has a one-tap contextual shortcut into
+        // Insights (Weekly Rhythm card) and Care (the checklist's "Meet your
+        // batch" row), but nothing pointed at Learn - not "buried" (it's a
+        // same-tier bottom-nav tab either way) but a real asymmetry in how
+        // often it actually gets surfaced day to day. This closes that gap
+        // with the same card treatment as Health File just above.
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { state.activeTab = "Learn" }
+                .border(width = 0.5.dp, color = NirogColor.outlineVariant.copy(alpha = 0.3f), shape = RoundedCornerShape(24.dp)),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            shape = RoundedCornerShape(24.dp)
+        ) {
+            Row(
+                modifier = Modifier.padding(16.dp).fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier.size(36.dp).clip(RoundedCornerShape(12.dp)).background(NirogColor.surfaceLow),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Filled.MenuBook, "Learn", tint = NirogColor.forest, modifier = Modifier.size(18.dp))
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Learn & Explore", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B2219))
+                    Text("Ayurvedic wisdom & modern metabolic science", fontSize = 11.5.sp, color = NirogColor.inkMuted)
+                }
+                Text("Browse", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = NirogColor.forest)
+            }
+        }
+
         // The one thing Today has that Track doesn't: a program-aware view of
         // what's coming up in Care+. Only rendered for enrolled members, and
         // only when there's something upcoming to show - never an empty card.
@@ -909,6 +990,73 @@ fun TodayTab(state: NirogState) {
         }
 
         Spacer(modifier = Modifier.height(24.dp))
+    }
+}
+
+// Fixed, deliberately not randomized - the same shape every time a new
+// member sees it, since the point is showing "what this becomes," not
+// simulating variety. Values are a plausible fasting/post-meal week, not
+// flagged-range numbers, so a brand-new member never mistakes a shown
+// "134" or "96" for a real reading in a moment of health anxiety - the
+// EXAMPLE badge and muted (never NirogColor.forest-toned) palette are the
+// same defense-in-depth idea applied visually.
+private val SAMPLE_RHYTHM_VALUES = listOf(112, 128, 96, 134, 108, 121, 102)
+private val SAMPLE_RHYTHM_LABELS = listOf("Fast", "Post", "Fast", "Post", "Fast", "Post", "Fast")
+
+/**
+ * Illustrative preview of the real sparkline below (same bar-chart shape,
+ * same layout) so a brand-new member's Weekly Rhythm and Insights cards show
+ * what logging unlocks instead of a bare "nothing here yet" - deliberately
+ * muted/grayscale rather than the real chart's forest-green palette, plus an
+ * EXAMPLE badge, so it's never mistakable for the member's own data.
+ */
+@Composable
+private fun PreviewRhythmChart(modifier: Modifier = Modifier) {
+    Box(modifier = modifier) {
+        Column {
+            Canvas(modifier = Modifier.fillMaxWidth().height(100.dp)) {
+                val spacing = size.width / SAMPLE_RHYTHM_VALUES.size
+                val barWidth = 14.dp.toPx()
+                val maxValue = SAMPLE_RHYTHM_VALUES.max()
+                val totalHeight = size.height - 30.dp.toPx()
+                SAMPLE_RHYTHM_VALUES.forEachIndexed { index, value ->
+                    val x = index * spacing + (spacing / 2) - (barWidth / 2)
+                    val barHeight = totalHeight * (value.toFloat() / maxValue)
+                    val y = totalHeight - barHeight
+                    drawRoundRect(
+                        color = NirogColor.outlineVariant.copy(alpha = 0.25f),
+                        topLeft = androidx.compose.ui.geometry.Offset(x, 0f),
+                        size = androidx.compose.ui.geometry.Size(barWidth, totalHeight),
+                        cornerRadius = CornerRadius(4.dp.toPx(), 4.dp.toPx())
+                    )
+                    drawRoundRect(
+                        color = NirogColor.outline.copy(alpha = 0.4f),
+                        topLeft = androidx.compose.ui.geometry.Offset(x, y),
+                        size = androidx.compose.ui.geometry.Size(barWidth, barHeight),
+                        cornerRadius = CornerRadius(4.dp.toPx(), 4.dp.toPx())
+                    )
+                }
+            }
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                SAMPLE_RHYTHM_LABELS.forEach { label ->
+                    Text(label, fontSize = 10.sp, color = NirogColor.outline.copy(alpha = 0.6f), modifier = Modifier.width(36.dp), textAlign = TextAlign.Center)
+                }
+            }
+        }
+        Surface(
+            modifier = Modifier.align(Alignment.TopEnd),
+            color = NirogColor.outlineVariant.copy(alpha = 0.35f),
+            shape = RoundedCornerShape(6.dp),
+        ) {
+            Text(
+                "EXAMPLE",
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Bold,
+                color = NirogColor.outline,
+                letterSpacing = 0.6.sp,
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+            )
+        }
     }
 }
 
@@ -975,6 +1123,58 @@ private fun ChecklistItemRow(label: String, done: Boolean, onClick: () -> Unit) 
 }
 
 /**
+ * One-line "how you're doing" rollup for the last 7 days - a plain-language
+ * headline instead of the raw numbers the bento cards below already show.
+ * Renders nothing until at least one day this week has something logged, so
+ * a brand-new member never sees a hollow judgment about a week that hasn't
+ * happened yet.
+ */
+@Composable
+private fun WeeklyScoreCard(state: NirogState) {
+    var glucoseReadings by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>>(emptyList()) }
+    var bpReadings by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>>(emptyList()) }
+    var sleepLogs by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>>(emptyList()) }
+
+    DisposableEffect(state.repository.userId) {
+        val glucoseSub = state.repository.listenUserCollection("glucoseReadings", limit = 30, orderByField = "measuredAt", descending = true) { result ->
+            if (result is CloudResult.Success) glucoseReadings = result.value
+        }
+        val bpSub = state.repository.listenUserCollection("bpReadings", limit = 30, orderByField = "createdAt", descending = true) { result ->
+            if (result is CloudResult.Success) bpReadings = result.value
+        }
+        val sleepSub = state.repository.listenUserCollection("sleepLogs", limit = 10, orderByField = "createdAt", descending = true) { result ->
+            if (result is CloudResult.Success) sleepLogs = result.value
+        }
+        onDispose { glucoseSub.cancel(); bpSub.cancel(); sleepSub.cancel() }
+    }
+
+    val nowMillis = remember { System.currentTimeMillis() }
+    val summary = remember(glucoseReadings, bpReadings, sleepLogs) {
+        com.nirogbhumi.app.health.computeWeeklySummary(glucoseReadings, bpReadings, sleepLogs, nowMillis)
+    } ?: return
+
+    val (bg, fg) = when (summary.tone) {
+        com.nirogbhumi.app.health.WeeklyTone.POSITIVE -> NirogColor.statusInRangeBg to NirogColor.statusInRange
+        com.nirogbhumi.app.health.WeeklyTone.CAUTION -> NirogColor.statusAttentionBg to NirogColor.statusAttention
+        com.nirogbhumi.app.health.WeeklyTone.NEUTRAL -> NirogColor.statusNeutralBg to NirogColor.statusNeutral
+    }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(width = 0.5.dp, color = NirogColor.outlineVariant.copy(alpha = 0.3f), shape = RoundedCornerShape(24.dp)),
+        colors = CardDefaults.cardColors(containerColor = bg),
+        shape = RoundedCornerShape(24.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(summary.headline, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = fg)
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(summary.detail, fontSize = 12.5.sp, color = Color(0xFF4B5750), lineHeight = 17.sp)
+        }
+    }
+}
+
+/**
  * Basic trend correlation insight: cross-references the member's own
  * glucoseReadings and sleepLogs (a fasting reading against sleep logged the
  * previous night) rather than showing a generic tip. Renders nothing at all
@@ -986,6 +1186,7 @@ private fun ChecklistItemRow(label: String, done: Boolean, onClick: () -> Unit) 
 private fun SleepGlucoseInsightCard(state: NirogState) {
     var sleepLogs by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>>(emptyList()) }
     var glucoseReadings by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>>(emptyList()) }
+    var medicationLogs by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>>(emptyList()) }
 
     DisposableEffect(state.repository.userId) {
         val sleepSub = state.repository.listenUserCollection("sleepLogs", limit = 60, orderByField = "createdAt", descending = true) { result ->
@@ -994,10 +1195,25 @@ private fun SleepGlucoseInsightCard(state: NirogState) {
         val glucoseSub = state.repository.listenUserCollection("glucoseReadings", limit = 60, orderByField = "measuredAt", descending = true) { result ->
             if (result is CloudResult.Success) glucoseReadings = result.value
         }
-        onDispose { sleepSub.cancel(); glucoseSub.cancel() }
+        val medicationSub = state.repository.listenUserCollection("medicationLogs", limit = 60, orderByField = "measuredAt", descending = true) { result ->
+            if (result is CloudResult.Success) medicationLogs = result.value
+        }
+        onDispose { sleepSub.cancel(); glucoseSub.cancel(); medicationSub.cancel() }
     }
 
-    val insight = remember(sleepLogs, glucoseReadings) { computeSleepGlucoseInsight(sleepLogs, glucoseReadings) } ?: return
+    // Today shows at most one pattern card, not three - insight_detail is
+    // where a member sees every correlation that's actually been found.
+    // Priority order is just the order they were built in, not a ranking.
+    val sleepInsight = remember(sleepLogs, glucoseReadings) { computeSleepGlucoseInsight(sleepLogs, glucoseReadings) }
+    val medicationInsight = remember(medicationLogs, glucoseReadings) { computeMedicationGlucoseInsight(medicationLogs, glucoseReadings) }
+    val mealInsight = remember(glucoseReadings) { computeMealTimingInsight(glucoseReadings) }
+
+    val summary = when {
+        sleepInsight != null -> "Your fasting sugar has averaged %.0f mg/dL after shorter nights (under 6h) vs %.0f mg/dL after longer ones, based on your own logs.".format(sleepInsight.shortSleepAvg, sleepInsight.longSleepAvg)
+        medicationInsight != null -> "On days you took your medication, fasting sugar averaged %.0f mg/dL, vs %.0f mg/dL on days it was missed.".format(medicationInsight.takenAvg, medicationInsight.missedAvg)
+        mealInsight != null -> "Your post-${mealInsight.mealLabel.lowercase()} sugar has averaged %.0f mg/dL, higher than after your other meals (%.0f mg/dL).".format(mealInsight.mealAvg, mealInsight.otherAvg)
+        else -> return
+    }
 
     Card(
         modifier = Modifier
@@ -1017,10 +1233,7 @@ private fun SleepGlucoseInsightCard(state: NirogState) {
             Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text("A pattern in your logs", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B2219))
-                Text(
-                    "Your fasting sugar has averaged %.0f mg/dL after shorter nights (under 6h) vs %.0f mg/dL after longer ones, based on your own logs.".format(insight.shortSleepAvg, insight.longSleepAvg),
-                    fontSize = 12.sp, color = Color(0xFF4B6450), lineHeight = 17.sp,
-                )
+                Text(summary, fontSize = 12.sp, color = Color(0xFF4B6450), lineHeight = 17.sp)
             }
         }
     }
@@ -1509,8 +1722,8 @@ fun InsightsTab(state: NirogState) {
                     modifier = Modifier.fillMaxWidth().padding(28.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Icon(Icons.Outlined.Insights, contentDescription = null, tint = NirogColor.forestSofter, modifier = Modifier.size(36.dp))
-                    Spacer(modifier = Modifier.height(12.dp))
+                    PreviewRhythmChart(modifier = Modifier.fillMaxWidth())
+                    Spacer(modifier = Modifier.height(16.dp))
                     Text(
                         "No insights yet",
                         fontWeight = FontWeight.Bold,
@@ -1750,7 +1963,8 @@ fun CareTab(state: NirogState) {
             // stepper was pulled with the Razorpay removal and isn't being
             // rebuilt yet, so this is an honest handoff instead of a dead-end
             // flow or a fabricated "coming soon" screen.
-            CareRow(Icons.Outlined.MedicalServices, "Book a Consultation", "Opens nirogbhumi.com to pick an expert and a time.") { openConsultationBooking() }
+            CareRow(Icons.Outlined.MedicalServices, "Request a consultation", "Tell us what you need - our team confirms a time with you.") { state.currentScreen = "request_consultation" }
+            CareRow(Icons.Outlined.EventAvailable, "My consultations", "Your requests and booked sessions.") { state.currentScreen = "my_consultations" }
 
             // Care+'s calendar/community layer is a second tier only for enrolled
             // program members. Rather than a single thin locked card, show what's
@@ -1812,13 +2026,19 @@ fun CareTab(state: NirogState) {
                 ) { state.currentScreen = "program_calendar" }
             }
 
+            CareRow(Icons.Outlined.Spa, "Plans & guidance", "Diet plans, yoga and routines your coach has shared.") { state.currentScreen = "program_resources" }
+
             SectionLabel("COMMUNITY", color = NirogColor.gold)
             PinnedAnnouncementCard(state)
 
             SectionLabel("SUPPORT", color = NirogColor.gold)
-            CareRow(Icons.Outlined.MedicalServices, "Book a Consultation", "Opens nirogbhumi.com to pick an expert and a time.") { openConsultationBooking() }
+            CareRow(Icons.Outlined.MedicalServices, "Request a consultation", "Tell us what you need - our team confirms a time with you.") { state.currentScreen = "request_consultation" }
+            CareRow(Icons.Outlined.EventAvailable, "My consultations", "Your requests and booked sessions.") { state.currentScreen = "my_consultations" }
         }
 
+        TextButton(onClick = { openConsultationBooking() }, modifier = Modifier.fillMaxWidth()) {
+            Text("Prefer to book on our website?", color = NirogColor.forestSoft, fontSize = 13.sp)
+        }
         Spacer(modifier = Modifier.height(32.dp))
     }
 }
@@ -1836,6 +2056,26 @@ private fun ProgramStatusHero(state: NirogState, dayNumber: Long) {
     val checkedIn = (pulse?.get("checkedInCount") as? Number)?.toInt() ?: 0
     val memberCount = (pulse?.get("memberCount") as? Number)?.toInt() ?: 0
     val collectiveMinutes = (pulse?.get("collectiveMinutes") as? Number)?.toInt() ?: 0
+    val leaderboard = remember(pulse) {
+        (pulse?.get("leaderboard") as? List<*>)?.mapNotNull { entry ->
+            val fields = entry as? Map<*, *> ?: return@mapNotNull null
+            val name = fields["name"] as? String ?: return@mapNotNull null
+            val minutes = (fields["minutes"] as? Number)?.toInt() ?: return@mapNotNull null
+            name to minutes
+        } ?: emptyList()
+    }
+
+    // Opt-in only: leaderboardOptIn defaults false/absent on every roster doc,
+    // so nobody's name appears anywhere until they flip this on themselves -
+    // the aggregate collectiveMinutes total above stays the only thing shown
+    // by default, exactly as before.
+    var leaderboardOptIn by remember { mutableStateOf(false) }
+    LaunchedEffect(state.activeProgramId) {
+        if (state.activeProgramId.isBlank()) return@LaunchedEffect
+        state.repository.peekMembership(state.activeProgramId) { result ->
+            if (result is CloudResult.Success) leaderboardOptIn = result.value?.values?.get("leaderboardOptIn") as? Boolean ?: false
+        }
+    }
 
     // Program-day milestone (30/60/90) - a device-local one-time flag (not
     // Firestore-synced state) since it's a celebratory toast, not data the
@@ -1896,15 +2136,54 @@ private fun ProgramStatusHero(state: NirogState, dayNumber: Long) {
                     Text("Day $dayNumber - a real milestone in your program!", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
                 }
             }
-            // Cooperative, never a per-member ranking - a team total only.
+            // Cooperative by default - the team total, no names attached -
+            // unless a member explicitly opts themselves into the leaderboard
+            // below, which only ever adds names for people who opted in.
             if (collectiveMinutes > 0) {
                 Spacer(modifier = Modifier.height(16.dp))
                 Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.18f)))
                 Spacer(modifier = Modifier.height(12.dp))
                 Text(
-                    "$collectiveMinutes minutes walked as a batch this month - no rankings, just the team total.",
+                    "$collectiveMinutes minutes walked as a batch this month.",
                     fontSize = 12.sp, color = NirogColor.forestPale, lineHeight = 17.sp,
                 )
+                if (leaderboard.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    leaderboard.forEachIndexed { index, (name, minutes) ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text("${index + 1}. $name", fontSize = 12.5.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            Text("${minutes}m", fontSize = 12.5.sp, color = NirogColor.forestPale)
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(10.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "Show my name on the leaderboard",
+                        fontSize = 11.5.sp, color = NirogColor.forestPale, modifier = Modifier.weight(1f),
+                    )
+                    Switch(
+                        checked = leaderboardOptIn,
+                        onCheckedChange = { checked ->
+                            leaderboardOptIn = checked
+                            state.repository.setLeaderboardOptIn(state.activeProgramId, checked) { result ->
+                                if (result is CloudResult.Failure) {
+                                    leaderboardOptIn = !checked
+                                    state.cloudMessage = result.message
+                                }
+                            }
+                        },
+                        colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = NirogColor.forestPale),
+                    )
+                }
             }
         }
     }

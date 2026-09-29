@@ -34,3 +34,46 @@
 .cons-meta .tag {
   text-transform: capitalize;
 }
+
+.cons-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-6);
+}
+.cons-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+.cons-concern {
+  margin: 0;
+  color: var(--ink-secondary);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.cons-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  font-size: 12.5px;
+  color: var(--ink-muted);
+}
+.cons-link {
+  color: var(--forest-soft);
+  font-weight: 700;
+}
+.cons-when {
+  background: var(--surface-sunken);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  font-size: 13.5px;
+  color: var(--ink-primary);
+}
+.cons-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}

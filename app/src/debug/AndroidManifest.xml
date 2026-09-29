@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- DEBUG-ONLY permission. This source set is merged into the debug
+         (tester / Firebase App Distribution) build ONLY, never the release
+         AAB uploaded to Google Play.
+
+         The in-app self-update flow (UpdateManager, gated on BuildConfig.DEBUG)
+         downloads a newer sideloaded APK and hands it to the system package
+         installer. Without REQUEST_INSTALL_PACKAGES the ACTION_VIEW install
+         intent is silently blocked on API 26+ (the modern per-app-source
+         replacement for the old device-wide "Unknown sources" toggle). The
+         user still grants it once in Settings (canRequestPackageInstalls()
+         gates the flow) and still taps through the system installer's own
+         confirmation - this permission alone does not enable silent installs.
+
+         It lives here, not in the main manifest, so it is absent from the
+         Play build. Google Play's Device & Network Abuse policy forbids an app
+         distributed through Play from downloading executable code and
+         self-updating outside of Play, so the whole mechanism - and this
+         permission - must not ship in the release AAB. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
+</manifest>

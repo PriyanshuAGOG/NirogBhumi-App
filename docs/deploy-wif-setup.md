@@ -89,6 +89,16 @@ exact missing role in the error (the same way the very first Cloud Functions
 deploy this project ever did needed `roles/cloudbuild.builds.builder` added
 on the fly) — grant that specific role the same way and re-run.
 
+> **Update (Sprint 0):** `deploy-firebase.yml` now runs a dedicated
+> "Ensure public invoker on every callable function" step after each deploy
+> (`gcloud functions add-invoker-policy-binding ... --member=allUsers` for every
+> callable listed by `firebase/functions/scripts/list-callables.mjs`). It is
+> idempotent, so once the organization policy below permits `allUsers`, the very
+> next deploy repairs every affected function automatically - no manual gcloud
+> loop needed. Until then the step fails loudly (with the org-policy hint)
+> instead of leaving broken functions silent. Production deploys are also
+> restricted to `main`.
+
 ## Known issue: new (never-before-deployed) callable functions fail to get
 their public invoker set
 

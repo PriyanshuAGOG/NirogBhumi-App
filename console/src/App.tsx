@@ -22,6 +22,8 @@ const Support = lazy(() => import('./pages/Support'))
 const Users = lazy(() => import('./pages/Users'))
 const Settings = lazy(() => import('./pages/Settings'))
 const ErrorReports = lazy(() => import('./pages/ErrorReports'))
+const DataRequests = lazy(() => import('./pages/DataRequests'))
+const Resources = lazy(() => import('./pages/Resources'))
 
 function FullScreenLoader() {
   return (
@@ -139,6 +141,14 @@ function Gate() {
             }
           />
           <Route
+            path="/resources"
+            element={
+              <Protected permission="programs">
+                <Resources />
+              </Protected>
+            }
+          />
+          <Route
             path="/content"
             element={
               <Protected adminOnly>
@@ -149,7 +159,7 @@ function Gate() {
           <Route
             path="/consultations"
             element={
-              <Protected permission="consultations">
+              <Protected adminOnly>
                 <Consultations />
               </Protected>
             }
@@ -175,6 +185,14 @@ function Gate() {
             element={
               <Protected adminOnly>
                 <ErrorReports />
+              </Protected>
+            }
+          />
+          <Route
+            path="/data-requests"
+            element={
+              <Protected adminOnly>
+                <DataRequests />
               </Protected>
             }
           />
