@@ -940,6 +940,19 @@ export const adminManageDeletion = onCall({ region }, async request => {
   await db.collection('auditLogs').add({ actorId: auth.uid, actorRole: role, action: `${action}_account_deletion`, entityType: 'deletionRequest', entityId: requestId, createdAt: FieldValue.serverTimestamp() });
   return { requestId, status: action === 'approve' ? 'approved' : 'rejected' };
 });
+// RETIRED. This trigger used to flip every new deletion request to
+// 'awaiting_verification'. Requests are now scheduled by requestAccountDeletion
+// (status 'scheduled', erased automatically when due), so the old behaviour would
+// overwrite that status and the request would never be processed. Firebase skips
+// deleting removed functions whenever another function in the same deploy fails
+// (e.g. while the org policy blocks the public invoker), so the old code stayed
+// live; exporting a no-op replaces it with a plain update. Delete this stub (and run
+// `firebase functions:delete queueDeletionRequest --region asia-south1`) once a
+// deploy has completed cleanly.
+export const queueDeletionRequest = onDocumentCreated({ document: 'deletionRequests/{requestId}', region }, async () => {
+  // intentionally empty
+});
+
 export const exportUserData = onDocumentCreated({ document: 'dataExportRequests/{requestId}', region }, async event => {
   const request = event.data; if (!request) return; const uid = request.get('userId'); if (!uid) return;
   await request.ref.set({ status: 'processing', updatedAt: FieldValue.serverTimestamp() }, { merge: true });

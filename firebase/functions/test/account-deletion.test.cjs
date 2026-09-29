@@ -88,6 +88,25 @@ describe('scheduling and cancelling', () => {
   });
 });
 
+describe('retired queueDeletionRequest trigger', () => {
+  beforeEach(resetFirestore);
+
+  it('never rewrites the status of a freshly scheduled request (the old trigger did, so requests were never processed)', async () => {
+    await db.doc('users/u1').set({ userId: 'u1' });
+    await call(fns.requestAccountDeletion, {}, 'u1');
+    const snap = (await db.collection('deletionRequests').where('userId', '==', 'u1').get()).docs[0];
+    const before = snap.get('status');
+    assert.equal(before, 'scheduled');
+    const writes = [];
+    await fns.queueDeletionRequest.run({
+      data: { id: snap.id, data: () => snap.data(), ref: { set: async (...args) => { writes.push(args); }, update: async (...args) => { writes.push(args); } } },
+      params: { requestId: snap.id },
+    });
+    assert.deepEqual(writes, []);
+    assert.equal((await db.doc(`deletionRequests/${snap.id}`).get()).get('status'), before);
+  });
+});
+
 describe('processDueDeletions', () => {
   beforeEach(resetFirestore);
 
