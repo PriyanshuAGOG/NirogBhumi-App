@@ -32,7 +32,8 @@ build before submitting.
 | Fitness info (steps/activity, incl. Health Connect import) | Yes | App functionality | Required |
 | Photos (profile photo, uploaded lab report images) | Yes | App functionality | Optional |
 | Voice/audio (chat voice notes; on-device speech recognition) | Yes | App functionality | Optional |
-| Purchase history (orders, bookings) | Yes | App functionality | Optional |
+| Purchase history (past orders shown read-only; consultation requests carry a fee *note* only — the app takes no payment) | Yes | App functionality | Optional |
+| Messages (coach chat, coach inbox, consultation request text: concern, preferred time) | Yes | App functionality | Optional |
 | App activity / in-app actions | Yes | Analytics, App functionality | Optional |
 | Crash logs & diagnostics | Yes | App functionality (stability) | Optional |
 | Device or other IDs | Yes | App functionality, Analytics | — |
@@ -53,7 +54,14 @@ Complete the Play **Health apps declaration** and, if you surface Health
 Connect data, the Health Connect–specific declaration. Do not use Health
 Connect data for advertising; access only the record types the app actually
 reads (steps, sleep, weight, blood glucose, blood pressure — see
-the manifest `health.READ_*` permissions).
+the manifest `health.READ_*` permissions). Heart rate is **not** requested
+(removed in Sprint 1; Play rejects unused Health Connect permissions).
+
+## Advertising ID
+
+The app declares **no advertising ID use**. `com.google.android.gms.permission.AD_ID`
+is removed from the merged manifest (`tools:node="remove"`), and CI fails if it,
+or any permission not in the allowlist, reappears (`scripts/verify_release_manifest.py`).
 
 ## Permissions to justify in the listing
 

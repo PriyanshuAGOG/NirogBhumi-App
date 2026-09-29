@@ -17,7 +17,7 @@
 - **Appoint a Grievance Officer** (DPDP s.13) and publish their name, working mailbox (e.g. `grievance@nirogbhumi.com`), and postal address in the legal pages and the in-app Legal Center.
 - Put the **hosted Privacy Policy URL** and the **hosted account-deletion URL** (`/legal/account-deletion.html`, reachable without installing the app) into the Play Console listing and Data Safety form — the deletion URL is a hard Play requirement.
 - Complete the Play **Data Safety** form and **Health apps declaration** using `docs/DATA_SAFETY_MAPPING.md`; confirm "no data shared for advertising".
-- Confirm `REQUEST_INSTALL_PACKAGES` is absent from the release AAB's merged manifest (it is in `src/debug` only).
+- `REQUEST_INSTALL_PACKAGES`, the advertising ID and any undeclared permission are blocked automatically: the CI "Android release build" job runs `scripts/verify_release_manifest.py` on the merged release manifest (also checks debuggable, cleartext, backup and exported components).
 - Verify export and deletion fulfillment end-to-end in production, incident response, staff access review, and processor (DPA) agreements.
 - On any material policy change, bump `CONSENT_VERSION` (`NirogModels.kt`) together with the hosted pages. See `docs/DPDP_COMPLIANCE.md` for the full obligation map.
 
@@ -27,8 +27,7 @@
 - All 86 screen routes at 390×844, small Android, tablet, font scale 1.3, dark system bars, TalkBack, Hindi text expansion, offline/reconnect, and process death.
 - Sugar/BP caution thresholds reviewed and signed off by a qualified clinician.
 - Private uploads cannot be accessed by another user or an unassigned expert.
-- Consultation payment/webhook idempotency, refund, reschedule, and failure recovery.
-- Order stock transaction, payment idempotency, cancellation, refund, and delivery updates.
+- Consultation requests (no payment in the app): request -> "waiting" -> confirmed in the console -> push + 1-hour reminder -> reschedule/decline/cancel; Plans & guidance from the coach; Data Controls (export, schedule/cancel deletion). Payments, a store and refunds are out of scope for v1.
 - Notification quiet hours, permissions, per-day cap, timezone, and medication safety copy.
 
 ## Play Console

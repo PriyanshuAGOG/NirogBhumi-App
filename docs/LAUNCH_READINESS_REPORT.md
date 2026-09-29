@@ -372,3 +372,41 @@ Other half-built logic:
   (Data Controls, onboarding profile, Health File) compile and their logic is
   unit/contract tested, but need a manual pass on a phone - see the checklist
   in the hand-off message.
+
+### Sprint 2 — finish the reachable product, scale, Play guards (done on branch)
+- ✅ **Reachability audit.** Many screens flagged as "half-built" in §5 belong to
+  the generic `CatalogScreen` cluster that nothing links to. Decision: do not
+  ship or polish unreachable screens; finish the flows a member can actually
+  reach, and make the store/payments explicitly out of scope for v1 (the app
+  shows past orders read-only; no checkout exists, and the Play listing no longer
+  promises shopping).
+- ✅ **Plans & guidance.** Coaches (or admins) write diet / yoga / naturopathy /
+  guidance notes per batch in the console ("Plans & Guidance"), optionally pushing
+  to the batch. Members see them in Care+ > Plans & guidance. Rules: only the
+  batch's members and staff read, only admin or the assigned coach writes, http(s)
+  links only. Replaces the orphaned per-user `programPlans` screens.
+- ✅ **Consultations without payment.** Members request (type, concern, preferred
+  time, share-readings consent, emergency acknowledgement) and track status in
+  My consultations; staff confirm a time, expert and join details in the console
+  (reschedule / decline with reason / cancel / complete). Push on every change and
+  exactly one "starts in an hour" reminder, kept in step with the appointment.
+  Fees are arranged by the team; nothing takes payment. Rules stop a member
+  self-confirming or attaching a link.
+- ✅ **Scale.** The daily job wrote a hardcoded dailyActions/weeklyReports doc per
+  user in a single batch (would fail at 501 users; nothing read them) — removed;
+  batch pulse and the Monday digest are paged. The notification sender now drains
+  up to 1,000 pushes per run at 25 concurrent (was 100 sequential: a 5,000-member
+  campaign would have taken ~12 hours).
+- ✅ **Play guards.** Advertising-ID permission removed from the merged manifest;
+  CI verifies the merged release manifest (permission allowlist, no debuggable /
+  cleartext / backup, exported-component allowlist). Listing, Data Safety mapping
+  and release checklist updated to match what the app really does.
+- ✅ **Tests.** Rules 166 (console queries, app writes, resources, consultations),
+  Functions emulator 55, browser e2e (admin, coach, full member journey incl.
+  Storage, plans and consultations), Android unit/Compose tests for the new
+  screens. All run in CI.
+- ⚠ Not verifiable without a device: Plans & guidance, Request/My consultations,
+  Data Controls, onboarding profile and Health File screens compile and are
+  Robolectric-tested, but need a manual pass on a phone.
+- ⏳ Owner actions unchanged: Cloud Run public-invoker org policy, release SHA-1/256
+  in Firebase, Grievance Officer + legal placeholders, real content, merge to `main`.
