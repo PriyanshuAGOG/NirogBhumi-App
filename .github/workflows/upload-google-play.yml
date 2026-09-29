@@ -63,6 +63,17 @@ jobs:
           distribution: temurin
           java-version: "21"
       - uses: gradle/actions/setup-gradle@v6
+      - name: Release gates (listing text, notes, graphics, legal placeholders)
+        env:
+          TRACK: ${{ inputs.track }}
+        run: |
+          # The internal track may go out before the legal text is final; every
+          # track that real people can reach must have no placeholders left.
+          if [ "$TRACK" = "internal" ]; then
+            python3 scripts/check_release_gates.py
+          else
+            python3 scripts/check_release_gates.py --strict
+          fi
       - name: Validate release and Play Console secrets
         env:
           GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}

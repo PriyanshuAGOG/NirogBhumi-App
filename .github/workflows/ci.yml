@@ -89,6 +89,18 @@ jobs:
             app/build/outputs/mapping/release/mapping.txt
             app/build/reports/**
 
+  release-gates:
+    name: Release gates (store listing, notes, graphics)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      # Non-strict: legal placeholders are allowed here (they are only blocked
+      # for closed/production uploads in upload-google-play.yml), but a
+      # store description over Play's limit or a missing graphic is not.
+      - name: Check store listing limits, release notes and graphics
+        run: python3 scripts/check_release_gates.py
+
   functions:
     name: Firebase Functions type-check
     runs-on: ubuntu-latest
