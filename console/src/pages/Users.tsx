@@ -14,6 +14,7 @@ interface UserRow {
   id: string
   userId?: string
   name?: string
+  fullName?: string
   email?: string
   phone?: string
   role?: string
@@ -103,7 +104,13 @@ export default function Users() {
     const unsub = onSnapshot(
       query(collection(db, 'users'), orderBy('createdAt', 'desc'), limit(500)),
       (snap) => {
-        const next = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<UserRow, 'id'>) }))
+        // The app stores a member's name as `fullName`; `name` only exists on older
+        // or staff-created docs, so prefer fullName (a list that shows "(no name)" for
+        // every real member is useless to search).
+        const next = snap.docs.map((d) => {
+          const row = { id: d.id, ...(d.data() as Omit<UserRow, 'id'>) }
+          return { ...row, name: row.fullName?.trim() || row.name?.trim() || undefined }
+        })
         next.sort((a, b) => (a.name ?? a.email ?? '').localeCompare(b.name ?? b.email ?? ''))
         setUsers(next)
         setLoading(false)

@@ -136,3 +136,35 @@ jobs:
       # none of which a "does it compile" check would ever catch.
       - name: Run rules unit tests against the emulator
         run: npx --yes firebase-tools@15.22.3 emulators:exec --only firestore,storage --project demo-nirog-bhumi "npm --prefix firebase/rules-tests test"
+
+  console-e2e:
+    name: Console end-to-end (browser + emulators)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+      # Drives the real console bundle in Chromium against the Auth + Firestore +
+      # Functions emulators as an admin and as a coach (access codes, announcements,
+      # data requests, coach scoping, batch messaging). Unit and rules tests can't
+      # catch a page that queries the wrong way or a button wired to nothing.
+      - name: Install e2e dependencies and Chromium
+        working-directory: e2e
+        run: |
+          npm install --no-audit --no-fund
+          npx playwright-core install --with-deps chromium
+      - name: Run console end-to-end tests
+        run: bash e2e/run.sh
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: console-e2e-screenshots
+          if-no-files-found: ignore
+          path: e2e/artifacts/*.png

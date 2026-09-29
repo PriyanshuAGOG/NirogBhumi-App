@@ -114,7 +114,11 @@ export default function Members() {
     const unsub = onSnapshot(
       query(collection(db, 'users'), ...constraints),
       (snap) => {
-        const next = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<RosterEntry, 'id'>) }))
+        const next = snap.docs.map((d) => {
+          // The app stores the name as `fullName`; fall back to legacy `name`.
+          const data = d.data() as Omit<RosterEntry, 'id'> & { fullName?: string }
+          return { id: d.id, ...data, name: data.fullName?.trim() || data.name?.trim() || undefined }
+        })
         next.sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''))
         setMembers(next)
         setLoading(false)

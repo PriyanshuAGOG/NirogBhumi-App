@@ -34,3 +34,4 @@ artifacts/
 *.apk
 .agents/
 .firebase-cli/
+e2e/artifacts/

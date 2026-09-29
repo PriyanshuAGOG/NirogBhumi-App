@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { collection, onSnapshot, query, where } from 'firebase/firestore'
+import { useEffect, useMemo, useState } from 'react'
+import { collection, getCountFromServer, onSnapshot, query, where } from 'firebase/firestore'
 import { db } from './firebase'
 import { errText } from './errors'
 import { useAuth } from '../auth/AuthProvider'
@@ -41,6 +41,7 @@ export function usePrograms(): {
   const [programs, setPrograms] = useState<Program[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [counts, setCounts] = useState<Record<string, number>>({})
   const { user, role } = useAuth()
   const isAdmin = role === 'admin' || role === 'super_admin'
   const uid = user?.uid ?? null
@@ -68,5 +69,30 @@ export function usePrograms(): {
     return unsub
   }, [isAdmin, uid])
 
-  return { programs, loading, error }
+  // programs.memberCount is only ever set to 0 when a program is created and
+  // nothing keeps it current, so every list showed "0 members". The roster is
+  // the source of truth - count it (a cheap aggregation, no documents read).
+  const idsKey = programs.map((p) => p.id).join(',')
+  useEffect(() => {
+    if (!idsKey) return
+    let cancelled = false
+    void Promise.all(
+      idsKey.split(',').map(async (id) => {
+        try {
+          const snap = await getCountFromServer(query(collection(db, 'programMembers'), where('programId', '==', id)))
+          return [id, snap.data().count] as const
+        } catch {
+          return null
+        }
+      }),
+    ).then((pairs) => {
+      if (!cancelled) setCounts(Object.fromEntries(pairs.filter((p): p is readonly [string, number] => p !== null)))
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [idsKey])
+
+  const withCounts = useMemo(() => programs.map((p) => (p.id in counts ? { ...p, memberCount: counts[p.id] } : p)), [programs, counts])
+  return { programs: withCounts, loading, error }
 }

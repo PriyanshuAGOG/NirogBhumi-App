@@ -46,7 +46,7 @@ export default function DataRequests() {
   const [items, setItems] = useState<DeletionRequest[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [names, setNames] = useState<Record<string, string>>({})
+  const [people, setPeople] = useState<Record<string, { name: string; contact: string }>>({})
   const [filter, setFilter] = useState<'open' | 'done' | 'all'>('open')
   const [pending, setPending] = useState<Pending>(null)
   const [busy, setBusy] = useState(false)
@@ -73,28 +73,28 @@ export default function DataRequests() {
 
   // Show who each open request is for (completed ones no longer have a uid on purpose).
   useEffect(() => {
-    const missing = items.filter((i) => i.userId && !names[i.userId]).map((i) => i.userId as string)
+    const missing = items.filter((i) => i.userId && !people[i.userId]).map((i) => i.userId as string)
     if (!missing.length) return
     let cancelled = false
     void Promise.all(
       Array.from(new Set(missing)).map(async (uid) => {
         try {
           const snap = await getDoc(doc(db, 'users', uid))
-          const label = snap.exists()
-            ? [snap.get('fullName'), snap.get('email') ?? snap.get('phone')].filter(Boolean).join(' · ')
-            : ''
-          return [uid, label || 'Unknown member'] as const
+          const person = snap.exists()
+            ? { name: String(snap.get('fullName') ?? '').trim() || 'Member', contact: String(snap.get('email') ?? snap.get('phone') ?? '') }
+            : { name: 'Unknown member', contact: '' }
+          return [uid, person] as const
         } catch {
-          return [uid, 'Unknown member'] as const
+          return [uid, { name: 'Unknown member', contact: '' }] as const
         }
       }),
     ).then((pairs) => {
-      if (!cancelled) setNames((prev) => ({ ...prev, ...Object.fromEntries(pairs) }))
+      if (!cancelled) setPeople((prev) => ({ ...prev, ...Object.fromEntries(pairs) }))
     })
     return () => {
       cancelled = true
     }
-  }, [items, names])
+  }, [items, people])
 
   const visible = useMemo(
     () =>
@@ -134,7 +134,8 @@ export default function DataRequests() {
   }
 
   const who = (i: DeletionRequest) =>
-    i.userId ? (names[i.userId] ?? 'Loading…') : i.userIdHash ? `Erased member (ref ${i.userIdHash.slice(0, 8)})` : 'Unknown'
+    i.userId ? (people[i.userId]?.name ?? 'Loading…') : i.userIdHash ? `Erased member (ref ${i.userIdHash.slice(0, 8)})` : 'Unknown'
+  const contactOf = (i: DeletionRequest) => (i.userId ? people[i.userId]?.contact : '')
 
   return (
     <section className="page">
@@ -207,7 +208,10 @@ export default function DataRequests() {
             return (
               <article key={item.id} className="card sup-card">
                 <div className="sup-head">
-                  <span className="sup-subject">{who(item)}</span>
+                  <span className="sup-subject">
+                    {who(item)}
+                    {contactOf(item) ? <span className="sup-meta"> · {contactOf(item)}</span> : null}
+                  </span>
                   <span className={`tag ${meta.tone}`}>{meta.label}</span>
                 </div>
                 {item.status === 'scheduled' && runsAt && (

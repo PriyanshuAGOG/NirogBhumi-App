@@ -419,7 +419,7 @@ export default function Programs() {
               </div>
               <div className="prog-meta">
                 {p.code && <span className="tag tag-warn">{p.code}</span>}
-                <span className="prog-members">{p.memberCount ?? 0} members</span>
+                <span className="prog-members">{p.memberCount ?? 0} {(p.memberCount ?? 0) === 1 ? 'member' : 'members'}</span>
                 <button
                   className="btn btn-ghost btn-sm"
                   onClick={() => {
