@@ -100,6 +100,16 @@ jobs:
           cache-dependency-path: firebase/functions/package-lock.json
       - run: npm ci
       - run: npm test
+      # Behavioural tests of the callables/triggers (access-code redemption,
+      # coach inbox push, ...) against the Firestore emulator - the type-check
+      # above proves it compiles, not that enrollment logic is correct.
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Run Cloud Functions unit tests against the emulator
+        working-directory: .
+        run: npx --yes firebase-tools@15.22.3 emulators:exec --only firestore --project demo-nirog-bhumi "npm --prefix firebase/functions run test:unit"
 
   firebase-rules:
     name: Firebase rules validation

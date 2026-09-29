@@ -601,7 +601,14 @@ export const redeemProgramCode = onCall({ region }, async request => {
   //     racing for the last seat can't both get in.
   //  2. programs.code - the single legacy code stored on the program itself.
   //     Kept so batches created before access codes existed keep working.
-  const codeRef = db.doc(`programCodes/${code}`);
+  // Codes created by older console builds were stored under whatever casing
+  // the coach typed, so fall back to the raw input as a doc id before giving up.
+  const rawCode = String(request.data?.code ?? '').trim();
+  let codeRef = db.doc(`programCodes/${code}`);
+  if (rawCode !== code && !rawCode.includes('/') && !(await codeRef.get()).exists) {
+    const rawRef = db.doc(`programCodes/${rawCode}`);
+    if ((await rawRef.get()).exists) codeRef = rawRef;
+  }
   const redemptionRef = codeRef.collection('redemptions').doc(auth.uid);
   const userRef = db.doc(`users/${auth.uid}`);
 
