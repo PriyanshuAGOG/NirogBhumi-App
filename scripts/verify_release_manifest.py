@@ -44,6 +44,9 @@ FORBIDDEN_PERMISSIONS = {
     "android.permission.SCHEDULE_EXACT_ALARM": "restricted by Play; WorkManager is used instead",
     "android.permission.USE_EXACT_ALARM": "restricted by Play",
     "com.google.android.gms.permission.AD_ID": "the app shows no ads and shares nothing for advertising; keep the advertising ID out",
+    "android.permission.ACCESS_ADSERVICES_AD_ID": "Privacy Sandbox advertising ID (merged in by Firebase Analytics); the app has no advertising",
+    "android.permission.ACCESS_ADSERVICES_ATTRIBUTION": "Privacy Sandbox ad attribution (merged in by Firebase Analytics); the app has no advertising",
+    "android.permission.ACCESS_ADSERVICES_TOPICS": "Privacy Sandbox ad topics; the app has no advertising",
 }
 
 # Components that are intentionally exported (launcher, Health Connect rationale, widget).
@@ -53,6 +56,12 @@ EXPORTED_ALLOWLIST = {
     ".health.PermissionsRationaleActivity", "com.nirogbhumi.app.health.PermissionsRationaleActivity",
     ".ViewPermissionUsageActivity", "com.nirogbhumi.app.ViewPermissionUsageActivity",
     ".widget.HealthQuickLogWidgetReceiver", "com.nirogbhumi.app.widget.HealthQuickLogWidgetReceiver",
+    # Library components that must be exported to work, reviewed once:
+    # Firebase Auth's browser-return activities (OAuth / reCAPTCHA redirects) and the
+    # Health Connect SDK's bind service that Health Connect itself connects to.
+    "com.google.firebase.auth.internal.GenericIdpActivity",
+    "com.google.firebase.auth.internal.RecaptchaActivity",
+    "androidx.health.platform.client.impl.sdkservice.HealthDataSdkService",
 }
 
 

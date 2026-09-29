@@ -3,6 +3,7 @@ package com.nirogbhumi.app.ui.screens
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.SemanticsNodeInteraction
@@ -81,9 +82,9 @@ class RequestConsultationScreenTest {
   fun `send is disabled until there is a real concern and the emergency note is acknowledged`() {
     composeTestRule.setContent { MyApplicationTheme { RequestConsultationContent(submitting = false, error = null, onBack = {}, onSubmit = { _, _, _, _ -> }) } }
     composeTestRule.onNodeWithText("Send request").assertIsNotEnabled()
-    composeTestRule.onNodeWithText("For example: my fasting sugar is high on weekends and I'm not sure what to change.").performScrollTo().performTextInput("too short")
+    composeTestRule.onNode(hasSetTextAction()).performScrollTo().performTextInput("too short")
     composeTestRule.onNodeWithText("Send request").assertIsNotEnabled()
-    composeTestRule.onNodeWithText("For example: my fasting sugar is high on weekends and I'm not sure what to change.").performScrollTo().performTextInput(" - now it is long enough to be useful")
+    composeTestRule.onNode(hasSetTextAction()).performScrollTo().performTextInput(" - now it is long enough to be useful")
     composeTestRule.onNodeWithText("Send request").assertIsNotEnabled() // still not acknowledged
     composeTestRule.onNodeWithText("I understand this is not emergency care. If I feel very unwell I will contact emergency services or my doctor.").tap()
     composeTestRule.onNodeWithText("Send request").assertIsEnabled()
@@ -98,7 +99,7 @@ class RequestConsultationScreenTest {
     composeTestRule.onNodeWithText("Yoga").tap()
     composeTestRule.onNodeWithText("Evening").tap()
     composeTestRule.onNodeWithText("Let the expert see my recent readings").tap() // untick
-    composeTestRule.onNodeWithText("For example: my fasting sugar is high on weekends and I'm not sure what to change.").performScrollTo().performTextInput("Knees hurt during the morning routine")
+    composeTestRule.onNode(hasSetTextAction()).performScrollTo().performTextInput("Knees hurt during the morning routine")
     composeTestRule.onNodeWithText("I understand this is not emergency care. If I feel very unwell I will contact emergency services or my doctor.").tap()
     composeTestRule.onNodeWithText("Send request").tap()
     assertEquals(listOf<Any>("Yoga", "Knees hurt during the morning routine", "Evening", false), captured)

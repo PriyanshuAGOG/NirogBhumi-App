@@ -4,6 +4,7 @@ import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -38,6 +39,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import com.google.firebase.Timestamp
@@ -249,8 +251,13 @@ fun RequestConsultationContent(
 
 @Composable
 private fun CheckRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-  Row(Modifier.fillMaxWidth().clickable { onChange(!checked) }, verticalAlignment = Alignment.CenterVertically) {
-    Checkbox(checked = checked, onCheckedChange = onChange)
+  // One toggleable row (Checkbox itself is not separately clickable) so TalkBack reads
+  // "<label>, checkbox, checked" as a single control and a tap anywhere on the row toggles it.
+  Row(
+    Modifier.fillMaxWidth().toggleable(value = checked, role = Role.Checkbox, onValueChange = onChange),
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    Checkbox(checked = checked, onCheckedChange = null)
     Text(label, style = NirogType.body, color = NirogColor.inkSecondary, modifier = Modifier.weight(1f))
   }
 }
