@@ -21,6 +21,7 @@ const NAV: NavItem[] = [
   { to: '/announcements', label: 'Announcements', icon: '📣', section: 'Care+', permission: 'announcements' },
   { to: '/calendar', label: 'Calendar', icon: '🗓️', section: 'Care+', permission: 'calendar' },
   { to: '/programs', label: 'Programs', icon: '🌱', section: 'Care+', permission: 'programs' },
+  { to: '/resources', label: 'Plans & Guidance', icon: '📋', section: 'Care+', permission: 'programs' },
   { to: '/consultations', label: 'Consultations', icon: '🩺', section: 'Care+', adminOnly: true },
   { to: '/moderation', label: 'Moderation', icon: '🛡️', section: 'Support', permission: 'moderation' },
   { to: '/support', label: 'Support', icon: '💬', section: 'Support', permission: 'support' },

@@ -2025,6 +2025,8 @@ fun CareTab(state: NirogState) {
                 ) { state.currentScreen = "program_calendar" }
             }
 
+            CareRow(Icons.Outlined.Spa, "Plans & guidance", "Diet plans, yoga and routines your coach has shared.") { state.currentScreen = "program_resources" }
+
             SectionLabel("COMMUNITY", color = NirogColor.gold)
             PinnedAnnouncementCard(state)
 

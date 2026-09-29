@@ -134,6 +134,9 @@ interface HealthRepository {
     // program, grouped by memberUid client-side. Members can't use this -
     // rules deny them reading anything beyond their own thread.
     fun listenCoachInboxForProgram(programId: String, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription
+    // Coach-authored plans and guidance (diet, yoga, naturopathy, notes) for one
+    // batch - programResources, readable only by that batch's members and staff.
+    fun listenProgramResources(programId: String, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription
     fun sendCoachInboxMessage(programId: String, memberUid: String, text: String, senderName: String, senderRole: String, done: (CloudResult<Unit>) -> Unit)
 
     // Batch Pulse: today's PII-free "N of M checked in" + collective walking
@@ -661,6 +664,22 @@ class FirebaseHealthRepository : HealthRepository {
             .limit(100)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) update(CloudResult.Failure(error.message ?: "Could not load your questions", error))
+                else update(CloudResult.Success(snapshot?.documents.orEmpty().map { CloudDocument(it.id, it.data.orEmpty()) }))
+            }
+        return CloudSubscription { registration.remove() }
+    }
+
+    override fun listenProgramResources(programId: String, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription {
+        val update = reporting("listenProgramResources", update)
+        val database = db ?: run { update(CloudResult.Failure("Firebase is not configured")); return CloudSubscription {} }
+        // Unordered on purpose (sorted on the device by week, then recency): an
+        // equality-only query needs no composite index that could be missing in a
+        // fresh project.
+        val registration = database.collection("programResources")
+            .whereEqualTo("programId", programId)
+            .limit(200)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) update(CloudResult.Failure(error.message ?: "Could not load plans", error))
                 else update(CloudResult.Success(snapshot?.documents.orEmpty().map { CloudDocument(it.id, it.data.orEmpty()) }))
             }
         return CloudSubscription { registration.remove() }

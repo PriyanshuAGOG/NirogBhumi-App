@@ -31,6 +31,7 @@ class NirogMessagingService : FirebaseMessagingService() {
             "announcement" -> "announcements"
             "coach_message" -> "coach_inbox"
             "privacy" -> "data_controls"
+            "program_resource" -> "program_resources"
             else -> "dashboard"
         }
         val intent = Intent(this, MainActivity::class.java).putExtra("route", route).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)

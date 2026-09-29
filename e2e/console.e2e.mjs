@@ -60,7 +60,7 @@ async function step(name, fn) {
     console.log(`  ✓ ${name}`);
   } catch (error) {
     results.push({ name, ok: false, error });
-    console.log(`  ✗ ${name}\n      ${String(error.message).split('\n')[0]}`);
+    console.log(`  ✗ ${name}\n      ${String(error.message).split('\n').slice(0, 3).join('\n      ')}`);
     if (currentPage) await currentPage.screenshot({ path: path.join(ARTIFACTS, `${name.replace(/[^a-z0-9]+/gi, '_').slice(0, 60)}.png`), fullPage: true }).catch(() => {});
   }
 }
@@ -376,6 +376,38 @@ await step('coach batches: roster + message works', async () => {
   await coach.page.getByRole('button', { name: 'Send message' }).click();
   await coach.page.getByText(/Your message to Asha Member was sent/).waitFor();
   expect((await adb.collection('coachInboxMessages').where('fromUid', '==', 'coachA').get()).size === 1, 'coach message should be stored');
+});
+
+await step('coach shares a plan with their batch: validation, save, members notified, edit, delete', async () => {
+  await go(coach.page, '/resources');
+  await coach.page.getByRole('heading', { name: 'Plans & guidance' }).waitFor();
+  expect((await coach.page.locator('select.select option', { hasText: 'August Batch' }).count()) === 0, 'coach must only be able to pick their own batch');
+  await coach.page.getByRole('button', { name: '+ New resource' }).click();
+  await coach.page.getByRole('button', { name: 'Share with batch' }).click();
+  await coach.page.getByText('Give it a short title.').waitFor();
+  await coach.page.getByPlaceholder(/Week 1 - building your plate/).fill('Gentle morning flow');
+  await coach.page.locator('.modal select.select').first().selectOption({ label: 'Yoga' });
+  await coach.page.locator('.modal textarea').fill('Cat-cow, child pose, slow breathing. Ten minutes. Stop if dizzy.');
+  await coach.page.locator('.modal input[inputmode="url"]').fill('javascript:alert(1)');
+  await coach.page.getByRole('button', { name: 'Share with batch' }).click();
+  await coach.page.getByText(/must start with http/).waitFor();
+  await coach.page.locator('.modal input[inputmode="url"]').fill('https://nirogbhumi.com/yoga');
+  await coach.page.getByRole('button', { name: 'Share with batch' }).click();
+  await coach.page.getByText(/Shared with July Batch/).waitFor();
+  await coach.page.locator('.res-card', { hasText: 'Gentle morning flow' }).waitFor();
+  const stored = (await adb.collection('programResources').where('programId', '==', 'progA').get()).docs[0];
+  expect(stored.get('createdBy') === 'coachA' && stored.get('category') === 'yoga' && stored.get('link') === 'https://nirogbhumi.com/yoga', `stored resource is wrong: ${JSON.stringify(stored.data())}`);
+  const pushes = await eventually(async () => { const s = await adb.collection('notifications').where('type', '==', 'program_resource').get(); return s.size >= 3 ? s : null; }, 'the batch should be queued a notification');
+  expect(pushes.docs.every((d) => d.get('status') === 'scheduled' && !['coachA'].includes(d.get('userId'))), 'pushes are scheduled and never go to the author');
+  await snap(coach.page, 'coach-resources');
+  await coach.page.locator('.res-card', { hasText: 'Gentle morning flow' }).getByRole('button', { name: 'Edit' }).click();
+  await coach.page.locator('.modal input.input').nth(1).fill('Gentle morning flow (v2)');
+  await coach.page.getByRole('button', { name: 'Save changes' }).click();
+  await coach.page.getByText('Gentle morning flow (v2)').waitFor();
+  await coach.page.locator('.res-card', { hasText: 'v2' }).getByRole('button', { name: 'Delete' }).click();
+  await coach.page.getByRole('button', { name: 'Remove' }).click();
+  await eventually(async () => (await adb.collection('programResources').where('programId', '==', 'progA').get()).empty, 'resource should be deleted');
+  await noBanner(coach.page, 'Plans & guidance');
 });
 
 await step('coach calendar loads', async () => {

@@ -94,6 +94,15 @@ await step('ask your coach: the member can write and read their own thread', asy
   expect(thread.size === 1, 'thread readable');
 });
 
+await step('plans & guidance: the member sees their own batch\'s resources and never another batch\'s', async () => {
+  await adb.doc('programResources/jr1').set({ programId: 'progJ', category: 'diet', title: 'Week 1 plate', body: 'Half plate vegetables, a quarter protein.', createdBy: 'coachJ' });
+  await adb.doc('programResources/jr2').set({ programId: 'progOther', category: 'yoga', title: 'Not for this batch', body: 'x', createdBy: 'coachX' });
+  const mine = await getDocs(query(collection(db, 'programResources'), where('programId', '==', 'progJ')));
+  expect(mine.size === 1 && mine.docs[0].get('title') === 'Week 1 plate', 'member should read their batch resource');
+  expect((await errorCode(() => getDocs(query(collection(db, 'programResources'), where('programId', '==', 'progOther'))))) === 'permission-denied', 'another batch\'s resources are private');
+  expect((await errorCode(() => addDoc(collection(db, 'programResources'), { programId: 'progJ', category: 'diet', title: 'Mine', body: 'x', createdBy: uid, createdAt: serverTimestamp() }))) === 'permission-denied', 'members cannot author resources');
+});
+
 let healthFilePath;
 await step('uploads: private files and chat photos succeed; wrong owner or wrong type is refused', async () => {
   healthFilePath = `users/${uid}/health-file/abc123`;

@@ -23,6 +23,7 @@ const Users = lazy(() => import('./pages/Users'))
 const Settings = lazy(() => import('./pages/Settings'))
 const ErrorReports = lazy(() => import('./pages/ErrorReports'))
 const DataRequests = lazy(() => import('./pages/DataRequests'))
+const Resources = lazy(() => import('./pages/Resources'))
 
 function FullScreenLoader() {
   return (
@@ -136,6 +137,14 @@ function Gate() {
             element={
               <Protected permission="programs">
                 <Programs />
+              </Protected>
+            }
+          />
+          <Route
+            path="/resources"
+            element={
+              <Protected permission="programs">
+                <Resources />
               </Protected>
             }
           />

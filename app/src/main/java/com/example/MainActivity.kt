@@ -45,7 +45,7 @@ private const val IS_PRODUCTION_APK = true
 private val DEEP_LINK_ROUTES = setOf(
   "dashboard", "weekly_report", "consultation_detail", "active_journey",
   "order_detail", "expert_notes", "program_calendar", "announcements",
-  "daily_checkin", "coach_inbox", "data_controls",
+  "daily_checkin", "coach_inbox", "data_controls", "program_resources",
 )
 private fun sanitizedRoute(raw: String?): String = raw?.takeIf { it in DEEP_LINK_ROUTES } ?: ""
 
@@ -384,6 +384,7 @@ fun ActiveScreenContent(state: NirogState) {
       "program_chat" -> ProgramChatScreen(state)
       "chat_hub" -> ChatHubScreen(state)
       "coach_inbox" -> CoachInboxScreen(state)
+      "program_resources" -> ProgramResourcesScreen(state)
 
       // Metrics Detailed screens
       "sugar_detail" -> BloodSugarDetailScreen(state)

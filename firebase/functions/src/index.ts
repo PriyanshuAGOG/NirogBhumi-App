@@ -205,6 +205,30 @@ export const onCoachInboxMessageCreate = onDocumentCreated({ document: 'coachInb
   }
 });
 
+// A coach shared a new plan/routine/note with their batch: queue one push per
+// member (delivered by the notification sweep within ~15 minutes, not instantly -
+// unlike a personal reply this is a broadcast). Silent when the author unticked
+// "Notify the batch". Skips the author, in case a coach is also on the roster.
+const RESOURCE_LABELS: Record<string, string> = { diet: 'diet plan', yoga: 'yoga routine', naturopathy: 'naturopathy routine', guidance: 'guidance note', other: 'resource' };
+export const onProgramResourceCreate = onDocumentCreated({ document: 'programResources/{resourceId}', region }, async event => {
+  const resource = event.data?.data();
+  if (!resource || resource.notify === false) return;
+  const programId = String(resource.programId ?? '');
+  if (!programId) return;
+  const roster = await db.collection('programMembers').where('programId', '==', programId).get();
+  const uids = roster.docs.map(d => String(d.get('uid') ?? '')).filter(uid => uid && uid !== resource.createdBy);
+  const title = `New ${RESOURCE_LABELS[String(resource.category)] ?? 'resource'} from your coach`;
+  const body = String(resource.title ?? '').slice(0, 140);
+  for (let offset = 0; offset < uids.length; offset += 400) {
+    const batch = db.batch();
+    uids.slice(offset, offset + 400).forEach(uid => batch.set(db.collection('notifications').doc(), {
+      userId: uid, profileId: null, title, body, type: 'program_resource',
+      status: 'scheduled', scheduledFor: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp(),
+    }));
+    await batch.commit();
+  }
+});
+
 // Daily maintenance (05:00 IST): refreshes each batch's collective-walk pulse and,
 // on Mondays, queues the weekly "your week in review" nudge. The previous version
 // also wrote a hardcoded "Walk 15 minutes after dinner" dailyActions doc and a

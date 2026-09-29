@@ -283,6 +283,29 @@ service cloud.firestore {
       allow read: if programStaff(resource.data.programId) || ownProgram(resource.data.programId);
       allow write: if false;
     }
+    // Coach-authored guidance for one batch: diet plans, yoga and naturopathy
+    // routines, general notes. Members read only their own batch's resources;
+    // only admin or that batch's assigned coach may write, and a coach can never
+    // move a resource to another batch or forge its author. Field shape is
+    // validated here so a malformed doc can't crash the member app's renderer.
+    function validResource(d) {
+      return d.keys().hasOnly(['programId', 'category', 'title', 'body', 'link', 'weekNumber', 'notify', 'createdBy', 'createdByName', 'createdAt', 'updatedAt'])
+        && d.programId is string && d.programId != ''
+        && d.category in ['diet', 'yoga', 'naturopathy', 'guidance', 'other']
+        && d.title is string && d.title.size() > 0 && d.title.size() <= 120
+        && d.body is string && d.body.size() <= 5000
+        && (d.get('link', null) == null || (d.link is string && d.link.size() <= 500 && d.link.matches('https?://.+')))
+        && (d.get('weekNumber', null) == null || (d.weekNumber is int && d.weekNumber >= 0 && d.weekNumber <= 104));
+    }
+    match /programResources/{id} {
+      allow read: if programStaff(resource.data.programId) || ownProgram(resource.data.programId);
+      allow create: if programStaff(request.resource.data.programId) && validResource(request.resource.data)
+        && request.resource.data.createdBy == request.auth.uid && request.resource.data.createdAt == request.time;
+      allow update: if programStaff(resource.data.programId) && validResource(request.resource.data)
+        && request.resource.data.programId == resource.data.programId
+        && request.resource.data.createdBy == resource.data.createdBy;
+      allow delete: if programStaff(resource.data.programId);
+    }
     // Program access codes are sensitive bearer credentials. Admins can manage
     // every code; a coach can only see or mutate codes belonging to a program
     // that coach is explicitly assigned to.
