@@ -63,16 +63,34 @@ jobs:
       # RELEASE build (R8 code-shrinking, resource shrinking, ProGuard
       # rules) on a push. A missing keep rule or an R8-stripped class would
       # surface only at upload time, or as a crash on a user's device.
-      # The release signing + google-services plugins are both conditional,
-      # so with no secrets present this produces an UNSIGNED bundle - which
-      # is exactly what's needed to prove the shipping artifact compiles,
-      # minifies, and its release unit tests pass on every push.
+      # The google-services plugin is conditional (no google-services.json in
+      # CI), and signing uses a throwaway key (see the step below), which is
+      # enough to prove the shipping artifact compiles, minifies and signs on
+      # every push.
       # Unit tests live in the shared src/test source set (no release-specific
       # test source set), so the debug job's testDebugUnitTest already covers
       # them - this job's job is purely to exercise the release artifact:
       # R8 code-shrinking, resource shrinking, and ProGuard.
-      - name: Build unsigned release bundle (verify R8 + resource shrinking)
-        run: ./gradlew --no-daemon --max-workers=2 bundleRelease
+      # Signs with a throwaway keystore created on the runner so the exact
+      # signing path used for the real upload (KEYSTORE_PATH/STORE_PASSWORD/
+      # KEY_ALIAS/KEY_PASSWORD env -> signingConfigs.release) is exercised on
+      # every push. The key is discarded with the runner and is NOT the upload
+      # key; the resulting bundle is never published.
+      - name: Build signed release bundle with a throwaway key (verify R8 + resource shrinking + signing)
+        env:
+          STORE_PASSWORD: ci-throwaway-pass
+          KEY_ALIAS: ci-throwaway
+          KEY_PASSWORD: ci-throwaway-pass
+        run: |
+          export KEYSTORE_PATH="$RUNNER_TEMP/ci-throwaway.jks"
+          keytool -genkeypair -keystore "$KEYSTORE_PATH" -storepass "$STORE_PASSWORD" -keypass "$KEY_PASSWORD" \
+            -alias "$KEY_ALIAS" -keyalg RSA -keysize 2048 -validity 2 -dname "CN=CI throwaway"
+          ./gradlew --no-daemon --max-workers=2 bundleRelease -PVERSION_CODE=${{ github.run_number }} -PVERSION_NAME=0.0.${{ github.run_number }}-ci
+          AAB="$(ls app/build/outputs/bundle/release/*.aab | head -n1)"
+          jarsigner -verify "$AAB" | tee /tmp/jarsigner.txt
+          grep -q "jar verified" /tmp/jarsigner.txt
+          # It must be signed by the throwaway key, not left unsigned or debug-signed.
+          jarsigner -verify -verbose -certs "$AAB" | grep -q "CN=CI throwaway"
       # Guard the merged manifest that actually ships: no debuggable flag,
       # cleartext traffic, backups, advertising ID, install-packages or any
       # permission we haven't declared in the Data Safety form.
@@ -82,7 +100,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: android-release-unsigned-and-reports
+          name: android-release-ci-signed-and-reports
           if-no-files-found: ignore
           path: |
             app/build/outputs/bundle/release/*.aab
