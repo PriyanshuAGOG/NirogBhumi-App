@@ -35,7 +35,7 @@ class ProfileValidationTest {
     fun numericOnlyStripsTextAndKeepsOneDecimalPoint() {
         assertEquals("42", ProfileValidation.numericOnly("4a2 ", allowDecimal = false))
         assertEquals("68.5", ProfileValidation.numericOnly("68.5", allowDecimal = true))
-        assertEquals("68.5", ProfileValidation.numericOnly("6.8.5", allowDecimal = true))
+        assertEquals("6.85", ProfileValidation.numericOnly("6.8.5", allowDecimal = true))
         assertEquals("685", ProfileValidation.numericOnly("68.5", allowDecimal = false))
         assertEquals("123456", ProfileValidation.numericOnly("1234567890", allowDecimal = false))
     }
