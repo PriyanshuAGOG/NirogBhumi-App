@@ -337,3 +337,38 @@ Other half-built logic:
 - ⏳ Needs the owner: the org-policy change in §9 item 1 (until then the
   invoker step will report failure), and merging this branch to `main` to
   deploy.
+
+### Sprint 1 — Play blockers and quality gate (done on branch)
+- ✅ **Account deletion works end to end.** Root cause found while fixing it:
+  the app wrote `deletionRequests` / `dataExportRequests` straight to Firestore,
+  which the rules always denied, so **"Export my data" and "Delete my account"
+  never worked in the app**, and nothing ever approved a request for the
+  scheduler. Now: the app uses the callables; deletion is scheduled 7 days out
+  (cancellable in the app), then runs automatically; an admin **Data Requests**
+  page handles emailed requests; erasure covers identity, uploads, chat, coach
+  inbox/notes, support, reports, invites, roster and login, and health readings
+  too unless the member opted into anonymized research. Data export now also
+  includes chat, inbox, orders and consent receipts.
+- ✅ Heart-rate Health Connect permission removed. Health File sharing fails
+  closed (never a permanent public URL).
+- ✅ Profile setup no longer pre-fills fake data (28 / Male / 174 / 72 / Jaipur);
+  gender is optional; ranges are validated in onboarding and Edit profile.
+- ✅ Coach console works: coaches previously hit permission-denied on almost
+  every page. Program-scoped queries everywhere; `programInvites` (which had no
+  rule at all, so the Invites list failed even for admins) fixed; announcement
+  master docs (which list every recipient) restricted to their author + admins.
+- ✅ Console bugs found by the new browser tests: member names missing from
+  Members/Users (the app stores `fullName`), stale "0 members" on programs, an
+  unstyled filter control.
+- ✅ Quality gate now in CI: 33 Cloud Functions emulator tests, 156 rules tests
+  (including console-query and Android-write contracts), and a 24-check browser
+  end-to-end suite (admin + coach) against the emulators. Android: unit tests and
+  the R8 release build pass.
+- Known and accepted: `npm audit` still lists moderate advisories that need
+  breaking upgrades (functions: transitive `uuid` inside Google client
+  libraries; console: dev-server `esbuild`, `react-router`). Staff-only console,
+  no untrusted input reaches them.
+- ⚠ Not verifiable without a device: the Android screens changed in Sprint 1
+  (Data Controls, onboarding profile, Health File) compile and their logic is
+  unit/contract tested, but need a manual pass on a phone - see the checklist
+  in the hand-off message.
