@@ -10,6 +10,8 @@ import java.io.File
 import java.security.MessageDigest
 
 object UpdateInstaller {
+    private val SHA256_HEX = Regex("^[0-9a-fA-F]{64}$")
+
     /** SHA-256 of the downloaded file, lowercase hex - compared against the Firestore-supplied checksum before install. */
     fun sha256(file: File): String {
         val digest = MessageDigest.getInstance("SHA-256")
@@ -24,10 +26,18 @@ object UpdateInstaller {
         return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
-    /** True if the on-disk file's checksum matches what Firestore said it should be. An empty expected checksum (not yet backfilled by CI) skips verification rather than blocking every install. */
+    /**
+     * Verifies the downloaded APK against the SHA-256 published with the release.
+     * Missing or malformed checksums fail closed. The update pipeline must publish
+     * a valid checksum for every installable build.
+     */
     fun verifyChecksum(file: File, expectedSha256: String): Boolean {
-        if (expectedSha256.isBlank()) return true
-        return sha256(file).equals(expectedSha256, ignoreCase = true)
+        val normalized = expectedSha256.trim()
+        if (!SHA256_HEX.matches(normalized)) return false
+        return MessageDigest.isEqual(
+            sha256(file).lowercase().toByteArray(Charsets.US_ASCII),
+            normalized.lowercase().toByteArray(Charsets.US_ASCII),
+        )
     }
 
     fun canInstallPackages(context: Context): Boolean =

@@ -433,7 +433,8 @@ describe('health-log collection group - coach read scoped to assigned members', 
     await assertSucceeds(getDoc(doc(admin(), 'glucoseReadings/r1')));
   });
 
-  it('denies an unrelated signed-in member', async () => {
+  it('denies an unassigned coach and unrelated signed-in member', async () => {
+    await assertFails(getDoc(doc(coach('coach-b'), 'glucoseReadings/r1')));
     await assertFails(getDoc(doc(member('mem2'), 'glucoseReadings/r1')));
   });
 

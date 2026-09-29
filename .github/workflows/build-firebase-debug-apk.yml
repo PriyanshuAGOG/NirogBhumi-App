@@ -69,7 +69,13 @@ jobs:
       - name: Build debug APK
         run: |
           chmod +x gradlew
-          ./gradlew --no-daemon --max-workers=2 assembleDebug \
+          # The Firebase-connected build has a larger dependency/configuration
+          # footprint than the ordinary CI build. The previous 666 MiB heap /
+          # 384 MiB metaspace caused the Gradle daemon to die during dexing.
+          # Give this runner enough headroom while keeping worker concurrency low.
+          ./gradlew --no-daemon --max-workers=2 \
+            -Dorg.gradle.jvmargs="-Xmx3072m -XX:MaxMetaspaceSize=1024m -Dfile.encoding=UTF-8" \
+            assembleDebug \
             -PVERSION_CODE="$VERSION_CODE" -PVERSION_NAME="$VERSION_NAME" -PGIT_COMMIT="$GIT_COMMIT"
       # Absolute path - the self-update publish step below runs with a
       # different working-directory (firebase/functions), and a
