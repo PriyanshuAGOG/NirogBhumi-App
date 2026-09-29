@@ -8,6 +8,8 @@ import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import * as functions from 'firebase-functions/v1';
 import { createHash, randomBytes } from 'node:crypto';
+import { processPendingNotifications } from './notificationSender.js';
+import { dayKeyIST, isMondayIST, sendWeeklyDigests, updateBatchPulse } from './scheduledJobs.js';
 import { DELETION_GRACE_DAYS, cancelAccountDeletion as cancelDeletionRequest, processDueDeletions, scheduleAccountDeletion } from './accountDeletion.js';
 
 initializeApp();
@@ -110,10 +112,6 @@ function glucoseStatus(value: number, type: string) {
   return 'in_range';
 }
 
-function dayKeyIST(date = new Date()): string {
-  // en-CA formats as YYYY-MM-DD, which is exactly the sortable key we want.
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
-}
 
 // Batch Pulse (PRD v2, Care+): a PII-free "N of M checked in today" count for
 // the member's program. Deliberately does NOT expose which members checked
@@ -168,9 +166,6 @@ export const onBPReadingCreate = onDocumentCreated({ document: 'bpReadings/{read
 // programId field can't express). See resolveAudienceUids and
 // deleteAnnouncementDoc.
 
-// Daily maintenance job. Runs once a day; on Mondays it also builds weekly
-// reports. Keeping daily + weekly in one schedule keeps us to 3 Cloud
-// Scheduler jobs total (this + notifications + deletions), inside the free tier.
 // Two-way coach <-> member inbox (coachInboxMessages, written by the app's
 // "Ask your coach" screen and by the console's roster "Message" action).
 // Pushes the message to whoever did NOT write it, immediately rather than
@@ -210,106 +205,22 @@ export const onCoachInboxMessageCreate = onDocumentCreated({ document: 'coachInb
   }
 });
 
-export const generateDailyContent = onSchedule({ schedule: '0 5 * * *', timeZone: 'Asia/Kolkata', region }, async () => {
-  const users = await db.collection('users').where('status', '==', 'active').get();
-  const day = new Date().toISOString().slice(0, 10); const batch = db.batch();
-  users.docs.forEach(user => batch.set(db.doc(`dailyActions/${user.id}_${day}`), { userId: user.id, profileId: user.id, dateKey: day, title: 'Walk 15 minutes after dinner', reason: 'A short post-meal walk can support your health rhythm.', status: 'pending', createdAt: FieldValue.serverTimestamp() }, { merge: true }));
-  await batch.commit();
-
-  // Batch Pulse collective goal: minutes walked together this month, per
-  // active program. Runs daily (not per-log) since a monthly total doesn't
-  // need intraday freshness, keeping this inside the existing job budget.
-  const programsSnap = await db.collection('programs').get();
-  const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
-  const monthStartTs = Timestamp.fromDate(monthStart);
-  const today = dayKeyIST();
-  for (const programDoc of programsSnap.docs) {
-    const programId = programDoc.id;
-    const membersSnap = await db.collection('programMembers').where('programId', '==', programId).get();
-    const uids = membersSnap.docs.map(m => String(m.get('uid') ?? '')).filter(Boolean);
-    if (!uids.length) continue;
-    let totalMinutes = 0;
-    // Per-uid breakdown alongside the existing team total - only ever
-    // surfaced client-side for members who've opted in (below), never a
-    // silent default-on ranking.
-    const minutesByUid: Record<string, number> = {};
-    for (let i = 0; i < uids.length; i += 30) {
-      const chunk = uids.slice(i, i + 30);
-      const walks = await db.collection('walkLogs').where('userId', 'in', chunk).where('createdAt', '>=', monthStartTs).get();
-      walks.docs.forEach(w => {
-        const minutes = Number(w.get('minutes') ?? 0);
-        totalMinutes += minutes;
-        const uid = String(w.get('userId') ?? '');
-        if (uid) minutesByUid[uid] = (minutesByUid[uid] ?? 0) + minutes;
-      });
-    }
-    const leaderboard = membersSnap.docs
-      .filter(m => m.get('leaderboardOptIn') === true)
-      .map(m => ({ name: String(m.get('name') ?? 'Member'), minutes: Math.round(minutesByUid[String(m.get('uid') ?? '')] ?? 0) }))
-      .sort((a, b) => b.minutes - a.minutes)
-      .slice(0, 10);
-    await db.doc(`batchStats/${programId}_${today}`).set({ programId, dayKey: today, collectiveMinutes: Math.round(totalMinutes), memberCount: uids.length, leaderboard, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
-  }
-
-  const weekdayIST = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', weekday: 'short' }).format(new Date());
-  if (weekdayIST !== 'Mon') return;
-  const end = Timestamp.now(); const start = Timestamp.fromMillis(end.toMillis() - 7 * 86400000);
-  // Digest notifications are scheduled a few hours out (not sent immediately
-  // at this 5am run) so they land at a considerate mid-morning hour instead
-  // of during most users' default quiet hours (21:00-07:00).
-  const digestScheduledFor = Timestamp.fromMillis(Date.now() + 4 * 60 * 60000);
-  for (const user of users.docs) {
-    const [glucose, sleep] = await Promise.all([
-      db.collection('glucoseReadings').where('userId', '==', user.id).where('measuredAt', '>=', start).get(),
-      db.collection('sleepLogs').where('userId', '==', user.id).where('createdAt', '>=', start).get(),
-    ]);
-    const values = glucose.docs.map(x => Number(x.data().value)).filter(Number.isFinite);
-    const average = values.length ? Math.round(values.reduce((a,b) => a+b, 0) / values.length) : null;
-    await db.collection('weeklyReports').add({ userId: user.id, profileId: user.id, periodStart: start, periodEnd: end, glucoseAverage: average, glucoseLogCount: values.length, consistency: values.length >= 4 ? 'good' : 'building', recommendation: 'Focus on one consistent daily action this week.', createdAt: FieldValue.serverTimestamp() });
-
-    // Weekly logging-coverage digest: same "days with a reading/sleep log
-    // out of 7" coverage math the Insights screen already shows the member,
-    // sent as a nudge rather than left for them to discover on their own.
-    const loggedDayKeys = new Set<string>();
-    for (const doc of [...glucose.docs, ...sleep.docs]) {
-      const ts = (doc.get('measuredAt') ?? doc.get('createdAt')) as FirebaseFirestore.Timestamp | undefined;
-      if (ts) loggedDayKeys.add(dayKeyIST(ts.toDate()));
-    }
-    const daysLogged = loggedDayKeys.size;
-    if (daysLogged === 0) continue; // Never nag a fully inactive user with a "0/7" ping.
-    const body = daysLogged >= 4
-      ? `Great rhythm - you logged health data on ${daysLogged} of the last 7 days. Keep it up!`
-      : `You logged health data on ${daysLogged} of the last 7 days. Try logging one thing today to build your rhythm.`;
-    await db.collection('notifications').add({
-      userId: user.id, profileId: user.id, title: 'Your week in review', body,
-      type: 'weekly_digest', status: 'scheduled', scheduledFor: digestScheduledFor, createdAt: FieldValue.serverTimestamp(),
-    });
-  }
+// Daily maintenance (05:00 IST): refreshes each batch's collective-walk pulse and,
+// on Mondays, queues the weekly "your week in review" nudge. The previous version
+// also wrote a hardcoded "Walk 15 minutes after dinner" dailyActions doc and a
+// stub weeklyReports doc for every user - nothing in the app ever read either (the
+// app computes today's focus and the weekly report on the device from the member's
+// own logs), and a single 500-write batch over all users would have failed at 501.
+export const generateDailyContent = onSchedule({ schedule: '0 5 * * *', timeZone: 'Asia/Kolkata', region, timeoutSeconds: 540, memory: '512MiB' }, async () => {
+  const pulses = await updateBatchPulse(db);
+  const digest = isMondayIST() ? await sendWeeklyDigests(db, { budgetMs: 420_000 }) : null;
+  console.log('Daily maintenance', JSON.stringify({ pulses, digest }));
 });
 
-export const sendPendingNotifications = onSchedule({ schedule: 'every 15 minutes', timeZone: 'Asia/Kolkata', region }, async () => {
-  const due = await db.collection('notifications').where('status', '==', 'scheduled').where('scheduledFor', '<=', Timestamp.now()).limit(100).get();
-  for (const doc of due.docs) {
-    const notification = doc.data(); const user = await db.doc(`users/${notification.userId}`).get();
-    const preferences = user.get('notificationPreferences') ?? {}; const timezone = String(user.get('timezone') ?? 'Asia/Kolkata');
-    const parts = new Intl.DateTimeFormat('en-GB', { timeZone: timezone, hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(new Date());
-    const currentMinutes = Number(parts.find(part => part.type === 'hour')?.value ?? 0) * 60 + Number(parts.find(part => part.type === 'minute')?.value ?? 0);
-    const toMinutes = (value: unknown, fallback: number) => { const match = String(value ?? '').match(/^(\d{1,2}):(\d{2})$/); return match ? Number(match[1]) * 60 + Number(match[2]) : fallback; };
-    const quietStart = toMinutes(preferences.quietHoursStart, 21 * 60); const quietEnd = toMinutes(preferences.quietHoursEnd, 7 * 60);
-    const inQuietHours = quietStart < quietEnd ? currentMinutes >= quietStart && currentMinutes < quietEnd : currentMinutes >= quietStart || currentMinutes < quietEnd;
-    if (notification.type === 'reminder' && inQuietHours) { await doc.ref.set({ scheduledFor: Timestamp.fromMillis(Date.now() + 60 * 60000), deferredReason: 'quiet_hours', updatedAt: FieldValue.serverTimestamp() }, { merge: true }); continue; }
-    if (notification.type === 'reminder') {
-      const startOfWindow = Timestamp.fromMillis(Date.now() - 24 * 60 * 60000); const sent = await db.collection('notifications').where('userId', '==', notification.userId).where('status', '==', 'sent').where('sentAt', '>=', startOfWindow).get();
-      const maxReminders = Math.max(0, Math.min(5, Number(preferences.maxHealthReminders ?? 3)));
-      if (sent.size >= maxReminders) { await doc.ref.set({ scheduledFor: Timestamp.fromMillis(Date.now() + 12 * 60 * 60000), deferredReason: 'daily_cap', updatedAt: FieldValue.serverTimestamp() }, { merge: true }); continue; }
-    }
-    const token = user.get('fcmToken');
-    if (!token) { await doc.ref.set({ status: 'failed', failureReason: 'missing_token' }, { merge: true }); continue; }
-    try {
-      await getMessaging().send({ token, notification: { title: notification.title, body: notification.body }, data: { type: String(notification.type ?? 'reminder'), notificationId: doc.id } });
-      await doc.ref.set({ status: 'sent', sentAt: FieldValue.serverTimestamp() }, { merge: true });
-    } catch (error) { console.error('FCM send failed', doc.id, error); await doc.ref.set({ status: 'failed', failureReason: 'send_failed', updatedAt: FieldValue.serverTimestamp() }, { merge: true }); }
-  }
+
+export const sendPendingNotifications = onSchedule({ schedule: 'every 15 minutes', timeZone: 'Asia/Kolkata', region, timeoutSeconds: 540, memory: '512MiB' }, async () => {
+  const summary = await processPendingNotifications({ db, send: message => getMessaging().send(message) }, { limit: 1000, concurrency: 25, budgetMs: 420_000 });
+  if (summary.considered) console.log('Notifications processed', JSON.stringify(summary));
 
   // Piggybacks the 24-hour-default announcement expiry cleanup onto this
   // existing 15-minute schedule rather than adding a 4th Cloud Scheduler job
@@ -1000,7 +911,7 @@ export const exportUserData = onDocumentCreated({ document: 'dataExportRequests/
   const path = `users/${uid}/exports/${request.id}.json`; const file = getStorage().bucket().file(path);
   await file.save(JSON.stringify(exported, null, 2), { contentType: 'application/json', metadata: { cacheControl: 'private, max-age=0', metadata: { ownerUid: uid } } });
   await request.ref.set({ status: 'completed', storagePath: path, completedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
-  await db.collection('notifications').add({ userId: uid, profileId: null, title: 'Your data export is ready', body: 'Open Privacy and Data Controls to access your export.', type: 'report', status: 'scheduled', scheduledFor: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp() });
+  await db.collection('notifications').add({ userId: uid, profileId: null, title: 'Your data export is ready', body: 'Open Privacy and Data Controls to access your export.', type: 'privacy', status: 'scheduled', scheduledFor: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp() });
 });
 // Real, time-limited signed URL for the Health File "share link / QR code"
 // feature - the client previously used the Storage download-token URL
