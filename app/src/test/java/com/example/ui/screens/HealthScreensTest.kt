@@ -106,8 +106,11 @@ class HealthScreensTest {
     @Test
     fun `a pending deletion shows its date and a way to keep the account`() {
         val state = NirogState()
-        state.pendingDeletionMillis = System.currentTimeMillis() + 7L * 86_400_000L
         composeTestRule.setContent { MyApplicationTheme { DataControlsScreen(state) } }
+        // The screen re-checks the server when it opens (and clears the date when nobody is signed in), so the
+        // scheduled date is supplied after it has opened, the way the server's answer arrives.
+        composeTestRule.runOnIdle { state.pendingDeletionMillis = System.currentTimeMillis() + 7L * 86_400_000L }
+        composeTestRule.waitForIdle()
         composeTestRule.onNodeWithText("Keep my account - cancel deletion").assertExists()
     }
 
