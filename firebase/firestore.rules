@@ -104,15 +104,110 @@ service cloud.firestore {
       allow update: if admin() || (ownsResource() && ownsRequest() && preservesUserId()) || (assigned(resource.data.userId) && preservesUserId());
       allow delete: if ownsResource() || admin();
     }
+    // ---- Health logs -------------------------------------------------------------------------
+    // Six kinds of reading a member logs or a device imports. Their rules are split by who wrote the
+    // entry: a member's own entry (source 'manual') can be corrected for 60 minutes after it was
+    // created, judged by the SERVER clock (request.time), never the phone's; an entry imported from
+    // Health Connect is the provider's record and is only ever re-written by the sync, never hand-edited.
+    // Keep the editable-field lists below identical to Corrections.editableKeys in the app
+    // (app/src/main/java/com/example/health/domain/HealthPayloads.kt).
+    function correctableLog(c) { return c in ['glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','medicationLogs']; }
+    function otherHealthDoc(c) { return c in ['labReports','dailyCheckins','checklistLogs']; }
+    function correctableKeys(c) {
+      return c == 'glucoseReadings' ? ['value','unit','readingType','measuredAt']
+        : c == 'bpReadings' ? ['systolic','diastolic','pulse','context','measuredAt']
+        : c == 'weightLogs' ? ['valueKg','measuredAt']
+        : c == 'sleepLogs' ? ['sleepStartAt','sleepEndAt','durationMinutes','measuredAt']
+        : c == 'walkLogs' ? ['minutes','seconds','activityType','estimatedSteps','mealRelation','measuredAt']
+        : ['taken','name','measuredAt'];
+    }
+    // A time the member typed or picked: not in the future (15 min of phone-clock drift allowed) and not ancient.
+    function plausibleTime(t) { return t is timestamp && t <= request.time + duration.value(15, 'm') && t >= request.time - duration.value(14, 'd'); }
+    function inRange(v, lo, hi) { return v is number && v >= lo && v <= hi; }
+    // Range checks on whatever value fields are present (older app versions send other shapes, so absence is allowed here;
+    // corrections below additionally require the canonical fields).
+    function sensibleValues(c, d) {
+      return (c != 'glucoseReadings' || !('value' in d) || (d.get('readingType', '') == 'hba1c' ? inRange(d.value, 3, 20) : inRange(d.value, 20, 800)))
+        && (c != 'bpReadings' || ((!('systolic' in d) || inRange(d.systolic, 60, 260)) && (!('diastolic' in d) || inRange(d.diastolic, 30, 180)) && (!('pulse' in d) || d.pulse == null || inRange(d.pulse, 20, 250))))
+        && (c != 'weightLogs' || !('valueKg' in d) || inRange(d.valueKg, 20, 300))
+        && (c != 'sleepLogs' || !('durationMinutes' in d) || (d.durationMinutes is int && d.durationMinutes >= 1 && d.durationMinutes <= 1080))
+        && (c != 'walkLogs' || !('minutes' in d) || inRange(d.minutes, 0, 1440))
+        && (c != 'medicationLogs' || !('taken' in d) || d.taken is bool)
+        && (!('measuredAt' in d) || d.measuredAt is timestamp);
+    }
+    function sleepIsCoherent(d) {
+      return d.sleepStartAt is timestamp && d.sleepEndAt is timestamp && d.sleepEndAt > d.sleepStartAt
+        && d.durationMinutes is int && d.measuredAt == d.sleepEndAt
+        && (d.sleepEndAt.toMillis() - d.sleepStartAt.toMillis()) >= (d.durationMinutes - 1) * 60000
+        && (d.sleepEndAt.toMillis() - d.sleepStartAt.toMillis()) <= (d.durationMinutes + 1) * 60000;
+    }
+    function manualLogCreate(c) {
+      let d = request.resource.data;
+      return validCreate() && d.get('source', 'manual') in ['manual', 'timer']
+        && !('lastCorrectedAt' in d) && !('correctionCount' in d) && !('providerRecordId' in d)
+        && sensibleValues(c, d)
+        && (!('measuredAt' in d) || d.measuredAt == request.time || plausibleTime(d.measuredAt));
+    }
+    // What the Health Connect sync writes. createdAt is the provider's own time so it never changes between syncs.
+    function importedLogCreate(c) {
+      let d = request.resource.data;
+      return ownsRequest() && d.get('source', '') == 'health_connect'
+        && d.providerRecordId is string && d.providerRecordId.size() > 0 && d.providerRecordId.size() <= 200
+        && d.createdAt is timestamp && d.createdAt <= request.time + duration.value(15, 'm') && d.createdAt >= request.time - duration.value(400, 'd')
+        && (!('importedAt' in d) || d.importedAt == request.time)
+        && !('lastCorrectedAt' in d) && !('correctionCount' in d);
+    }
+    function importedLogResync() {
+      let d = request.resource.data;
+      let b = resource.data;
+      return ownsResource() && ownsRequest() && preservesUserId()
+        && b.get('source', '') == 'health_connect' && d.get('source', '') == 'health_connect'
+        && d.get('providerRecordId', null) == b.get('providerRecordId', null)
+        && d.get('profileId', null) == b.get('profileId', null)
+        && d.createdAt is timestamp && d.createdAt <= request.time + duration.value(15, 'm')
+        && (!('importedAt' in d) || d.importedAt == request.time);
+    }
+    // The member correcting their own entry: only the listed fields, only while the window is open, with an audit trail.
+    function memberCorrection(c) {
+      let d = request.resource.data;
+      let b = resource.data;
+      return ownsResource() && ownsRequest() && preservesUserId()
+        && b.get('source', 'manual') in ['manual', 'timer'] && d.get('source', 'manual') == b.get('source', 'manual')
+        && d.get('profileId', null) == b.get('profileId', null)
+        && d.createdAt == b.createdAt
+        && d.get('providerRecordId', null) == b.get('providerRecordId', null)
+        && b.createdAt is timestamp && request.time < b.createdAt + duration.value(60, 'm')
+        && d.diff(b).affectedKeys().hasOnly(correctableKeys(c).concat(['updatedAt', 'lastCorrectedAt', 'correctionCount']))
+        && d.lastCorrectedAt == request.time && d.updatedAt == request.time
+        && d.correctionCount is int && d.correctionCount == b.get('correctionCount', 0) + 1
+        && sensibleValues(c, d)
+        && (!d.diff(b).affectedKeys().hasAny(['measuredAt']) || d.measuredAt == b.get('measuredAt', null) || plausibleTime(d.measuredAt))
+        && (c != 'sleepLogs' || sleepIsCoherent(d));
+    }
+    // A platform admin fixing a member's entry: who and when are always recorded, provenance fields stay put.
+    function adminCorrection() {
+      let d = request.resource.data;
+      let b = resource.data;
+      return admin() && preservesUserId()
+        && d.get('source', 'manual') == b.get('source', 'manual')
+        && d.get('profileId', null) == b.get('profileId', null)
+        && d.createdAt == b.createdAt
+        && d.get('providerRecordId', null) == b.get('providerRecordId', null)
+        && d.lastCorrectedBy == request.auth.uid && d.lastCorrectedAt == request.time;
+    }
+
     match /{collection}/{id} {
-      allow create: if collection in ['glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','labReports','dailyCheckins','checklistLogs','medicationLogs'] && validCreate();
+      allow create: if otherHealthDoc(collection) && validCreate();
+      allow create: if correctableLog(collection) && (manualLogCreate(collection) || importedLogCreate(collection));
       // Health data is sensitive. A coach receives read-only access only when
       // the record owner is an active member of a program assigned to that
       // coach. Admins and explicitly assigned experts retain their intended
       // access. Coaches can never update/delete a member's health record.
-      allow read: if collection in ['glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','labReports','dailyCheckins','checklistLogs','medicationLogs'] && (ownsResource() || admin() || assigned(resource.data.userId) || assignedCoachToUser(resource.data.userId));
-      allow delete: if collection in ['glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','labReports','dailyCheckins','checklistLogs','medicationLogs'] && (ownsResource() || admin() || assigned(resource.data.userId));
-      allow update: if collection in ['glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','labReports','dailyCheckins','checklistLogs','medicationLogs'] && (admin() || (ownsResource() && ownsRequest() && preservesUserId()) || (assigned(resource.data.userId) && preservesUserId()));
+      allow read: if (correctableLog(collection) || otherHealthDoc(collection)) && (ownsResource() || admin() || assigned(resource.data.userId) || assignedCoachToUser(resource.data.userId));
+      allow delete: if (correctableLog(collection) || otherHealthDoc(collection)) && (ownsResource() || admin() || assigned(resource.data.userId));
+      allow update: if otherHealthDoc(collection) && (admin() || (ownsResource() && ownsRequest() && preservesUserId()) || (assigned(resource.data.userId) && preservesUserId()));
+      // Experts and coaches never edit a member's readings (read-only), so they are deliberately absent here.
+      allow update: if correctableLog(collection) && (memberCorrection(collection) || importedLogResync() || adminCorrection());
     }
     match /consultations/{id} {
       // A member can only ever *request*: status starts 'pending' and payment 'pending'; the
@@ -236,7 +331,10 @@ service cloud.firestore {
       // the legitimate flow nothing and closes the direct-write bypass.
       allow create: if false;
       allow read: if collection in ['dataExportRequests','deletionRequests'] && (ownsResource() || admin());
-      allow update: if admin();
+      // Scoped to the two request collections this block is about. It used to read `allow update: if admin()`
+      // for EVERY collection, which silently let an admin rewrite any document (health logs included) and
+      // would have bypassed the audited correction rules above.
+      allow update: if collection in ['dataExportRequests','deletionRequests'] && admin();
     }
     match /auditLogs/{id} { allow read: if admin(); allow write: if false; }
     match /supportRequests/{id} {
