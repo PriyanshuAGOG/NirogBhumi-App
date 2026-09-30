@@ -833,20 +833,14 @@ fun InsightDetailScreen(state: NirogState) {
             // consistently the last 7 days have actually been logged, using
             // the same sleepLogs/glucoseReadings already fetched above.
             Text("This week's logging", fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
-            val nowMillis = remember { System.currentTimeMillis() }
-            val weekAgoDayKey = remember(nowMillis) { com.nirogbhumi.app.ui.localDayKey(nowMillis) - 6 }
-            val sleepDaysThisWeek = remember(sleepLogs, nowMillis) {
-                sleepLogs.mapNotNull { log ->
-                    val ts = (log.values["measuredAt"] as? Timestamp) ?: (log.values["createdAt"] as? Timestamp)
-                    ts?.toDate()?.time?.let { com.nirogbhumi.app.ui.localDayKey(it) }
-                }.filter { it >= weekAgoDayKey }.toSet().size
+            val readingDaysThisWeek = remember(health) {
+                val first = health.today.date.minusDays(6)
+                health.sugarReadings
+                    .map { com.nirogbhumi.app.health.domain.HealthStateBuilder.dateOf(it.measuredAtMillis, health.zone) }
+                    .filter { !it.isBefore(first) && !it.isAfter(health.today.date) }
+                    .toSet().size
             }
-            val readingDaysThisWeek = remember(glucoseReadings, nowMillis) {
-                glucoseReadings.mapNotNull { doc ->
-                    val ts = (doc.values["measuredAt"] as? Timestamp) ?: (doc.values["createdAt"] as? Timestamp)
-                    ts?.toDate()?.time?.let { com.nirogbhumi.app.ui.localDayKey(it) }
-                }.filter { it >= weekAgoDayKey }.toSet().size
-            }
+            val sleepDaysThisWeek = health.week.sleepNights
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Card(
                     modifier = Modifier.weight(1f).border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.3f), shape = RoundedCornerShape(18.dp)),
@@ -876,11 +870,10 @@ fun InsightDetailScreen(state: NirogState) {
             // logged since starting, not a manually-incremented counter.
             Text("Resolve the correlation pattern", fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
 
-            val nightsSinceStart = remember(sleepLogs, state.experimentStartedAtMillis) {
-                if (state.experimentStartedAtMillis <= 0) 0 else sleepLogs.count { log ->
-                    val ts = (log.values["measuredAt"] as? Timestamp) ?: (log.values["createdAt"] as? Timestamp)
-                    val hours = (log.values["duration"] as? Number)?.toDouble() ?: 0.0
-                    ts != null && ts.toDate().time >= state.experimentStartedAtMillis && hours >= 7.0
+            val nightsSinceStart = remember(health, state.experimentStartedAtMillis) {
+                // A night counts when it ended after the experiment began and lasted 7 hours or more.
+                if (state.experimentStartedAtMillis <= 0) 0 else health.sleep.count {
+                    !it.isSuspect && it.measuredAtMillis >= state.experimentStartedAtMillis && it.durationMinutes >= 7 * 60
                 }
             }
             val experimentDaysElapsed = remember(state.experimentStartedAtMillis) {

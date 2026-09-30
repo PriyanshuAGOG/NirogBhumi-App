@@ -378,6 +378,7 @@ fun ActiveScreenContent(state: NirogState) {
       "health_file" -> HealthFileScreen(state)
       "bp_overview" -> BpOverviewScreen(state)
       "weight_overview" -> WeightOverviewScreen(state)
+      "store_web" -> SafeWebViewScreen("Store", BuildConfig.STORE_URL, onBack = { state.currentScreen = "dashboard" })
       "trends_30" -> TrendsScreen(state)
       "sleep_overview" -> SleepOverviewScreen(state)
       "walking_overview" -> WalkingActivityScreen(state)

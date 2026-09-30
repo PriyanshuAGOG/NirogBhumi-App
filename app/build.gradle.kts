@@ -28,6 +28,9 @@ android {
     // Surfaced in Developer Settings ("current git commit, if available") -
     // CI passes the real short SHA via -PGIT_COMMIT; local builds fall back
     // to "local" rather than a stale/misleading hardcoded value.
+    // The in-app store page (physical goods on nirogbhumi.com). Empty = the store is not launched and the
+    // Learn tab shows "coming soon". Must be https on our own host or it is ignored at run time.
+    buildConfigField("String", "STORE_URL", "\"${project.findProperty("STORE_URL") as String? ?: ""}\"")
     buildConfigField("String", "GIT_COMMIT", "\"${project.findProperty("GIT_COMMIT") as String? ?: "local"}\"")
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

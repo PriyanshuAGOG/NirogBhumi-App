@@ -380,7 +380,7 @@ fun NirogBottomNavItem(
     }
 }
 
-private data class SugarBar(val value: Int)
+private data class SugarBar(val value: Int, val type: String)
 
 // TAB 1: Today Tab Dashboard
 @Composable
@@ -802,7 +802,11 @@ fun TodayTab(state: NirogState) {
                     }
                 } else {
                     // Recent readings sparkline built from real logged sugar values
-                    val recent = health.sugarReadings.take(7).reversed().map { SugarBar(it.value.toInt()) }
+                    val recent = health.sugarReadings.take(7).reversed().map {
+                        // Weekday under each bar so the bars mean something ("Mon", "Tue"...), not just a shape.
+                        SugarBar(it.value.toInt(), com.nirogbhumi.app.health.domain.HealthLabels.zoned(it.measuredAtMillis, health.zone).dayOfWeek
+                            .getDisplayName(java.time.format.TextStyle.SHORT, java.util.Locale.ENGLISH))
+                    }
                     Canvas(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -2382,11 +2386,13 @@ fun LearnTab(state: NirogState) {
         }
 
         // Store is not launched yet - a single clear teaser instead of a shop
-        // front with nothing real to sell.
+        // front with nothing real to sell. It opens the (locked-down) store page only when a
+        // store address on our own site has been configured for this build.
+        val storeOpen = com.nirogbhumi.app.web.UrlPolicy.isAllowedHttps(com.nirogbhumi.app.BuildConfig.STORE_URL)
         Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable { state.currentScreen = "coming_soon" }
+                .clickable { state.currentScreen = if (storeOpen) "store_web" else "coming_soon" }
                 .border(width = 0.5.dp, color = NirogColor.outlineVariant.copy(alpha = 0.35f), shape = RoundedCornerShape(24.dp)),
             colors = CardDefaults.cardColors(containerColor = Color(0xFFEEE8DC)),
             shape = RoundedCornerShape(24.dp)
@@ -2403,7 +2409,7 @@ fun LearnTab(state: NirogState) {
                         fontWeight = FontWeight.Bold,
                         color = NirogColor.forest
                     )
-                    Text("Wellness tools and kits - coming soon", fontSize = 12.sp, color = NirogColor.outline)
+                    Text(if (storeOpen) "Wellness tools and kits" else "Wellness tools and kits - coming soon", fontSize = 12.sp, color = NirogColor.outline)
                 }
                 Icon(Icons.Filled.ChevronRight, "Coming soon", tint = NirogColor.forest)
             }

@@ -315,7 +315,7 @@ fun DailyCheckInScreen(state: NirogState) {
                                     saving = true
                                     val status = if (v > 130) "High" else if (v < 80) "Low" else "Normal"
                                     val kind = if (sugarType == "Fasting") GlucoseKind.FASTING else GlucoseKind.POST_MEAL
-                                    val onDone = { r: CloudResult<*> ->
+                                    fun onDone(r: CloudResult<*>) {
                                         saving = false
                                         if (r is CloudResult.Success) {
                                             sugarResult = "$sugarType $v mg/dL"; advance()
@@ -325,7 +325,7 @@ fun DailyCheckInScreen(state: NirogState) {
                                     if (existing == null) {
                                         state.health.logGlucose(v, kind) { r -> if (r is CloudResult.Success) sugarDocId = r.value; onDone(r) }
                                     } else {
-                                        state.health.correct("glucoseReadings", existing, mapOf("value" to v, "unit" to "mg/dL", "readingType" to if (kind == GlucoseKind.FASTING) "fasting" else "post_meal"), onDone)
+                                        state.health.correct("glucoseReadings", existing, mapOf("value" to v, "unit" to "mg/dL", "readingType" to if (kind == GlucoseKind.FASTING) "fasting" else "post_meal"), ::onDone)
                                     }
                                 }
                             }
