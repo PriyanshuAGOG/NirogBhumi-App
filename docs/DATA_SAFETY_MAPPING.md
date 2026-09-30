@@ -33,12 +33,30 @@ build before submitting.
 | Photos (profile photo, uploaded lab report images) | Yes | App functionality | Optional |
 | Voice/audio (chat voice notes; on-device speech recognition) | Yes | App functionality | Optional |
 | Purchase history (past orders shown read-only; consultation requests carry a fee *note* only — the app takes no payment) | Yes | App functionality | Optional |
-| Messages (coach chat, coach inbox, consultation request text: concern, preferred time) | Yes | App functionality | Optional |
+| Messages (coach chat, coach inbox, consultation request text: concern, preferred time, support requests emailed to our support inbox) | Yes | App functionality, Customer support | Optional |
+| Health profile answers (diabetes type incl. optional free text for "Other", blood-pressure status, medication yes/no, goals) | Yes | App functionality, Personalization | Optional |
 | App activity / in-app actions | Yes | Analytics, App functionality | Optional |
 | Crash logs & diagnostics | Yes | App functionality (stability) | Optional |
 | Device or other IDs | Yes | App functionality, Analytics | — |
 | **Precise or coarse location (GPS)** | **No** | — | — |
 | Contacts | No | — | — |
+
+## Reassessment after the health-data and export changes
+
+Re-checked against the code in this branch; the declarations above still hold, with these clarifications:
+
+- **Export file.** A member's data export is a ZIP built on request, stored privately, reachable only through a 15-minute
+  signed link or their own authenticated access; an email with a 3-hour link may be sent. The email contains no health values.
+  The ZIP is deleted automatically after 30 days and is erased with the account.
+- **Support requests** are emailed to our support inbox (text the member typed: subject, message, app version).
+  Declared under Messages / Customer support. They are not shared with anyone else.
+- **Education content** is fetched from our own website (nirogbhumi.com) and a short copy of the article list is saved on the phone for offline use. No user data is sent with the request beyond a search word the member types.
+- **In-app web page (store)** is disabled in builds without a store address; when enabled it loads only our own host, with no
+  JavaScript bridge, no file/camera/microphone/location access and third-party cookies off.
+- **No new permissions.** Health Connect stays read-only (steps, sleep, weight, blood glucose, blood pressure); no advertising
+  ID; no location.
+- **Deletion wording.** The app says what is erased, what is kept by law (payment records, security logs) and that copies in
+  our cloud provider's backups clear on their own schedule; Health readings are erased unless the member opted into anonymised research.
 
 ## Security & deletion section
 

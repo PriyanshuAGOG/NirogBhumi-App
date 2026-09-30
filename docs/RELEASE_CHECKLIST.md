@@ -20,6 +20,10 @@
 - Deploy rules, indexes, and Functions; test rules with separate user, assigned expert, unassigned expert, admin, and anonymous sessions.
 - Configure budget alerts, retention, backups, least-privilege IAM, staff custom claims, and audit-log monitoring.
 - Add Razorpay/UPI secrets through Firebase secret management; never commit them.
+- **Email for exports and support (owner).** Data-export links and support-request alerts are written to the Firestore `mail` collection; something has to send them. Install the Firebase extension **Trigger Email from Firestore** (SMTP or SendGrid), then set the function environment variable `SUPPORT_EMAIL` to the inbox that should receive support requests (for example `support@nirogbhumi.com`; until it is set support alerts are skipped and marked `skipped_not_configured`). Without the extension, exports still work in the app; only the email copy is missing.
+- **Signed export/share links (owner).** Give the Functions runtime service account the `roles/iam.serviceAccountTokenCreator` role on itself (same one-time grant as `docs/health-file-signed-url-setup.md`). Without it the app falls back to its own authenticated download and emails say "open the app".
+- **Staging project (owner).** Create a staging Firebase project. The health-data backfill (`docs/MIGRATION_RUNBOOK.md`), rules changes and function changes are rehearsed there before production.
+- **Store address (owner, optional).** Pass `-PSTORE_URL=https://nirogbhumi.com/shop/` to the Gradle build only when physical-goods checkout is ready (see `docs/PLAY_PAYMENTS.md`); otherwise the store card stays "coming soon".
 
 ## Health and privacy (DPDP Act 2023 + Play)
 
@@ -30,7 +34,7 @@
 - Complete the Play **Data Safety** form and **Health apps declaration** using `docs/DATA_SAFETY_MAPPING.md`; confirm "no data shared for advertising".
 - `REQUEST_INSTALL_PACKAGES`, the advertising ID and any undeclared permission are blocked automatically: the CI "Android release build" job runs `scripts/verify_release_manifest.py` on the merged release manifest (also checks debuggable, cleartext, backup and exported components).
 - Verify export and deletion fulfillment end-to-end in production, incident response, staff access review, and processor (DPA) agreements.
-- On any material policy change, bump `CONSENT_VERSION` (`NirogModels.kt`) together with the hosted pages. See `docs/DPDP_COMPLIANCE.md` for the full obligation map.
+- On any material policy change, bump `CONSENT_VERSION` (`NirogModels.kt`) together with the hosted pages. Members who accepted an earlier version see an "updated privacy notice" banner and accept it again (a new dated receipt is written); it is now `2026-09`. See `docs/DPDP_COMPLIANCE.md` for the full obligation map.
 
 ## Device acceptance
 

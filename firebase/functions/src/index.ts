@@ -11,7 +11,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { processPendingNotifications } from './notificationSender.js';
 import { cancelOwnConsultation, handleConsultationChange } from './consultations.js';
 import { dayKeyIST, isMondayIST, sendWeeklyDigests, updateBatchPulse } from './scheduledJobs.js';
-import { exportDownloadLink, processExportRequest } from './exportJob.js';
+import { exportDownloadLink, processExportRequest, purgeExpiredExports } from './exportJob.js';
 import { notifySupportRequest } from './supportMail.js';
 import { DELETION_GRACE_DAYS, cancelAccountDeletion as cancelDeletionRequest, processDueDeletions, scheduleAccountDeletion } from './accountDeletion.js';
 
@@ -986,6 +986,11 @@ export const exportUserData = onDocumentCreated({ document: 'dataExportRequests/
     saveFile: (path, data, contentType, ownerUid) => getStorage().bucket().file(path).save(data, { contentType, metadata: { cacheControl: 'private, max-age=0', metadata: { ownerUid } } }),
     signUrl: signStorageUrl,
   }, event.params.requestId);
+});
+// Exports hold health information, so they are deleted after 30 days (a fresh one can be requested any time).
+export const purgeOldExports = onSchedule({ schedule: 'every 24 hours', timeZone: 'Asia/Kolkata', region, timeoutSeconds: 300 }, async () => {
+  const result = await purgeExpiredExports({ db, deleteFile: path => getStorage().bucket().file(path).delete({ ignoreNotFound: true }).then(() => undefined) });
+  console.log('purgeOldExports', result);
 });
 // A fresh, short-lived link to the caller's own completed export (15 minutes). When links cannot be signed yet the
 // caller gets { url: null, storagePath } and downloads through its own authenticated Storage access instead.

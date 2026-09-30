@@ -100,13 +100,21 @@ check-in counts in the reports use `HealthStateBuilder.checkInDates`.
    rules are lenient) but cannot edit within the window until they update.
 3. Deploy the rules from `main`. Verify in the emulator suite first (done in CI) and in staging.
 4. Run the backfill in dry-run against staging, inspect the report, then production (see
-   `docs/MIGRATION_RUNBOOK.md` once written; not yet run anywhere).
+   `docs/MIGRATION_RUNBOOK.md`; not yet run anywhere).
 5. Only after the backfill validates, consider removing legacy readers. They are cheap; there is no
    deadline.
 
+## Data export
+
+`requestDataExport` (one per hour; a failed attempt does not count) builds one ZIP per request: `data.json` (everything,
+times as ISO text), six CSVs (blood sugar, blood pressure, weight, sleep, activity, medication; cells that could run as
+spreadsheet formulas are defused) and a README. It is stored privately at `users/<uid>/exports/<requestId>.zip`, reachable
+through a 15-minute signed link (`getExportDownloadLink`, owner only) and emailed (3-hour link, no health values in the
+email) when the account has an address. Phone-only accounts get the in-app notification instead. Files are deleted after 30
+days (`purgeOldExports`) and with the account.
+
 ## Not done yet / owner decisions
 
-- Backfill/cleanup utility for legacy per-interval step documents and old sleep shapes (readers cover
-  them today).
+- The backfill exists and is tested (`firebase/scripts/health-backfill.cjs`) but has not been run on any real project.
 - A staging Firebase project does not exist; production must not be used for testing.
 - Clinical sign-off for the glucose/BP status thresholds (`GlucoseRanges`, the BP "watch" lines).

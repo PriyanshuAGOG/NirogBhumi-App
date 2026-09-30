@@ -5,7 +5,7 @@ const { Timestamp } = require('firebase-admin/firestore');
 const { db, resetFirestore } = require('./helpers.cjs');
 const { buildZip } = require('../lib/zip.js');
 const { csvCell, toCsv, buildExportZip, plain } = require('../lib/dataExport.js');
-const { processExportRequest, exportDownloadLink } = require('../lib/exportJob.js');
+const { processExportRequest, exportDownloadLink, purgeExpiredExports } = require('../lib/exportJob.js');
 const { notifySupportRequest } = require('../lib/supportMail.js');
 const { queueEmail } = require('../lib/email.js');
 
@@ -168,6 +168,39 @@ describe('export job', () => {
     await assert.rejects(() => exportDownloadLink(makeDeps(), 'u1', 'missing'), { code: 'not-found' });
     await db.doc('dataExportRequests/r1').set({ storagePath: 'users/u2/exports/r1.zip' }, { merge: true });
     await assert.rejects(() => exportDownloadLink(makeDeps(), 'u1', 'r1'), { code: 'not-found' }); // path tampering
+  });
+});
+
+describe('export retention', () => {
+  beforeEach(resetFirestore);
+  const DAY = 86_400_000;
+  it('deletes completed exports older than 30 days and marks them expired; leaves newer and unfinished ones', async () => {
+    const now = new Date('2026-09-30T00:00:00Z');
+    await db.doc('dataExportRequests/old').set({ userId: 'u1', status: 'completed', storagePath: 'users/u1/exports/old.zip', completedAt: Timestamp.fromMillis(now.getTime() - 31 * DAY) });
+    await db.doc('dataExportRequests/fresh').set({ userId: 'u1', status: 'completed', storagePath: 'users/u1/exports/fresh.zip', completedAt: Timestamp.fromMillis(now.getTime() - 29 * DAY) });
+    await db.doc('dataExportRequests/busy').set({ userId: 'u1', status: 'processing' });
+    const deleted = [];
+    const result = await purgeExpiredExports({ db, now: () => now, deleteFile: async p => { deleted.push(p); } });
+    assert.deepEqual(result, { purged: 1, failed: 0 });
+    assert.deepEqual(deleted, ['users/u1/exports/old.zip']);
+    const old = (await db.doc('dataExportRequests/old').get()).data();
+    assert.equal(old.status, 'expired'); assert.equal(old.storagePath, undefined);
+    assert.equal((await db.doc('dataExportRequests/fresh').get()).get('status'), 'completed');
+    assert.equal((await db.doc('dataExportRequests/busy').get()).get('status'), 'processing');
+  });
+  it('a storage failure is counted, not hidden, and does not loop forever', async () => {
+    const now = new Date('2026-09-30T00:00:00Z');
+    await db.doc('dataExportRequests/old').set({ userId: 'u1', status: 'completed', storagePath: 'users/u1/exports/old.zip', completedAt: Timestamp.fromMillis(now.getTime() - 40 * DAY) });
+    const result = await purgeExpiredExports({ db, now: () => now, deleteFile: async () => { throw new Error('storage down'); } });
+    assert.deepEqual(result, { purged: 0, failed: 1 });
+    assert.equal((await db.doc('dataExportRequests/old').get()).get('status'), 'completed', 'left for the next run');
+  });
+  it('never deletes a path outside the member exports folder', async () => {
+    const now = new Date('2026-09-30T00:00:00Z');
+    await db.doc('dataExportRequests/odd').set({ userId: 'u1', status: 'completed', storagePath: 'users/u1/health-file/report.pdf', completedAt: Timestamp.fromMillis(now.getTime() - 40 * DAY) });
+    const deleted = [];
+    await purgeExpiredExports({ db, now: () => now, deleteFile: async p => { deleted.push(p); } });
+    assert.deepEqual(deleted, []);
   });
 });
 

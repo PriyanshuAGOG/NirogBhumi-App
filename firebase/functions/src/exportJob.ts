@@ -1,4 +1,4 @@
-import { FieldValue, type Firestore } from 'firebase-admin/firestore';
+import { FieldValue, Timestamp, type Firestore } from 'firebase-admin/firestore';
 import { buildExportZip } from './dataExport.js';
 import { escapeHtml, looksLikeEmail, queueEmail } from './email.js';
 
@@ -102,4 +102,30 @@ export async function exportDownloadLink(deps: Pick<ExportDeps, 'db' | 'signUrl'
   }
   const url = await deps.signUrl(storagePath, EXPORT_LINK_APP_TTL_MS, 'nirog-bhumi-data-export.zip');
   return { url, expiresInMinutes: EXPORT_LINK_APP_TTL_MS / 60_000, storagePath };
+}
+
+export const EXPORT_RETENTION_DAYS = 30;
+
+/**
+ * A data export contains health information, so the file does not sit in storage forever: completed exports older than
+ * 30 days are deleted and their request marked 'expired' (the member can make a fresh one any time).
+ */
+export async function purgeExpiredExports(deps: { db: Firestore; deleteFile(path: string): Promise<void>; now?: () => Date }): Promise<{ purged: number; failed: number }> {
+  const cutoff = Timestamp.fromMillis((deps.now?.() ?? new Date()).getTime() - EXPORT_RETENTION_DAYS * 86_400_000);
+  let purged = 0; let failed = 0;
+  for (;;) {
+    const snap = await deps.db.collection('dataExportRequests').where('status', '==', 'completed').where('completedAt', '<', cutoff).limit(200).get();
+    if (snap.empty) break;
+    let progressed = 0;
+    for (const doc of snap.docs) {
+      const path = String(doc.get('storagePath') ?? '');
+      try {
+        if (path.startsWith('users/') && path.includes('/exports/')) await deps.deleteFile(path);
+        await doc.ref.set({ status: 'expired', storagePath: FieldValue.delete(), expiredAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+        purged++; progressed++;
+      } catch (error) { console.error('export purge failed', doc.id, error); failed++; }
+    }
+    if (!progressed) break; // nothing moved forward this round: stop instead of looping on a persistent failure
+  }
+  return { purged, failed };
 }
