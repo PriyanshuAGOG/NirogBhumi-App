@@ -372,6 +372,8 @@ fun ActiveScreenContent(state: NirogState) {
       "family_profiles" -> FamilyProfilesScreen(state)
       "orders" -> OrdersScreen(state)
       "articles" -> ArticlesScreen(state)
+      "article_reader" -> ArticleReaderScreen(state)
+      "article_detail" -> RedirectTo(state, "articles")   // the old Firestore-backed article list is retired; one source now
       "daily_checkin" -> DailyCheckInScreen(state)
       "body_report" -> BodyReportScreen(state)
       "rhythm" -> RhythmScreen(state)

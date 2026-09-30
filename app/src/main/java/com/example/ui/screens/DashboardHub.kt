@@ -2286,19 +2286,19 @@ fun LearnTab(state: NirogState) {
 
         Row(modifier = Modifier.fillMaxWidth()) {
             Box(modifier = Modifier.weight(1f).padding(end = 6.dp)) {
-                LearnCategoryCard("Diabetes", Icons.Filled.Spa, NirogColor.secondaryContainer) { state.currentScreen = "articles" }
+                LearnCategoryCard("Diabetes", Icons.Filled.Spa, NirogColor.secondaryContainer) { state.searchQuery = "diabetes"; state.currentScreen = "articles" }
             }
             Box(modifier = Modifier.weight(1f).padding(start = 6.dp)) {
-                LearnCategoryCard("Food", Icons.Filled.Restaurant, Color(0xFFFFD9DE)) { state.currentScreen = "articles" }
+                LearnCategoryCard("Food", Icons.Filled.Restaurant, Color(0xFFFFD9DE)) { state.searchQuery = "food"; state.currentScreen = "articles" }
             }
         }
 
         Row(modifier = Modifier.fillMaxWidth()) {
             Box(modifier = Modifier.weight(1f).padding(end = 6.dp)) {
-                LearnCategoryCard("Movement", Icons.Filled.DirectionsWalk, NirogColor.forestPaleLight) { state.currentScreen = "articles" }
+                LearnCategoryCard("Movement", Icons.Filled.DirectionsWalk, NirogColor.forestPaleLight) { state.searchQuery = "walk"; state.currentScreen = "articles" }
             }
             Box(modifier = Modifier.weight(1f).padding(start = 6.dp)) {
-                LearnCategoryCard("Mindfulness", Icons.Filled.SelfImprovement, NirogColor.surfaceNeutral) { state.currentScreen = "articles" }
+                LearnCategoryCard("Mindfulness", Icons.Filled.SelfImprovement, NirogColor.surfaceNeutral) { state.searchQuery = "mind"; state.currentScreen = "articles" }
             }
         }
 
