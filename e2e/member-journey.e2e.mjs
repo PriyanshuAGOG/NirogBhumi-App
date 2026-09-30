@@ -10,7 +10,7 @@ import { connectAuthEmulator, createUserWithEmailAndPassword, getAuth, signInWit
 import { addDoc, collection, connectFirestoreEmulator, deleteDoc, doc, getDoc, getDocs, getFirestore, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
 import { connectFunctionsEmulator, getFunctions, httpsCallable } from 'firebase/functions';
 import { connectStorageEmulator, getBytes, getStorage, ref, uploadBytes } from 'firebase/storage';
-import { require, step, expect, eventually, errorCode, summarize } from './lib.mjs';
+import { require, step, expect, eventually, errorCode, summarize, readZip } from './lib.mjs';
 
 const { initializeApp: initAdmin } = require('firebase-admin/app');
 const { getFirestore: adminFirestore, Timestamp } = require('firebase-admin/firestore');
@@ -138,9 +138,25 @@ await step('data export: request -> file generated -> member downloads their own
   expect((await errorCode(() => call('requestDataExport', {}))) === 'functions/resource-exhausted', 'second export within an hour is rate limited');
   const request = await eventually(async () => { const s = await getDocs(query(collection(db, 'dataExportRequests'), where('userId', '==', uid))); const d = s.docs[0]?.data(); return d?.status === 'completed' ? d : null; }, 'exportUserData should complete the request');
   exportPath = request.storagePath;
-  const json = JSON.parse(new TextDecoder().decode(await getBytes(ref(storage, exportPath))));
+  expect(exportPath.endsWith('.zip') && request.format === 'zip', `export should be a zip, got ${exportPath}`);
+  const files = readZip(Buffer.from(await getBytes(ref(storage, exportPath))));
+  expect(['data.json', 'README.txt', 'blood_sugar.csv', 'blood_pressure.csv', 'weight.csv', 'sleep.csv', 'activity.csv', 'medication.csv'].every((n) => n in files), `zip is missing files: ${Object.keys(files).join(', ')}`);
+  const json = JSON.parse(files['data.json'].toString('utf8'));
   expect(json.users.length === 1 && json.users[0].fullName === 'Journey Member', 'export has the profile');
   expect(json.glucoseReadings.length === 1 && json.programChatMessages.length === 1 && json.consentReceipts.length === 1 && json.coachInboxMessages.length === 1, `export is missing sections: ${Object.entries(json).filter(([, v]) => Array.isArray(v)).map(([k, v]) => `${k}:${v.length}`).join(' ')}`);
+  expect(/^\d{4}-\d\d-\d\dT/.test(String(json.glucoseReadings[0].createdAt)), 'timestamps are written as ISO text, not raw objects');
+  const sugarCsv = files['blood_sugar.csv'].toString('utf8').trim().split(/\r?\n/);
+  expect(sugarCsv.length === 2 && sugarCsv[0].startsWith('measuredAt,value') && sugarCsv[1].includes('142'), `blood sugar csv wrong: ${sugarCsv.join(' | ')}`);
+  // The email carries a link (or app instructions) but never any readings.
+  const mail = await eventually(async () => { const m = await adb.collection('mail').get(); return m.empty ? null : m.docs.map((d) => ({ id: d.id, ...d.data() })); }, 'an export email should be queued for a member with an email address');
+  expect(mail.length === 1 && mail[0].id.startsWith('export_'), 'one email, keyed by the export request (idempotent)');
+  expect(!/142|Journey Member/.test(JSON.stringify(mail[0].message)), 'email must not contain health values or the name');
+  expect(['queued', 'duplicate'].includes(request.emailStatus), `emailStatus ${request.emailStatus}`);
+  // A fresh short-lived link for the owner only (null in the emulator if signing is unavailable there).
+  const requestDocId = (await getDocs(query(collection(db, 'dataExportRequests'), where('userId', '==', uid)))).docs[0].id;
+  const link = await call('getExportDownloadLink', { requestId: requestDocId });
+  expect(link.storagePath === exportPath && link.expiresInMinutes === 15 && (link.url === null || typeof link.url === 'string'), `link response wrong: ${JSON.stringify(link)}`);
+  expect((await errorCode(() => call('getExportDownloadLink', { requestId: 'nope' }))) === 'functions/not-found', 'unknown export id');
 });
 
 await step('deletion: schedule (7 days), idempotent, visible to the member, cancel, re-schedule', async () => {

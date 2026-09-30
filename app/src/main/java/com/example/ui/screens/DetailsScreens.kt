@@ -2835,8 +2835,9 @@ fun SupportScreen(state: NirogState) {
                     onClick = {
                         sending = true
                         state.repository.addHealthLog("supportRequests", mapOf(
-                            "subject" to subject.trim(),
-                            "message" to message.trim(),
+                            "subject" to subject.trim().take(150),
+                            "message" to message.trim().take(4000),
+                            "appVersion" to com.nirogbhumi.app.BuildConfig.VERSION_NAME,
                             "status" to "open"
                         )) { result ->
                             sending = false

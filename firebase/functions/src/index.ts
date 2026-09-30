@@ -11,6 +11,8 @@ import { createHash, randomBytes } from 'node:crypto';
 import { processPendingNotifications } from './notificationSender.js';
 import { cancelOwnConsultation, handleConsultationChange } from './consultations.js';
 import { dayKeyIST, isMondayIST, sendWeeklyDigests, updateBatchPulse } from './scheduledJobs.js';
+import { exportDownloadLink, processExportRequest } from './exportJob.js';
+import { notifySupportRequest } from './supportMail.js';
 import { DELETION_GRACE_DAYS, cancelAccountDeletion as cancelDeletionRequest, processDueDeletions, scheduleAccountDeletion } from './accountDeletion.js';
 
 initializeApp();
@@ -862,8 +864,9 @@ export const requestDataExport = onCall({ region }, async request => {
   // burn reads/writes/invocations at will. One export per hour is plenty
   // for the legitimate "download my data" use case.
   const cooldown = Timestamp.fromMillis(Date.now() - 60 * 60000);
-  const recent = await db.collection('dataExportRequests').where('userId', '==', auth.uid).where('createdAt', '>=', cooldown).limit(1).get();
-  if (!recent.empty) throw new HttpsError('resource-exhausted', 'You can request one export per hour - please try again later.');
+  const recent = await db.collection('dataExportRequests').where('userId', '==', auth.uid).where('createdAt', '>=', cooldown).get();
+  // A failed attempt must not lock the member out for an hour.
+  if (recent.docs.some(d => d.get('status') !== 'failed')) throw new HttpsError('resource-exhausted', 'You can request one export per hour - please try again later.');
   await db.collection('dataExportRequests').add({ userId: auth.uid, status: 'requested', createdAt: FieldValue.serverTimestamp() }); return { accepted: true };
 });
 // Schedules the caller's own account for deletion after a grace period (see
@@ -953,25 +956,44 @@ export const queueDeletionRequest = onDocumentCreated({ document: 'deletionReque
   // intentionally empty
 });
 
-export const exportUserData = onDocumentCreated({ document: 'dataExportRequests/{requestId}', region }, async event => {
-  const request = event.data; if (!request) return; const uid = request.get('userId'); if (!uid) return;
-  await request.ref.set({ status: 'processing', updatedAt: FieldValue.serverTimestamp() }, { merge: true });
-  const names = ['users','profiles','glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','labReports','dailyCheckins','dailyActions','weeklyReports','sugarStories','consultations','userPrograms','programPlans','checklistLogs','expertNotes','notifications','deviceConnections','medicationLogs','orders','supportRequests','programChatMessages'];
-  const exported: Record<string, unknown> = { exportedAt: new Date().toISOString(), formatVersion: 1 };
-  for (const name of names) {
-    if (name === 'users') { const user = await db.doc(`users/${uid}`).get(); exported.users = user.exists ? [{ id: user.id, ...user.data() }] : []; continue; }
-    const snapshot = await db.collection(name).where('userId', '==', uid).get(); exported[name] = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+// Builds the member's export (ZIP with data.json, CSVs and a README), stores it privately and tells them.
+// The work lives in exportJob.ts so it can be tested with fakes; this only connects it to Storage.
+async function signStorageUrl(path: string, ttlMs: number, downloadName: string): Promise<string | null> {
+  try {
+    const [url] = await getStorage().bucket().file(path).getSignedUrl({
+      version: 'v4', action: 'read', expires: Date.now() + ttlMs,
+      responseDisposition: `attachment; filename="${downloadName}"`, responseType: 'application/zip',
+    });
+    return url;
+  } catch (error) {
+    // Usually the one-time IAM grant (serviceAccountTokenCreator) has not been made yet; the app falls back to its own authenticated download.
+    console.error('export link signing failed', error);
+    return null;
   }
-  // Not keyed by `userId`, so gathered separately: the member's coach-inbox
-  // threads, program roster entries, and their consent receipts (the record of
-  // what they agreed to and when).
-  exported.coachInboxMessages = (await db.collection('coachInboxMessages').where('memberUid', '==', uid).get()).docs.map(doc => ({ id: doc.id, ...doc.data() }));
-  exported.programMembers = (await db.collection('programMembers').where('uid', '==', uid).get()).docs.map(doc => ({ id: doc.id, ...doc.data() }));
-  exported.consentReceipts = (await db.collection(`users/${uid}/consentReceipts`).get()).docs.map(doc => ({ id: doc.id, ...doc.data() }));
-  const path = `users/${uid}/exports/${request.id}.json`; const file = getStorage().bucket().file(path);
-  await file.save(JSON.stringify(exported, null, 2), { contentType: 'application/json', metadata: { cacheControl: 'private, max-age=0', metadata: { ownerUid: uid } } });
-  await request.ref.set({ status: 'completed', storagePath: path, completedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
-  await db.collection('notifications').add({ userId: uid, profileId: null, title: 'Your data export is ready', body: 'Open Privacy and Data Controls to access your export.', type: 'privacy', status: 'scheduled', scheduledFor: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp() });
+}
+export const exportUserData = onDocumentCreated({ document: 'dataExportRequests/{requestId}', region, timeoutSeconds: 300, memory: '512MiB' }, async event => {
+  await processExportRequest({
+    db,
+    saveFile: (path, data, contentType, ownerUid) => getStorage().bucket().file(path).save(data, { contentType, metadata: { cacheControl: 'private, max-age=0', metadata: { ownerUid } } }),
+    signUrl: signStorageUrl,
+  }, event.params.requestId);
+});
+// A fresh, short-lived link to the caller's own completed export (15 minutes). When links cannot be signed yet the
+// caller gets { url: null, storagePath } and downloads through its own authenticated Storage access instead.
+export const getExportDownloadLink = onCall({ region }, async request => {
+  const auth = requireUser(request);
+  const requestId = String(request.data?.requestId ?? '');
+  if (!requestId) throw new HttpsError('invalid-argument', 'requestId is required');
+  try {
+    return await exportDownloadLink({ db, signUrl: signStorageUrl }, auth.uid, requestId);
+  } catch (error) {
+    if ((error as { code?: string }).code === 'not-found') throw new HttpsError('not-found', 'That export is not available');
+    throw error;
+  }
+});
+// New support request -> an email to the support inbox (SUPPORT_EMAIL). Idempotent per request.
+export const onSupportRequestCreate = onDocumentCreated({ document: 'supportRequests/{requestId}', region }, async event => {
+  await notifySupportRequest(db, event.params.requestId, process.env.SUPPORT_EMAIL);
 });
 // Real, time-limited signed URL for the Health File "share link / QR code"
 // feature - the client previously used the Storage download-token URL

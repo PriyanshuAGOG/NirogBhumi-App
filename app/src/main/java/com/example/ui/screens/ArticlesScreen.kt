@@ -69,9 +69,9 @@ import kotlinx.coroutines.launch
 import java.text.DateFormat
 import java.util.Date
 
-private val Ink = Color(0xFF1B3221)
-private val Muted = Color(0xFF697169)
-private val Green = Color(0xFF314936)
+private val ArticleInk = Color(0xFF1B3221)
+private val ArticleMuted = Color(0xFF697169)
+private val ArticleGreen = Color(0xFF314936)
 
 /** Opens a link in the user's browser, only if it is a plain https address. */
 internal fun openWebUrl(context: Context, url: String) {
@@ -125,14 +125,14 @@ fun ArticlesScreen(state: NirogState) {
 
     Column(modifier = Modifier.fillMaxSize().background(Color(0xFFF8F6EF))) {
         DetailScreenHeader("Learn", onBack = { state.currentScreen = "dashboard" })
-        Text("Simple reads from nirogbhumi.com.", fontSize = 13.sp, color = Muted, modifier = Modifier.padding(horizontal = 20.dp))
+        Text("Simple reads from nirogbhumi.com.", fontSize = 13.sp, color = ArticleMuted, modifier = Modifier.padding(horizontal = 20.dp))
         OutlinedTextField(
             value = query,
             onValueChange = { query = it.take(ArticleSearch.MAX_LENGTH) },
             modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 10.dp),
             label = { Text("Search articles") },
             leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-            trailingIcon = { if (query.isNotEmpty()) TextButton(onClick = { query = "" }) { Text("Clear", color = Green) } },
+            trailingIcon = { if (query.isNotEmpty()) TextButton(onClick = { query = "" }) { Text("Clear", color = ArticleGreen) } },
             singleLine = true,
             shape = RoundedCornerShape(16.dp),
         )
@@ -142,16 +142,16 @@ fun ArticlesScreen(state: NirogState) {
             loading && feed.items.isEmpty() -> Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 24.dp), verticalAlignment = Alignment.CenterVertically) {
                 CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Color(0xFF9CB79F))
                 Spacer(Modifier.width(8.dp))
-                Text("Loading articles...", fontSize = 13.sp, color = Muted)
+                Text("Loading articles...", fontSize = 13.sp, color = ArticleMuted)
             }
             failed && shownSaved != null -> LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 item {
                     Column {
                         Text(
                             "You're offline. Showing the articles saved on ${DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(shownSaved.savedAtMillis))}.",
-                            fontSize = 12.5.sp, color = Muted,
+                            fontSize = 12.5.sp, color = ArticleMuted,
                         )
-                        TextButton(onClick = { scope.launch { loadFirst(query) } }) { Text("Try again", color = Green, fontWeight = FontWeight.Bold) }
+                        TextButton(onClick = { scope.launch { loadFirst(query) } }) { Text("Try again", color = ArticleGreen, fontWeight = FontWeight.Bold) }
                     }
                 }
                 items(shownSaved.articles, key = { it.id }) { article -> ArticleCard(article) { openReader(state, article) } }
@@ -162,7 +162,7 @@ fun ArticlesScreen(state: NirogState) {
                 Button(
                     onClick = { scope.launch { loadFirst(query) } },
                     modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Green), shape = RoundedCornerShape(24.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = ArticleGreen), shape = RoundedCornerShape(24.dp),
                 ) { Text("Try again", color = Color.White) }
                 OutlinedButton(onClick = { openWebUrl(context, "https://nirogbhumi.com") }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), shape = RoundedCornerShape(24.dp)) { Text("Open nirogbhumi.com instead") }
             }
@@ -173,7 +173,7 @@ fun ArticlesScreen(state: NirogState) {
                 items(feed.items, key = { it.id }) { article -> ArticleCard(article) { openReader(state, article) } }
                 item {
                     Column(Modifier.fillMaxWidth().padding(bottom = 32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        if (moreFailed) Text("We couldn't load more articles. Check your connection.", fontSize = 12.5.sp, color = Muted)
+                        if (moreFailed) Text("We couldn't load more articles. Check your connection.", fontSize = 12.5.sp, color = ArticleMuted)
                         if (feed.hasMore) {
                             OutlinedButton(
                                 enabled = !loadingMore,
@@ -188,9 +188,9 @@ fun ArticlesScreen(state: NirogState) {
                                     }
                                 },
                                 modifier = Modifier.heightIn(min = 48.dp), shape = RoundedCornerShape(24.dp),
-                            ) { if (loadingMore) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = Green) else Text("Load more articles") }
+                            ) { if (loadingMore) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = ArticleGreen) else Text("Load more articles") }
                         } else {
-                            Text("That's everything for now.", fontSize = 12.sp, color = Muted)
+                            Text("That's everything for now.", fontSize = 12.sp, color = ArticleMuted)
                         }
                     }
                 }
@@ -225,17 +225,17 @@ fun ArticleReaderScreen(state: NirogState) {
             coil.compose.AsyncImage(model = url, contentDescription = null, modifier = Modifier.fillMaxWidth().height(200.dp), contentScale = ContentScale.Crop)
         }
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(title, fontFamily = FontFamily.Serif, fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Ink, lineHeight = 30.sp)
-            Text(listOf((v["dateLabel"] as? String).orEmpty(), "From nirogbhumi.com").filter { it.isNotBlank() }.joinToString(" · "), fontSize = 12.sp, color = Muted)
+            Text(title, fontFamily = FontFamily.Serif, fontSize = 24.sp, fontWeight = FontWeight.Bold, color = ArticleInk, lineHeight = 30.sp)
+            Text(listOf((v["dateLabel"] as? String).orEmpty(), "From nirogbhumi.com").filter { it.isNotBlank() }.joinToString(" · "), fontSize = 12.sp, color = ArticleMuted)
             (v["excerpt"] as? String)?.takeIf { it.isNotBlank() }?.let { Text(it, fontSize = 15.sp, color = Color(0xFF303B33), lineHeight = 23.sp) }
             if (canOpen) {
                 Button(
                     onClick = { openWebUrl(context, link) },
                     modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Green), shape = RoundedCornerShape(26.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = ArticleGreen), shape = RoundedCornerShape(26.dp),
                 ) { Text("Read the full article on nirogbhumi.com", color = Color.White, fontWeight = FontWeight.Bold) }
             }
-            Text("Education only. It is not medical advice. Ask your doctor before changing treatment.", fontSize = 11.5.sp, color = Muted)
+            Text("Education only. It is not medical advice. Ask your doctor before changing treatment.", fontSize = 11.5.sp, color = ArticleMuted)
         }
     }
 }
@@ -253,7 +253,7 @@ private fun ArticleCard(article: NirogBhumiArticle, onClick: () -> Unit) {
                 coil.compose.AsyncImage(model = url, contentDescription = null, modifier = Modifier.fillMaxWidth().height(160.dp), contentScale = ContentScale.Crop)
             }
             Column(modifier = Modifier.padding(16.dp)) {
-                Text(article.title, fontFamily = FontFamily.Serif, fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Ink)
+                Text(article.title, fontFamily = FontFamily.Serif, fontSize = 17.sp, fontWeight = FontWeight.Bold, color = ArticleInk)
                 if (article.excerpt.isNotBlank()) {
                     Spacer(Modifier.height(4.dp))
                     Text(article.excerpt, fontSize = 13.sp, color = Color(0xFF434842), maxLines = 3, overflow = TextOverflow.Ellipsis)
@@ -262,8 +262,8 @@ private fun ArticleCard(article: NirogBhumiArticle, onClick: () -> Unit) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Text(article.dateLabel, fontSize = 11.sp, color = Color(0xFF737972))
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Read", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Green)
-                        Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Green, modifier = Modifier.size(14.dp))
+                        Text("Read", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = ArticleGreen)
+                        Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = ArticleGreen, modifier = Modifier.size(14.dp))
                     }
                 }
             }

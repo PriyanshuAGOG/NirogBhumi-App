@@ -338,7 +338,12 @@ service cloud.firestore {
     }
     match /auditLogs/{id} { allow read: if admin(); allow write: if false; }
     match /supportRequests/{id} {
-      allow create: if validCreate() && request.resource.data.status == 'open';
+      // Length-capped: the text is emailed to the support inbox and shown in the console, so it is bounded here.
+      allow create: if validCreate() && request.resource.data.status == 'open'
+        && request.resource.data.get('subject', '') is string && request.resource.data.get('subject', '').size() <= 150
+        && request.resource.data.get('message', '') is string && request.resource.data.get('message', '').size() <= 4000
+        && request.resource.data.get('appVersion', '') is string && request.resource.data.get('appVersion', '').size() <= 40
+        && !('emailStatus' in request.resource.data);
       allow read: if ownsResource() || staff();
       allow update: if staff();
     }

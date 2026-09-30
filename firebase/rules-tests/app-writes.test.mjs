@@ -122,6 +122,15 @@ describe('health logs (addHealthLog / updateHealthLog / upsertUserRecord)', () =
     await assertSucceeds(setDoc(doc(collection(db, 'consultations')), { userId: 'mem', status: 'payment_pending', paymentStatus: 'pending', createdAt: ts() }));
     await assertFails(setDoc(doc(collection(db, 'consultations')), { userId: 'mem', status: 'confirmed', paymentStatus: 'paid', createdAt: ts() }));
   });
+  it('support requests are length-capped and cannot forge the email status; the outbound mail queue is server-only', async () => {
+    const db = member('mem');
+    await assertSucceeds(setDoc(doc(collection(db, 'supportRequests')), { userId: 'mem', status: 'open', subject: 'Help', message: 'x'.repeat(4000), appVersion: '1.0.3', createdAt: ts() }));
+    await assertFails(setDoc(doc(collection(db, 'supportRequests')), { userId: 'mem', status: 'open', subject: 'x'.repeat(151), message: 'hi', createdAt: ts() }));
+    await assertFails(setDoc(doc(collection(db, 'supportRequests')), { userId: 'mem', status: 'open', subject: 'Help', message: 'x'.repeat(4001), createdAt: ts() }));
+    await assertFails(setDoc(doc(collection(db, 'supportRequests')), { userId: 'mem', status: 'open', subject: 'Help', message: 'hi', emailStatus: 'sent_to_inbox', createdAt: ts() }));
+    await assertFails(setDoc(doc(collection(db, 'mail')), { to: ['victim@example.com'], message: { subject: 'Spoofed', text: 'phish' } }));
+    await assertFails(getDoc(doc(db, 'mail/export_someone')));
+  });
   it('a member cannot schedule their own push notifications, but can log a received one', async () => {
     const db = member('mem');
     await assertSucceeds(addDoc(collection(db, 'notifications'), { userId: 'mem', category: 'reminder', title: 't', body: 'b', route: 'dashboard', createdAt: ts() }));
