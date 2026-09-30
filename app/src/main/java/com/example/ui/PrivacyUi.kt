@@ -1,6 +1,5 @@
 package com.nirogbhumi.app.ui
 
-import android.app.Activity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -24,7 +23,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
+import androidx.activity.compose.LocalActivity
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
@@ -90,7 +89,7 @@ fun PendingDeletionBanner(state: NirogState, modifier: Modifier = Modifier) {
  */
 @Composable
 fun ReauthDialog(onConfirmed: () -> Unit, onDismiss: () -> Unit, onSignOut: () -> Unit) {
-    val activity = LocalContext.current as? Activity
+    val activity = LocalActivity.current
     val method = remember { FirebaseAuthGateway.signInMethod() }
     val phone = remember { FirebaseAuthGateway.currentPhone() }
     var password by remember { mutableStateOf("") }
