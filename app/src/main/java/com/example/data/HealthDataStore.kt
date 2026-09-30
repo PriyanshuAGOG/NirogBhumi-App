@@ -68,6 +68,12 @@ class HealthDataStore(
 
     fun stop() = synchronized(lock) { stopLocked(); _ui.value = HealthUiState(isLoading = true, zone = zone()) }
 
+    /** Re-opens every listener (the "Try again" button after a load error). */
+    fun retry() {
+        synchronized(lock) { stopLocked() }
+        start()
+    }
+
     /** Re-derives "today" and the windows from the clock without new data (midnight rollover, app resumed). */
     fun recompute() = synchronized(lock) { if (boundUid != null) publishLocked() }
 

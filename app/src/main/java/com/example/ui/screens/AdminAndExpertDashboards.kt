@@ -20,6 +20,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nirogbhumi.app.ui.NirogState
+import com.nirogbhumi.app.ui.collectHealth
 
 // Re-map tokens inside dashboards
 private val DashDeepGreen = Color(0xFF314936)
@@ -832,10 +833,11 @@ fun ExpertWebDashboard(state: NirogState) {
                             // Visual parameters
                             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                 Box(modifier = Modifier.background(BackgroundPaperLight, RoundedCornerShape(8.dp)).padding(12.dp)) {
-                                    Text("Avg Fasting sugar: ${state.fastingSugarValue} mg/dL", color = ActiveGreenText, fontSize = 13.sp)
+                                    val previewHealth = state.collectHealth()
+                                    Text("Avg fasting sugar (30 days): ${previewHealth.month.fastingAverage?.toInt()?.let { "$it mg/dL" } ?: "no data"}", color = ActiveGreenText, fontSize = 13.sp)
                                 }
                                 Box(modifier = Modifier.background(BackgroundPaperLight, RoundedCornerShape(8.dp)).padding(12.dp)) {
-                                    Text("Sleep log avg: ${state.sleepHours}h", color = ActiveGreenText, fontSize = 13.sp)
+                                    Text("Sleep avg (30 days): ${state.collectHealth().month.sleepAverageMinutes?.let { "${it / 60}h ${it % 60}m" } ?: "no data"}", color = ActiveGreenText, fontSize = 13.sp)
                                 }
                             }
 

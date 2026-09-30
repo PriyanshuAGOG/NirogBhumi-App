@@ -47,6 +47,8 @@ data class PeriodSummary(
     val glucoseCount: Int,
     val glucoseAverage: Double?,
     val glucoseInRangePercent: Int?,
+    val fastingCount: Int,
+    val fastingAverage: Double?,
     val bpCount: Int,
     val bpAverageSystolic: Double?,
     val bpAverageDiastolic: Double?,
@@ -88,8 +90,8 @@ data class HealthUiState(
     val lastSleep: SleepEntry? = null,
 
     val today: TodayStatus = TodayStatus(LocalDate.MIN, false, false, false, false, false, false, false, 0L, 0, null),
-    val week: PeriodSummary = PeriodSummary(7, 0, null, null, 0, null, null, 0, null, 0, null, 0, 0, 0L, 0),
-    val month: PeriodSummary = PeriodSummary(30, 0, null, null, 0, null, null, 0, null, 0, null, 0, 0, 0L, 0),
+    val week: PeriodSummary = PeriodSummary(7, 0, null, null, 0, null, 0, null, null, 0, null, 0, null, 0, 0, 0L, 0),
+    val month: PeriodSummary = PeriodSummary(30, 0, null, null, 0, null, 0, null, null, 0, null, 0, null, 0, 0, 0L, 0),
 ) {
     val hasAnyReading: Boolean get() = glucose.isNotEmpty() || bp.isNotEmpty() || weight.isNotEmpty() || sleep.isNotEmpty() || activity.isNotEmpty()
     /** mg/dL readings only: HbA1c is a percentage on another scale and must never be averaged with them. */
@@ -167,6 +169,15 @@ object HealthStateBuilder {
 
     private fun isCheckIn(source: HealthSource) = !source.isImported
 
+    /** Every local day on which the member checked in (see [TodayStatus] for the definition). One source for Rhythm, streaks and reports. */
+    fun checkInDates(state: HealthUiState): Set<LocalDate> = buildSet {
+        val zone = state.zone
+        state.glucose.filter { !it.isHbA1c && isCheckIn(it.source) }.forEach { add(dateOf(it.measuredAtMillis, zone)) }
+        state.bp.filter { isCheckIn(it.source) }.forEach { add(dateOf(it.measuredAtMillis, zone)) }
+        state.weight.filter { isCheckIn(it.source) }.forEach { add(dateOf(it.measuredAtMillis, zone)) }
+        state.medication.filter { isCheckIn(it.source) }.forEach { add(dateOf(it.measuredAtMillis, zone)) }
+    }
+
     private fun todayStatus(
         glucose: List<GlucoseEntry>, bp: List<BpEntry>, weight: List<WeightEntry>, sleep: List<SleepEntry>,
         activity: List<ActivityEntry>, medication: List<MedicationEntry>, today: LocalDate, zone: ZoneId,
@@ -215,6 +226,8 @@ object HealthStateBuilder {
             glucoseInRangePercent = g.takeIf { it.isNotEmpty() }?.let { list ->
                 (list.count { it.status() == GlucoseStatus.NORMAL } * 100.0 / list.size).toInt()
             },
+            fastingCount = g.count { it.kind == GlucoseKind.FASTING },
+            fastingAverage = g.filter { it.kind == GlucoseKind.FASTING }.takeIf { it.isNotEmpty() }?.map { it.value }?.average(),
             bpCount = b.size,
             bpAverageSystolic = b.takeIf { it.isNotEmpty() }?.map { it.systolic }?.average(),
             bpAverageDiastolic = b.takeIf { it.isNotEmpty() }?.map { it.diastolic }?.average(),

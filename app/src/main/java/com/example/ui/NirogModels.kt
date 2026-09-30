@@ -6,6 +6,7 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.nirogbhumi.app.data.FirebaseHealthRepository
+import com.nirogbhumi.app.data.HealthDataStore
 import com.nirogbhumi.app.data.HealthRepository
 import com.nirogbhumi.app.data.CloudDocument
 
@@ -16,20 +17,6 @@ import com.nirogbhumi.app.data.CloudDocument
 const val CONSENT_VERSION = "2025-07"
 
 // Data Models
-data class SugarLog(
-    val id: Int,
-    val value: Int,
-    val type: String, // "Fasting" or "Post-meal"
-    val time: String,
-    val status: String, // "High", "Normal" or "Low"
-    // Defaults to "now" so the existing optimistic quick-log call sites (which
-    // log the instant a reading is entered) don't need updating - only the
-    // Firestore-sync call sites pass the reading's real measuredAt, which the
-    // 7/30/90-day trend chart needs for real day-bucketing instead of relying
-    // on the pre-formatted display string in `time`.
-    val measuredAtMillis: Long = System.currentTimeMillis()
-)
-
 data class ConsultationSlot(
     val date: String,
     val time: String
@@ -38,6 +25,8 @@ data class ConsultationSlot(
 // Shared Memory State Manager
 class NirogState {
     val repository: HealthRepository = FirebaseHealthRepository()
+    // The one source every screen reads health records from (see HealthDataStore).
+    val health = HealthDataStore(repository)
     var cloudMessage by mutableStateOf("")
     val formValues = mutableStateMapOf<String, String>()
     val routeSelections = mutableStateMapOf<String, String>()
@@ -141,17 +130,6 @@ class NirogState {
     // Active Tab under Dashboard
     var activeTab by mutableStateOf("Today") // "Today", "Track", "Insights", "Care", "Learn"
 
-    // User Metrics State - starts at nil/zero until the user logs a real reading
-    var fastingSugarValue by mutableStateOf(0)
-    var sleepHours by mutableStateOf(0)
-    var sleepMinutes by mutableStateOf(0)
-    var stepsLogged by mutableStateOf(0)
-    var latestBpReading by mutableStateOf<String?>(null)
-
-    // True once ANY real reading (sugar/BP/weight) has been logged today - the one
-    // shared signal the Today/Track prompts and Rhythm agree on, so a completed
-    // check-in never keeps re-prompting with an empty-feeling "do this now" card.
-    var checkedInToday by mutableStateOf(false)
     // Lets a quick-log entry point (a chip, a tile's "+" ) jump the Daily Check-in
     // wizard straight to the relevant step instead of starting over at sugar.
     var checkinStartStep by mutableStateOf(0)
@@ -160,9 +138,6 @@ class NirogState {
     // screen that shows it, same one-shot pattern as the check-in streak
     // milestone in CheckInFlow.kt.
     var walkMilestoneCount by mutableStateOf<Long?>(null)
-
-    // Sugar History & Tracking State - populated only from real Firestore reads
-    val sugarLogs = mutableStateListOf<SugarLog>()
 
     // Log FASTING sugar bottom sheet state
     var isQuickLogFastingOpen by mutableStateOf(false)

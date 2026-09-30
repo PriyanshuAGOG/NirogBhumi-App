@@ -28,11 +28,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.nirogbhumi.app.data.CloudResult
-import com.nirogbhumi.app.health.computeSleepGlucoseInsight
-import com.nirogbhumi.app.health.computeMedicationGlucoseInsight
-import com.nirogbhumi.app.health.computeMealTimingInsight
+import com.nirogbhumi.app.health.domain.ClockText
+import com.nirogbhumi.app.health.domain.HealthLabels
+import com.nirogbhumi.app.health.domain.Insights
+import com.nirogbhumi.app.health.domain.SugarDirection
+import com.nirogbhumi.app.ui.collectHealth
 import com.nirogbhumi.app.ui.NirogState
-import com.nirogbhumi.app.ui.SugarLog
 import com.nirogbhumi.app.ui.components.SectionLabel
 import com.nirogbhumi.app.ui.theme.NirogColor
 import com.nirogbhumi.app.ui.theme.NirogSpace
@@ -41,32 +42,8 @@ import com.nirogbhumi.app.ui.theme.NirogType
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainHub(state: NirogState) {
-    // Shared "has anything real been logged today" signal, computed once here
-    // (not per-tab) so Today's focus card and Track's check-in card always agree,
-    // and a completed check-in never re-prompts with an empty-feeling "do this
-    // now" card - it shows a genuine done-for-today state instead.
-    DisposableEffect(Unit) {
-        val todayKey = com.nirogbhumi.app.ui.localDayKey(System.currentTimeMillis())
-        fun anyToday(docs: List<com.nirogbhumi.app.data.CloudDocument>): Boolean = docs.any { doc ->
-            val ts = (doc.values["createdAt"] as? com.google.firebase.Timestamp)
-                ?: (doc.values["measuredAt"] as? com.google.firebase.Timestamp)
-            ts != null && com.nirogbhumi.app.ui.localDayKey(ts.toDate().time) == todayKey
-        }
-        val flags = booleanArrayOf(false, false, false)
-        fun recompute() { state.checkedInToday = flags.any { it } }
-        val subs = listOf(
-            state.repository.listenUserCollection("glucoseReadings", 5, orderByField = "measuredAt", descending = true) { r ->
-                if (r is CloudResult.Success) { flags[0] = anyToday(r.value); recompute() }
-            },
-            state.repository.listenUserCollection("bpReadings", 5, orderByField = "createdAt", descending = true) { r ->
-                if (r is CloudResult.Success) { flags[1] = anyToday(r.value); recompute() }
-            },
-            state.repository.listenUserCollection("weightLogs", 5, orderByField = "createdAt", descending = true) { r ->
-                if (r is CloudResult.Success) { flags[2] = anyToday(r.value); recompute() }
-            },
-        )
-        onDispose { subs.forEach { it.cancel() } }
-    }
+    // "Checked in today" is part of the shared health state (HealthUiState.today.checkedIn), so Today,
+    // Track and the prompts all read the same answer; nothing is computed per tab any more.
 
     Scaffold(
         topBar = {
@@ -403,66 +380,24 @@ fun NirogBottomNavItem(
     }
 }
 
+private data class SugarBar(val value: Int)
+
 // TAB 1: Today Tab Dashboard
 @Composable
 fun TodayTab(state: NirogState) {
     // Real, data-backed signals for TodayFocusEngine - the "one action for
     // today" card picks from these instead of always showing the same fixed
     // task, so it actually changes as the member logs real things.
-    var loggedReadingToday by remember { mutableStateOf(false) }
-    var walkLoggedToday by remember { mutableStateOf(false) }
+    val health = state.collectHealth()
+    val nowMs = System.currentTimeMillis()
+    val loggedReadingToday = health.today.hasSugar
+    // A deliberate walk (timed or typed in). Steps counted passively by a phone do not tick "walk done".
+    val walkLoggedToday = health.today.activityMinutesToday > 0
+    val sleepText = health.lastSleep?.let { ClockText.duration(it.durationMinutes) }
+    val stepsText = health.today.stepsToday.takeIf { it > 0 }?.let { String.format(java.util.Locale.US, "%,d", it) }
+    val bpText = health.latestBp?.let { HealthLabels.bp(it) }
 
     DisposableEffect(Unit) {
-        val sugarSub = state.repository.listenUserCollection("glucoseReadings", 7, orderByField = "measuredAt", descending = true) { result ->
-            if (result is com.nirogbhumi.app.data.CloudResult.Success) {
-                val todayKey = com.nirogbhumi.app.ui.localDayKey(System.currentTimeMillis())
-                val synced = result.value.mapIndexedNotNull { index, doc ->
-                    val readingType = doc.values["readingType"] as? String
-                    // HbA1c is a lab percentage on a different scale than mg/dL readings,
-                    // so it's excluded here to avoid corrupting the mg/dL trend/average.
-                    if (readingType == "hba1c") return@mapIndexedNotNull null
-                    val value = (doc.values["value"] as? Number)?.toInt() ?: return@mapIndexedNotNull null
-                    val type = if (readingType == "fasting") "Fasting" else "Post-meal"
-                    val timestamp = (doc.values["measuredAt"] as? com.google.firebase.Timestamp)
-                        ?: (doc.values["createdAt"] as? com.google.firebase.Timestamp)
-                    val time = timestamp?.toDate()?.let {
-                        java.text.SimpleDateFormat("MMM d, h:mm a", java.util.Locale.getDefault()).format(it)
-                    } ?: "Synced"
-                    val status = if (value > 130) "High" else if (value < 80) "Low" else "Normal"
-                    SugarLog(index + 1, value, type, time, status, measuredAtMillis = timestamp?.toDate()?.time ?: System.currentTimeMillis())
-                }
-                if (synced.isNotEmpty()) {
-                    state.sugarLogs.clear()
-                    state.sugarLogs.addAll(synced)
-                    state.fastingSugarValue = synced.firstOrNull { it.type == "Fasting" }?.value ?: state.fastingSugarValue
-                }
-                loggedReadingToday = result.value.any { doc ->
-                    val ts = (doc.values["measuredAt"] as? com.google.firebase.Timestamp) ?: (doc.values["createdAt"] as? com.google.firebase.Timestamp)
-                    ts != null && com.nirogbhumi.app.ui.localDayKey(ts.toDate().time) == todayKey
-                }
-            }
-        }
-        val bpSub = state.repository.listenUserCollection("bpReadings", 1, orderByField = "createdAt", descending = true) { result ->
-            if (result is com.nirogbhumi.app.data.CloudResult.Success) {
-                val latest = result.value.firstOrNull()
-                val systolic = (latest?.values?.get("systolic") as? Number)?.toInt()
-                val diastolic = (latest?.values?.get("diastolic") as? Number)?.toInt()
-                if (systolic != null && diastolic != null) state.latestBpReading = "$systolic/$diastolic"
-            }
-        }
-        // Real walk logs (from Activity/Walk Timer), independent of the
-        // manual "Mark Complete" checklist fallback below - if the member
-        // already logged a real walk today, the focus card treats it as done
-        // without requiring a separate manual tap.
-        val walkSub = state.repository.listenUserCollection("walkLogs", 5, orderByField = "createdAt", descending = true) { result ->
-            if (result is com.nirogbhumi.app.data.CloudResult.Success) {
-                val todayKey = com.nirogbhumi.app.ui.localDayKey(System.currentTimeMillis())
-                walkLoggedToday = result.value.any { doc ->
-                    val ts = (doc.values["measuredAt"] as? com.google.firebase.Timestamp) ?: (doc.values["createdAt"] as? com.google.firebase.Timestamp)
-                    ts != null && com.nirogbhumi.app.ui.localDayKey(ts.toDate().time) == todayKey
-                }
-            }
-        }
         // Restores today's checklist state from Firestore on every open - without
         // this, "Mark Complete" only ever lived in memory and silently reset the
         // moment the app was reopened, even though it visually said "Completed".
@@ -482,11 +417,11 @@ fun TodayTab(state: NirogState) {
                 else if (!walkDoneToday) state.dailyRitualsCompleted.remove("Walk")
             }
         }
-        onDispose { sugarSub.cancel(); bpSub.cancel(); walkSub.cancel(); checklistSub.cancel() }
+        onDispose { checklistSub.cancel() }
     }
 
     var checkinStreak by remember { mutableStateOf(0) }
-    LaunchedEffect(state.checkedInToday) {
+    LaunchedEffect(health.today.checkedIn) {
         state.repository.peekCheckinStreak { result ->
             if (result is CloudResult.Success) checkinStreak = result.value
         }
@@ -500,22 +435,22 @@ fun TodayTab(state: NirogState) {
     // Re-peeked whenever a check-in completes so today's own hint update
     // doesn't require a cold restart to take effect.
     var checkinHourHint by remember { mutableStateOf<Int?>(null) }
-    LaunchedEffect(state.checkedInToday) {
+    LaunchedEffect(health.today.checkedIn) {
         state.repository.peekCheckinHourHint { result ->
             if (result is CloudResult.Success) checkinHourHint = result.value
         }
     }
     var lateNudgeDismissed by remember { mutableStateOf(false) }
-    val showLateNudge = remember(checkinHourHint, state.checkedInToday, lateNudgeDismissed) {
+    val showLateNudge = remember(checkinHourHint, health.today.checkedIn, lateNudgeDismissed) {
         val hint = checkinHourHint
-        !state.checkedInToday && !lateNudgeDismissed && hint != null &&
+        !health.today.checkedIn && !lateNudgeDismissed && hint != null &&
             java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY) >= hint
     }
 
-    val focusAction = remember(state.isProgramActive, state.checkedInToday, loggedReadingToday, walkLoggedToday, state.dailyRitualsCompleted.contains("Walk")) {
+    val focusAction = remember(state.isProgramActive, health.today.checkedIn, loggedReadingToday, walkLoggedToday, state.dailyRitualsCompleted.contains("Walk")) {
         com.nirogbhumi.app.health.TodayFocusEngine.pick(
             isProgramActive = state.isProgramActive,
-            checkedInToday = state.checkedInToday,
+            checkedInToday = health.today.checkedIn,
             loggedReadingToday = loggedReadingToday,
             walkDoneToday = walkLoggedToday || state.dailyRitualsCompleted.contains("Walk"),
         )
@@ -741,7 +676,7 @@ fun TodayTab(state: NirogState) {
             )
             TextButton(onClick = { state.checkinStartStep = 0; state.currentScreen = "daily_checkin" }) {
                 Text(
-                    if (state.checkedInToday) "Add more" else "Log now",
+                    if (health.today.checkedIn) "Add more" else "Log now",
                     color = NirogColor.forestSoft, fontWeight = FontWeight.Bold, fontSize = 13.sp
                 )
                 Spacer(modifier = Modifier.width(2.dp))
@@ -759,10 +694,10 @@ fun TodayTab(state: NirogState) {
                 VitalBentoCard(
                     icon = Icons.Filled.Bloodtype,
                     iconColor = NirogColor.errorColor,
-                    title = "Fasting Sugar",
-                    value = if (state.fastingSugarValue > 0) "${state.fastingSugarValue}" else "—",
-                    unit = if (state.fastingSugarValue > 0) "mg/dL" else "",
-                    annotation = if (state.fastingSugarValue > 0) "Today" else "Tap to log",
+                    title = "Blood Sugar",
+                    value = health.latestGlucose?.value?.toInt()?.toString() ?: "—",
+                    unit = if (health.latestGlucose != null) "mg/dL" else "",
+                    annotation = health.latestGlucose?.let { HealthLabels.day(it.measuredAtMillis, nowMs, health.zone) } ?: "Tap to log",
                     onClick = { state.isQuickLogFastingOpen = true }
                 )
             }
@@ -775,9 +710,9 @@ fun TodayTab(state: NirogState) {
                     icon = Icons.Filled.Favorite,
                     iconColor = NirogColor.secondaryGreen,
                     title = "Blood Pressure",
-                    value = state.latestBpReading ?: "—",
+                    value = bpText ?: "—",
                     unit = "",
-                    annotation = if (state.latestBpReading != null) "Latest" else "No data yet",
+                    annotation = health.latestBp?.let { HealthLabels.day(it.measuredAtMillis, nowMs, health.zone) } ?: "No data yet",
                     onClick = { state.currentScreen = "bp_overview" }
                 )
             }
@@ -793,9 +728,9 @@ fun TodayTab(state: NirogState) {
                     icon = Icons.Filled.Bedtime,
                     iconColor = Color(0xFF4B6450),
                     title = "Sleep Duration",
-                    value = if (state.sleepHours > 0 || state.sleepMinutes > 0) "${state.sleepHours}h ${state.sleepMinutes}m" else "—",
+                    value = sleepText ?: "—",
                     unit = "",
-                    annotation = if (state.sleepHours > 0 || state.sleepMinutes > 0) "Last night" else "No data yet",
+                    annotation = health.lastSleep?.let { sleep -> HealthLabels.day(sleep.measuredAtMillis, nowMs, health.zone).let { if (it == "Today") "Last night" else it } } ?: "No data yet",
                     onClick = { state.currentScreen = "sleep_overview" }
                 )
             }
@@ -808,9 +743,9 @@ fun TodayTab(state: NirogState) {
                     icon = Icons.Filled.DirectionsWalk,
                     iconColor = NirogColor.secondaryGreen,
                     title = "Steps Done",
-                    value = if (state.stepsLogged > 0) String.format("%,d", state.stepsLogged) else "—",
-                    unit = if (state.stepsLogged > 0) "steps" else "",
-                    annotation = if (state.stepsLogged > 0) "Today" else "No data yet",
+                    value = stepsText ?: "—",
+                    unit = if (stepsText != null) "steps" else "",
+                    annotation = if (stepsText != null) "Today" else "No data yet",
                     onClick = { state.currentScreen = "walking_overview" }
                 )
             }
@@ -851,7 +786,7 @@ fun TodayTab(state: NirogState) {
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                if (state.sugarLogs.isEmpty()) {
+                if (health.sugarReadings.isEmpty()) {
                     Column(
                         modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
@@ -867,7 +802,7 @@ fun TodayTab(state: NirogState) {
                     }
                 } else {
                     // Recent readings sparkline built from real logged sugar values
-                    val recent = state.sugarLogs.take(7).reversed()
+                    val recent = health.sugarReadings.take(7).reversed().map { SugarBar(it.value.toInt()) }
                     Canvas(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1070,8 +1005,9 @@ private fun PreviewRhythmChart(modifier: Modifier = Modifier) {
 @Composable
 private fun FirstWeekChecklistCard(state: NirogState, checkinStreak: Int) {
     var dismissed by remember { mutableStateOf(false) }
-    val loggedFirstReading = state.sugarLogs.isNotEmpty()
-    val triedCheckin = state.checkedInToday || checkinStreak >= 1
+    val health = state.collectHealth()
+    val loggedFirstReading = health.sugarReadings.isNotEmpty()
+    val triedCheckin = health.today.checkedIn || checkinStreak >= 1
     val metBatch = state.isProgramActive
     if (dismissed || (loggedFirstReading && triedCheckin && metBatch)) return
 
@@ -1131,32 +1067,13 @@ private fun ChecklistItemRow(label: String, done: Boolean, onClick: () -> Unit) 
  */
 @Composable
 private fun WeeklyScoreCard(state: NirogState) {
-    var glucoseReadings by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>>(emptyList()) }
-    var bpReadings by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>>(emptyList()) }
-    var sleepLogs by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>>(emptyList()) }
-
-    DisposableEffect(state.repository.userId) {
-        val glucoseSub = state.repository.listenUserCollection("glucoseReadings", limit = 30, orderByField = "measuredAt", descending = true) { result ->
-            if (result is CloudResult.Success) glucoseReadings = result.value
-        }
-        val bpSub = state.repository.listenUserCollection("bpReadings", limit = 30, orderByField = "createdAt", descending = true) { result ->
-            if (result is CloudResult.Success) bpReadings = result.value
-        }
-        val sleepSub = state.repository.listenUserCollection("sleepLogs", limit = 10, orderByField = "createdAt", descending = true) { result ->
-            if (result is CloudResult.Success) sleepLogs = result.value
-        }
-        onDispose { glucoseSub.cancel(); bpSub.cancel(); sleepSub.cancel() }
-    }
-
-    val nowMillis = remember { System.currentTimeMillis() }
-    val summary = remember(glucoseReadings, bpReadings, sleepLogs) {
-        com.nirogbhumi.app.health.computeWeeklySummary(glucoseReadings, bpReadings, sleepLogs, nowMillis)
-    } ?: return
+    val health = state.collectHealth()
+    val summary = remember(health) { Insights.weeklySummary(health) } ?: return
 
     val (bg, fg) = when (summary.tone) {
-        com.nirogbhumi.app.health.WeeklyTone.POSITIVE -> NirogColor.statusInRangeBg to NirogColor.statusInRange
-        com.nirogbhumi.app.health.WeeklyTone.CAUTION -> NirogColor.statusAttentionBg to NirogColor.statusAttention
-        com.nirogbhumi.app.health.WeeklyTone.NEUTRAL -> NirogColor.statusNeutralBg to NirogColor.statusNeutral
+        com.nirogbhumi.app.health.domain.WeeklyTone.POSITIVE -> NirogColor.statusInRangeBg to NirogColor.statusInRange
+        com.nirogbhumi.app.health.domain.WeeklyTone.CAUTION -> NirogColor.statusAttentionBg to NirogColor.statusAttention
+        com.nirogbhumi.app.health.domain.WeeklyTone.NEUTRAL -> NirogColor.statusNeutralBg to NirogColor.statusNeutral
     }
 
     Card(
@@ -1184,29 +1101,13 @@ private fun WeeklyScoreCard(state: NirogState) {
  */
 @Composable
 private fun SleepGlucoseInsightCard(state: NirogState) {
-    var sleepLogs by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>>(emptyList()) }
-    var glucoseReadings by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>>(emptyList()) }
-    var medicationLogs by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>>(emptyList()) }
-
-    DisposableEffect(state.repository.userId) {
-        val sleepSub = state.repository.listenUserCollection("sleepLogs", limit = 60, orderByField = "createdAt", descending = true) { result ->
-            if (result is CloudResult.Success) sleepLogs = result.value
-        }
-        val glucoseSub = state.repository.listenUserCollection("glucoseReadings", limit = 60, orderByField = "measuredAt", descending = true) { result ->
-            if (result is CloudResult.Success) glucoseReadings = result.value
-        }
-        val medicationSub = state.repository.listenUserCollection("medicationLogs", limit = 60, orderByField = "measuredAt", descending = true) { result ->
-            if (result is CloudResult.Success) medicationLogs = result.value
-        }
-        onDispose { sleepSub.cancel(); glucoseSub.cancel(); medicationSub.cancel() }
-    }
-
+    val health = state.collectHealth()
     // Today shows at most one pattern card, not three - insight_detail is
     // where a member sees every correlation that's actually been found.
     // Priority order is just the order they were built in, not a ranking.
-    val sleepInsight = remember(sleepLogs, glucoseReadings) { computeSleepGlucoseInsight(sleepLogs, glucoseReadings) }
-    val medicationInsight = remember(medicationLogs, glucoseReadings) { computeMedicationGlucoseInsight(medicationLogs, glucoseReadings) }
-    val mealInsight = remember(glucoseReadings) { computeMealTimingInsight(glucoseReadings) }
+    val sleepInsight = remember(health) { Insights.sleepGlucose(health.sleep, health.glucose, health.zone) }
+    val medicationInsight = remember(health) { Insights.medicationGlucose(health.medication, health.glucose, health.zone) }
+    val mealInsight = remember(health) { Insights.mealTiming(health.glucose, health.zone) }
 
     val summary = when {
         sleepInsight != null -> "Your fasting sugar has averaged %.0f mg/dL after shorter nights (under 6h) vs %.0f mg/dL after longer ones, based on your own logs.".format(sleepInsight.shortSleepAvg, sleepInsight.longSleepAvg)
@@ -1398,6 +1299,10 @@ fun VitalBentoCard(
 @Composable
 fun TrackTab(state: NirogState) {
     var showActivityLog by remember { mutableStateOf(false) }
+    val health = state.collectHealth()
+    val sleepText = health.lastSleep?.let { ClockText.duration(it.durationMinutes) }
+    val stepsText = health.today.stepsToday.takeIf { it > 0 }?.let { String.format(java.util.Locale.US, "%,d", it) }
+    val bpText = health.latestBp?.let { HealthLabels.bp(it) }
 
     Column(
         modifier = Modifier
@@ -1432,41 +1337,41 @@ fun TrackTab(state: NirogState) {
                 .fillMaxWidth()
                 .clickable { state.checkinStartStep = 0; state.currentScreen = "daily_checkin" }
                 .border(width = 0.5.dp, color = NirogColor.forestSofter.copy(alpha = 0.4f), shape = RoundedCornerShape(24.dp)),
-            colors = CardDefaults.cardColors(containerColor = if (state.checkedInToday) NirogColor.surfaceLow else NirogColor.forestSoft),
+            colors = CardDefaults.cardColors(containerColor = if (health.today.checkedIn) NirogColor.surfaceLow else NirogColor.forestSoft),
             shape = RoundedCornerShape(24.dp)
         ) {
             Row(modifier = Modifier.padding(20.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     modifier = Modifier.size(44.dp).background(
-                        if (state.checkedInToday) NirogColor.forestSoft.copy(alpha = 0.12f) else Color.White.copy(alpha = 0.15f),
+                        if (health.today.checkedIn) NirogColor.forestSoft.copy(alpha = 0.12f) else Color.White.copy(alpha = 0.15f),
                         CircleShape
                     ),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        if (state.checkedInToday) Icons.Filled.CheckCircle else Icons.Filled.PlaylistAddCheck,
+                        if (health.today.checkedIn) Icons.Filled.CheckCircle else Icons.Filled.PlaylistAddCheck,
                         contentDescription = null,
-                        tint = if (state.checkedInToday) NirogColor.statusInRange else Color.White,
+                        tint = if (health.today.checkedIn) NirogColor.statusInRange else Color.White,
                         modifier = Modifier.size(24.dp)
                     )
                 }
                 Spacer(modifier = Modifier.width(16.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        if (state.checkedInToday) "Checked in for today" else "Daily Check-in",
+                        if (health.today.checkedIn) "Checked in for today" else "Daily Check-in",
                         fontSize = 18.sp, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold,
-                        color = if (state.checkedInToday) NirogColor.forest else Color.White
+                        color = if (health.today.checkedIn) NirogColor.forest else Color.White
                     )
                     Text(
-                        if (state.checkedInToday) "Nicely done — tap to add another reading" else "Sugar, BP & weight — under 2 minutes",
+                        if (health.today.checkedIn) "Nicely done — tap to add another reading" else "Sugar, BP & weight — under 2 minutes",
                         fontSize = 13.sp,
-                        color = if (state.checkedInToday) Color(0xFF4B6450) else NirogColor.forestPale
+                        color = if (health.today.checkedIn) Color(0xFF4B6450) else NirogColor.forestPale
                     )
                 }
                 Icon(
                     Icons.Filled.ArrowForward,
                     contentDescription = "Start",
-                    tint = if (state.checkedInToday) NirogColor.forestSoft else Color.White
+                    tint = if (health.today.checkedIn) NirogColor.forestSoft else Color.White
                 )
             }
         }
@@ -1497,8 +1402,8 @@ fun TrackTab(state: NirogState) {
                     iconBg = Color(0xFFFFDAD6),
                     iconTint = NirogColor.errorColor,
                     title = "Blood Sugar",
-                    measuredValue = if (state.fastingSugarValue > 0) "${state.fastingSugarValue}" else "No data",
-                    labelSuffix = if (state.fastingSugarValue > 0) "mg/dL" else "",
+                    measuredValue = health.latestGlucose?.value?.toInt()?.toString() ?: "No data",
+                    labelSuffix = if (health.latestGlucose != null) "mg/dL" else "",
                     onClick = { state.currentScreen = "sugar_detail" }
                 )
             }
@@ -1508,7 +1413,7 @@ fun TrackTab(state: NirogState) {
                     iconBg = NirogColor.forestPaleLight,
                     iconTint = NirogColor.forest,
                     title = "BP",
-                    measuredValue = state.latestBpReading ?: "No data",
+                    measuredValue = bpText ?: "No data",
                     labelSuffix = "",
                     onClick = { state.currentScreen = "bp_overview" }
                 )
@@ -1522,7 +1427,7 @@ fun TrackTab(state: NirogState) {
                     iconBg = NirogColor.surfaceNeutral,
                     iconTint = Color(0xFF4B6450),
                     title = "Sleep",
-                    measuredValue = if (state.sleepHours > 0 || state.sleepMinutes > 0) "${state.sleepHours}h ${state.sleepMinutes}m" else "No data",
+                    measuredValue = sleepText ?: "No data",
                     labelSuffix = "",
                     onClick = { state.currentScreen = "sleep_overview" }
                 )
@@ -1533,23 +1438,37 @@ fun TrackTab(state: NirogState) {
                     iconBg = NirogColor.secondaryContainer.copy(alpha = 0.5f),
                     iconTint = NirogColor.secondaryGreen,
                     title = "Walking & Activity",
-                    measuredValue = if (state.stepsLogged > 0) String.format("%,d", state.stepsLogged) else "No data",
+                    measuredValue = stepsText ?: "No data",
                     labelSuffix = "",
                     onClick = { state.currentScreen = "walking_overview" }
                 )
             }
         }
 
-        TrackModuleBox(
-            icon = Icons.Filled.Science,
-            iconBg = NirogColor.surfaceNeutral,
-            iconTint = NirogColor.forest,
-            title = "Lab Reports",
-            measuredValue = "Upload",
-            labelSuffix = "",
-            fullWidth = true,
-            onClick = { state.currentScreen = "lab_reports" }
-        )
+        Row(modifier = Modifier.fillMaxWidth()) {
+            Box(modifier = Modifier.weight(1f).padding(end = 6.dp)) {
+                TrackModuleBox(
+                    icon = Icons.Filled.MonitorWeight,
+                    iconBg = NirogColor.surfaceNeutral,
+                    iconTint = Color(0xFF4B6450),
+                    title = "Weight",
+                    measuredValue = health.latestWeight?.let { "%.1f".format(java.util.Locale.US, it.valueKg) } ?: "No data",
+                    labelSuffix = if (health.latestWeight != null) "kg" else "",
+                    onClick = { state.currentScreen = "weight_overview" }
+                )
+            }
+            Box(modifier = Modifier.weight(1f).padding(start = 6.dp)) {
+                TrackModuleBox(
+                    icon = Icons.Filled.Science,
+                    iconBg = NirogColor.surfaceNeutral,
+                    iconTint = NirogColor.forest,
+                    title = "Lab Reports",
+                    measuredValue = "Upload",
+                    labelSuffix = "",
+                    onClick = { state.currentScreen = "lab_reports" }
+                )
+            }
+        }
         Spacer(modifier = Modifier.height(32.dp))
     }
 
@@ -1663,21 +1582,21 @@ fun InsightsTab(state: NirogState) {
         val fmt = java.text.SimpleDateFormat("d MMM", java.util.Locale.getDefault())
         "${fmt.format(start)} - ${fmt.format(end)}"
     }
-    val hasEnoughData = state.sugarLogs.size >= 3
-    val avgFastingSugar = state.sugarLogs.filter { it.type == "Fasting" }.map { it.value }.let { if (it.isEmpty()) null else it.average().toInt() }
-    val sugarTrend = remember(state.sugarLogs.size) {
-        val values = state.sugarLogs.map { it.value }
-        if (values.size < 4) null else {
-            val half = values.size / 2
-            val recentAvg = values.take(half).average()
-            val olderAvg = values.drop(half).average()
-            when {
-                recentAvg < olderAvg - 3 -> "Improving" to Icons.Filled.TrendingDown
-                recentAvg > olderAvg + 3 -> "Rising" to Icons.Filled.TrendingUp
-                else -> "Stable" to Icons.Filled.TrendingFlat
-            }
+    val health = state.collectHealth()
+    // This week's own numbers, from the same window every other screen uses.
+    val hasEnoughData = health.week.glucoseCount >= 3
+    val avgFastingSugar = health.week.fastingAverage?.toInt()
+    val sugarTrend = remember(health) {
+        when (Insights.sugarDirection(health)) {
+            SugarDirection.IMPROVING -> "Improving" to Icons.Filled.TrendingDown
+            SugarDirection.RISING -> "Rising" to Icons.Filled.TrendingUp
+            SugarDirection.STABLE -> "Stable" to Icons.Filled.TrendingFlat
+            null -> null
         }
     }
+    val sleepText = health.lastSleep?.let { ClockText.duration(it.durationMinutes) }
+    val stepsText = health.today.stepsToday.takeIf { it > 0 }?.let { String.format(java.util.Locale.US, "%,d", it) }
+    val bpText = health.latestBp?.let { HealthLabels.bp(it) }
 
     Column(
         modifier = Modifier
@@ -1814,8 +1733,8 @@ fun InsightsTab(state: NirogState) {
                     }
                     Spacer(modifier = Modifier.height(8.dp))
                     Row(verticalAlignment = Alignment.Bottom) {
-                        Text(state.latestBpReading ?: "—", fontSize = 28.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = NirogColor.forest)
-                        if (state.latestBpReading != null) {
+                        Text(bpText ?: "—", fontSize = 28.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = NirogColor.forest)
+                        if (bpText != null) {
                             Spacer(modifier = Modifier.width(4.dp))
                             Text("mmHg", fontSize = 12.sp, color = NirogColor.outline)
                         }
@@ -1842,7 +1761,7 @@ fun InsightsTab(state: NirogState) {
                             }
                             Spacer(modifier = Modifier.height(12.dp))
                             Text(
-                                if (state.sleepHours > 0 || state.sleepMinutes > 0) "${state.sleepHours}h ${state.sleepMinutes}m" else "—",
+                                sleepText ?: "—",
                                 fontSize = 18.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = NirogColor.forest
                             )
                         }
@@ -1865,7 +1784,7 @@ fun InsightsTab(state: NirogState) {
                             }
                             Spacer(modifier = Modifier.height(12.dp))
                             Text(
-                                if (state.stepsLogged > 0) String.format("%,d", state.stepsLogged) else "—",
+                                stepsText ?: "—",
                                 fontSize = 18.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = NirogColor.forest
                             )
                         }
@@ -1900,6 +1819,20 @@ fun InsightsTab(state: NirogState) {
                             lineHeight = 18.sp
                         )
                     }
+                }
+            }
+
+            OutlinedButton(
+                onClick = { state.currentScreen = "trends_30" },
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                shape = RoundedCornerShape(24.dp),
+                border = BorderStroke(1.dp, NirogColor.outlineVariant),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = NirogColor.forest)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.Insights, null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("See your trends", fontWeight = FontWeight.SemiBold)
                 }
             }
 

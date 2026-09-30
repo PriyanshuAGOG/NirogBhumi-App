@@ -16,7 +16,6 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.google.firebase.firestore.FieldValue
 import com.nirogbhumi.app.data.CloudResult
 import com.nirogbhumi.app.ui.NirogState
 import kotlinx.coroutines.delay
@@ -48,7 +47,7 @@ fun WalkTimerScreen(state: NirogState) {
             OutlinedButton(onClick = { running = !running }, Modifier.weight(1f).height(52.dp), shape = RoundedCornerShape(26.dp)) { Text(if (running) "Pause" else "Resume") }
             Button(onClick = {
                 running = false; saving = true
-                state.repository.addHealthLog("walkLogs", mapOf("minutes" to maxOf(1, minutes), "seconds" to seconds, "mealRelation" to "after_dinner", "measuredAt" to FieldValue.serverTimestamp(), "source" to "timer")) { result ->
+                state.health.logWalk(maxOf(1, minutes), "walking", seconds = seconds, mealRelation = "after_dinner") { result ->
                     saving = false
                     if (result is CloudResult.Success) {
                         state.currentScreen = "walking_overview"

@@ -48,13 +48,22 @@ import androidx.compose.ui.unit.sp
 import androidx.health.connect.client.PermissionController
 import com.nirogbhumi.app.health.HealthConnectManager
 import com.nirogbhumi.app.health.HealthConnectStatus
-import com.nirogbhumi.app.health.computeSleepGlucoseInsight
-import com.nirogbhumi.app.health.computeMedicationGlucoseInsight
-import com.nirogbhumi.app.health.computeMealTimingInsight
+import com.nirogbhumi.app.health.domain.ClockText
+import com.nirogbhumi.app.health.domain.GlucoseEntry
+import com.nirogbhumi.app.health.domain.GlucoseStatus
+import com.nirogbhumi.app.health.domain.HealthLabels
+import com.nirogbhumi.app.health.domain.HealthMetric
+import com.nirogbhumi.app.health.domain.Insights
+import com.nirogbhumi.app.health.domain.TrendMetric
+import com.nirogbhumi.app.health.domain.status
+import com.nirogbhumi.app.ui.collectHealth
+import com.nirogbhumi.app.ui.components.EditWindowFootnote
+import com.nirogbhumi.app.ui.components.HealthHistoryRow
+import com.nirogbhumi.app.ui.components.MetricTrendCard
+import com.nirogbhumi.app.ui.components.StaleDataNotice
 import com.nirogbhumi.app.ui.NirogState
 import com.nirogbhumi.app.ui.CONSENT_VERSION
 import com.nirogbhumi.app.ui.canManageProgram
-import com.nirogbhumi.app.ui.SugarLog
 import com.nirogbhumi.app.ui.components.NirogCard
 import com.nirogbhumi.app.ui.components.RowCard
 import com.nirogbhumi.app.ui.theme.NirogColor
@@ -66,38 +75,10 @@ import kotlinx.coroutines.launch
 // Screen 1: Sugar Metric detailed deepdive
 @Composable
 fun BloodSugarDetailScreen(state: NirogState) {
-    DisposableEffect(Unit) {
-        // 180, not 30 - a 90-day trend chart needs enough history even for
-        // members logging fasting+post-meal readings most days.
-        val subscription = state.repository.listenUserCollection("glucoseReadings", 180, orderByField = "measuredAt", descending = true) { result ->
-            when (result) {
-                is com.nirogbhumi.app.data.CloudResult.Success -> {
-                    val synced = result.value.mapIndexedNotNull { index, doc ->
-                        val readingType = doc.values["readingType"] as? String
-                        // HbA1c is a lab percentage on a different scale than mg/dL readings,
-                        // so it's excluded here to avoid corrupting the mg/dL trend/average.
-                        if (readingType == "hba1c") return@mapIndexedNotNull null
-                        val value = (doc.values["value"] as? Number)?.toInt() ?: return@mapIndexedNotNull null
-                        val type = if (readingType == "fasting") "Fasting" else "Post-meal"
-                        val timestamp = (doc.values["measuredAt"] as? com.google.firebase.Timestamp)
-                            ?: (doc.values["createdAt"] as? com.google.firebase.Timestamp)
-                        val time = timestamp?.toDate()?.let {
-                            java.text.SimpleDateFormat("MMM d, h:mm a", java.util.Locale.getDefault()).format(it)
-                        } ?: "Synced"
-                        val status = if (value > 130) "High" else if (value < 80) "Low" else "Normal"
-                        SugarLog(index + 1, value, type, time, status, measuredAtMillis = timestamp?.toDate()?.time ?: System.currentTimeMillis())
-                    }
-                    if (synced.isNotEmpty()) {
-                        state.sugarLogs.clear()
-                        state.sugarLogs.addAll(synced)
-                        state.fastingSugarValue = synced.firstOrNull { it.type == "Fasting" }?.value ?: state.fastingSugarValue
-                    }
-                }
-                is com.nirogbhumi.app.data.CloudResult.Failure -> Unit
-            }
-        }
-        onDispose { subscription.cancel() }
-    }
+    val health = state.collectHealth()
+    val now = System.currentTimeMillis()
+    var editing by remember { mutableStateOf<GlucoseEntry?>(null) }
+    val readings = health.glucose
 
     Column(
         modifier = Modifier
@@ -135,7 +116,8 @@ fun BloodSugarDetailScreen(state: NirogState) {
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Summary Card - computed from real logged readings, not a fixed value
+            StaleDataNotice(health)
+            // Summary Card - computed from the member's real readings over the last 30 days
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -144,102 +126,66 @@ fun BloodSugarDetailScreen(state: NirogState) {
                 shape = RoundedCornerShape(24.dp)
             ) {
                 Column(modifier = Modifier.padding(20.dp)) {
-                    Text("CURRENT AVERAGE", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF737972))
+                    Text("AVERAGE · LAST 30 DAYS", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF737972))
                     Spacer(modifier = Modifier.height(4.dp))
-                    if (state.sugarLogs.isEmpty()) {
-                        Text("No readings logged yet", fontSize = 16.sp, color = Color(0xFF737972), modifier = Modifier.padding(top = 8.dp))
-                    } else {
-                        val avg = state.sugarLogs.map { it.value }.average().toInt()
-                        val normalPercent = (state.sugarLogs.count { it.status == "Normal" } * 100 / state.sugarLogs.size)
-                        Row(verticalAlignment = Alignment.Bottom) {
-                            Text("$avg", fontSize = 42.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("mg/dL", fontSize = 14.sp, color = Color(0xFF737972), modifier = Modifier.padding(bottom = 6.dp))
+                    val avg = health.month.glucoseAverage
+                    when {
+                        health.isLoading && readings.isEmpty() -> Text("Loading your readings…", fontSize = 16.sp, color = Color(0xFF737972), modifier = Modifier.padding(top = 8.dp))
+                        health.errors[HealthMetric.GLUCOSE] != null && readings.isEmpty() -> Column {
+                            Text(health.errors[HealthMetric.GLUCOSE] ?: "", fontSize = 15.sp, color = Color(0xFF737972), modifier = Modifier.padding(top = 8.dp))
+                            TextButton(onClick = { state.health.retry() }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Try again", color = Color(0xFF314936), fontWeight = FontWeight.Bold) }
                         }
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Text(
-                            "Your readings were within a typical range $normalPercent% of the time across your last ${state.sugarLogs.size} logs.",
-                            fontSize = 13.sp,
-                            color = Color(0xFF434842),
-                            lineHeight = 18.sp
-                        )
+                        avg == null -> Text("No readings in the last 30 days", fontSize = 16.sp, color = Color(0xFF737972), modifier = Modifier.padding(top = 8.dp))
+                        else -> {
+                            Row(verticalAlignment = Alignment.Bottom) {
+                                Text("${avg.toInt()}", fontSize = 42.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("mg/dL", fontSize = 14.sp, color = Color(0xFF737972), modifier = Modifier.padding(bottom = 6.dp))
+                            }
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                "Your readings were within a typical range ${health.month.glucoseInRangePercent ?: 0}% of the time across ${health.month.glucoseCount} readings.",
+                                fontSize = 13.sp,
+                                color = Color(0xFF434842),
+                                lineHeight = 18.sp
+                            )
+                        }
+                    }
+                    health.latestHbA1c?.let { a1c ->
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text("Latest HbA1c: ${HealthLabels.glucoseValue(a1c)} · ${HealthLabels.day(a1c.measuredAtMillis, now, health.zone)}", fontSize = 12.sp, color = Color(0xFF737972))
                     }
                 }
             }
 
-            // Trend chart built from real logged readings - shared 7/30/90-day
-            // range chart with BP/Sleep Overview (OverviewScreens.kt).
-            Text("Recent Trend", fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
-            RangeTrendChart(state.sugarLogs.map { it.measuredAtMillis to it.value.toFloat() }, "sugar")
+            if (readings.isEmpty() && !health.isLoading) {
+                EmptyStateCard(Icons.Filled.WaterDrop, "No blood sugar readings yet. Tap + to add one.")
+            }
+            if (readings.isNotEmpty()) {
+                MetricTrendCard(health, TrendMetric.GLUCOSE, title = "Recent trend")
 
-            // High/Normal History Rows List
-            Text("Logged History", fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+                // High/Normal History Rows List
+                Text("Logged History", fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
 
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                state.sugarLogs.forEach { log ->
-                    SugarLogHistoryRow(log)
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    readings.take(30).forEach { e ->
+                        HealthHistoryRow(
+                            title = HealthLabels.glucoseValue(e),
+                            subtitle = "${HealthLabels.glucoseKind(e.kind)} · ${HealthLabels.dayAndTime(e.measuredAtMillis, now, health.zone)}",
+                            entry = e, nowMillis = now, onEdit = { editing = e },
+                            badge = if (e.isHbA1c) null else HealthLabels.glucoseStatus(e.status()),
+                        )
+                    }
+                    EditWindowFootnote()
                 }
             }
 
             Spacer(modifier = Modifier.height(32.dp))
         }
     }
-}
-
-@Composable
-fun SugarLogHistoryRow(log: SugarLog) {
-    val isHigh = log.status == "High"
-    val isLow = log.status == "Low"
-    val statusColor = if (isHigh) Color(0xFFBA1A1A) else if (isLow) Color(0xFF43242A) else Color(0xFF426820)
-    val statusContainerColor = if (isHigh) Color(0xFFFFDAD6) else if (isLow) Color(0xFFFFD9DE) else Color(0xFFE5F1E2)
-
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.3f), shape = RoundedCornerShape(16.dp)),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        shape = RoundedCornerShape(16.dp)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                // Circular rating outline
-                Box(
-                    modifier = Modifier
-                        .size(44.dp)
-                        .background(statusContainerColor, CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        "${log.value}",
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF1B3221),
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 16.sp
-                    )
-                }
-
-                Spacer(modifier = Modifier.width(16.dp))
-
-                Column {
-                    Text(log.type, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221), fontSize = 15.sp)
-                    Text(log.time, fontSize = 12.sp, color = Color(0xFF737972))
-                }
-            }
-
-            // Flag badge
-            Box(
-                modifier = Modifier
-                    .background(statusColor.copy(alpha = 0.12f), RoundedCornerShape(6.dp))
-                    .padding(horizontal = 8.dp, vertical = 4.dp)
-            ) {
-                Text(log.status, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = statusColor)
-            }
+    editing?.let { e ->
+        GlucoseEditDialog(e, { editing = null }) { edits, report ->
+            state.health.correct("glucoseReadings", e.id, edits) { r -> report((r as? CloudResult.Failure)?.message) }
         }
     }
 }
@@ -536,9 +482,11 @@ private val DAILY_PROTOCOLS = listOf(
 
 @Composable
 fun ActiveJourneyScreen(state: NirogState) {
-    var loggedReadingToday by remember { mutableStateOf(false) }
-    var walkLoggedToday by remember { mutableStateOf(false) }
-    var sleepLoggedToday by remember { mutableStateOf(false) }
+    val health = state.collectHealth()
+    // Same definitions as every other screen (HealthUiState.today): no separate per-screen listeners.
+    val loggedReadingToday = health.today.hasSugar
+    val walkLoggedToday = health.today.activityMinutesToday > 0
+    val sleepLoggedToday = health.today.hasSleep
     // Persisted like the "daily_post_dinner_walk" checklist item (a
     // checklistLogs doc keyed by day) instead of state.completedProtocols,
     // which lived only in memory and silently reset on every app restart
@@ -553,15 +501,6 @@ fun ActiveJourneyScreen(state: NirogState) {
             val ts = (doc.values["measuredAt"] as? Timestamp) ?: (doc.values["createdAt"] as? Timestamp)
             return ts != null && com.nirogbhumi.app.ui.localDayKey(ts.toDate().time) == todayKey
         }
-        val sugarSub = state.repository.listenUserCollection("glucoseReadings", 7, orderByField = "measuredAt", descending = true) { result ->
-            if (result is CloudResult.Success) loggedReadingToday = result.value.any(::loggedToday)
-        }
-        val walkSub = state.repository.listenUserCollection("walkLogs", 5, orderByField = "createdAt", descending = true) { result ->
-            if (result is CloudResult.Success) walkLoggedToday = result.value.any(::loggedToday)
-        }
-        val sleepSub = state.repository.listenUserCollection("sleepLogs", 5, orderByField = "createdAt", descending = true) { result ->
-            if (result is CloudResult.Success) sleepLoggedToday = result.value.any(::loggedToday)
-        }
         val checklistSub = state.repository.listenUserCollection("checklistLogs", 10, orderByField = "createdAt", descending = true) { result ->
             if (result is CloudResult.Success) {
                 movementDoneToday = result.value.any { doc ->
@@ -569,12 +508,12 @@ fun ActiveJourneyScreen(state: NirogState) {
                 }
             }
         }
-        onDispose { sugarSub.cancel(); walkSub.cancel(); sleepSub.cancel(); checklistSub.cancel() }
+        onDispose { checklistSub.cancel() }
     }
 
     fun isDone(protocol: DailyProtocol): Boolean = when (protocol.id) {
         "fasting_reading" -> loggedReadingToday
-        "checkin" -> state.checkedInToday
+        "checkin" -> health.today.checkedIn
         "walk" -> walkLoggedToday
         "sleep" -> sleepLoggedToday
         else -> movementDoneToday
@@ -720,24 +659,10 @@ fun ActiveJourneyScreen(state: NirogState) {
 // Screen 5: Detailed Insight sleeping-correlation dashboard
 @Composable
 fun InsightDetailScreen(state: NirogState) {
-    var sleepLogs by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>>(emptyList()) }
-    var glucoseReadings by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>>(emptyList()) }
-    var medicationLogs by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>>(emptyList()) }
-    DisposableEffect(state.repository.userId) {
-        val sleepSub = state.repository.listenUserCollection("sleepLogs", limit = 60, orderByField = "createdAt", descending = true) { result ->
-            if (result is CloudResult.Success) sleepLogs = result.value
-        }
-        val glucoseSub = state.repository.listenUserCollection("glucoseReadings", limit = 60, orderByField = "measuredAt", descending = true) { result ->
-            if (result is CloudResult.Success) glucoseReadings = result.value
-        }
-        val medicationSub = state.repository.listenUserCollection("medicationLogs", limit = 60, orderByField = "measuredAt", descending = true) { result ->
-            if (result is CloudResult.Success) medicationLogs = result.value
-        }
-        onDispose { sleepSub.cancel(); glucoseSub.cancel(); medicationSub.cancel() }
-    }
-    val insight = remember(sleepLogs, glucoseReadings) { computeSleepGlucoseInsight(sleepLogs, glucoseReadings) }
-    val medicationInsight = remember(medicationLogs, glucoseReadings) { computeMedicationGlucoseInsight(medicationLogs, glucoseReadings) }
-    val mealInsight = remember(glucoseReadings) { computeMealTimingInsight(glucoseReadings) }
+    val health = state.collectHealth()
+    val insight = remember(health) { com.nirogbhumi.app.health.domain.Insights.sleepGlucose(health.sleep, health.glucose, health.zone) }
+    val medicationInsight = remember(health) { com.nirogbhumi.app.health.domain.Insights.medicationGlucose(health.medication, health.glucose, health.zone) }
+    val mealInsight = remember(health) { com.nirogbhumi.app.health.domain.Insights.mealTiming(health.glucose, health.zone) }
 
     Column(
         modifier = Modifier
@@ -798,7 +723,7 @@ fun InsightDetailScreen(state: NirogState) {
                         )
                     }
                 }
-            } else if (state.sugarLogs.size < 5) {
+            } else if (health.sugarReadings.size < 5) {
                 Card(
                     modifier = Modifier.fillMaxWidth().border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.35f), shape = RoundedCornerShape(20.dp)),
                     colors = CardDefaults.cardColors(containerColor = Color.White),
@@ -808,7 +733,7 @@ fun InsightDetailScreen(state: NirogState) {
                         Icon(Icons.Filled.Insights, contentDescription = null, tint = Color(0xFF9CB79F), modifier = Modifier.size(28.dp))
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            "Not enough data yet for your personal comparison (${state.sugarLogs.size}/5 sugar readings logged).",
+                            "Not enough data yet for your personal comparison (${health.sugarReadings.size}/5 sugar readings logged).",
                             fontSize = 13.sp,
                             color = Color(0xFF737972),
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center

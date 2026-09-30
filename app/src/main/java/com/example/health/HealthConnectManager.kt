@@ -10,9 +10,12 @@ import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.time.TimeRangeFilter
 import com.google.firebase.firestore.FieldValue
 import com.nirogbhumi.app.data.HealthRepository
+import com.nirogbhumi.app.health.domain.HealthPayloads
+import com.nirogbhumi.app.health.domain.StepAggregation
+import com.nirogbhumi.app.health.domain.StepInterval
 import java.time.Instant
+import java.time.ZoneId
 import java.time.temporal.ChronoUnit
-import java.util.Date
 
 data class HealthSyncSummary(val steps: Int, val sleep: Int, val glucose: Int, val bloodPressure: Int, val weight: Int)
 
@@ -60,18 +63,22 @@ class HealthConnectManager(private val context: Context, private val repository:
         check(isAvailable) { "Health Connect is unavailable or needs an update" }
         val granted = client.permissionController.getGrantedPermissions()
         check(granted.isNotEmpty()) { "Choose at least one Health Connect category first" }
-        val end = Instant.now(); val filter = TimeRangeFilter.between(end.minus(30, ChronoUnit.DAYS), end)
+        val zone = ZoneId.systemDefault()
+        val end = Instant.now()
+        // Whole local days (today plus the 29 before it) so every day's step total is complete.
+        val start = end.atZone(zone).toLocalDate().minusDays(29).atStartOfDay(zone).toInstant()
+        val filter = TimeRangeFilter.between(start, end)
         val steps = if (HealthPermission.getReadPermission(StepsRecord::class) in granted) client.readRecords(ReadRecordsRequest<StepsRecord>(filter)).records else emptyList()
         val sleep = if (HealthPermission.getReadPermission(SleepSessionRecord::class) in granted) client.readRecords(ReadRecordsRequest<SleepSessionRecord>(filter)).records else emptyList()
         val glucose = if (HealthPermission.getReadPermission(BloodGlucoseRecord::class) in granted) client.readRecords(ReadRecordsRequest<BloodGlucoseRecord>(filter)).records else emptyList()
         val bp = if (HealthPermission.getReadPermission(BloodPressureRecord::class) in granted) client.readRecords(ReadRecordsRequest<BloodPressureRecord>(filter)).records else emptyList()
         val weight = if (HealthPermission.getReadPermission(WeightRecord::class) in granted) client.readRecords(ReadRecordsRequest<WeightRecord>(filter)).records else emptyList()
 
-        steps.forEach { record -> repository.upsertUserRecord("walkLogs", id("steps", record.metadata.id, record.startTime), mapOf("steps" to record.count, "startTime" to Date.from(record.startTime), "endTime" to Date.from(record.endTime), "source" to "health_connect", "providerRecordId" to record.metadata.id)) }
-        sleep.forEach { record -> repository.upsertUserRecord("sleepLogs", id("sleep", record.metadata.id, record.startTime), mapOf("sleepTime" to Date.from(record.startTime), "wakeTime" to Date.from(record.endTime), "duration" to (record.endTime.epochSecond - record.startTime.epochSecond) / 3600.0, "source" to "health_connect", "providerRecordId" to record.metadata.id)) }
-        glucose.forEach { record -> repository.upsertUserRecord("glucoseReadings", id("glucose", record.metadata.id, record.time), mapOf("value" to record.level.inMilligramsPerDeciliter, "unit" to "mg/dL", "readingType" to "device", "measuredAt" to Date.from(record.time), "source" to "health_connect", "providerRecordId" to record.metadata.id)) }
-        bp.forEach { record -> repository.upsertUserRecord("bpReadings", id("bp", record.metadata.id, record.time), mapOf("systolic" to record.systolic.inMillimetersOfMercury, "diastolic" to record.diastolic.inMillimetersOfMercury, "measuredAt" to Date.from(record.time), "source" to "health_connect", "providerRecordId" to record.metadata.id)) }
-        weight.forEach { record -> repository.upsertUserRecord("weightLogs", id("weight", record.metadata.id, record.time), mapOf("weightKg" to record.weight.inKilograms, "measuredAt" to Date.from(record.time), "source" to "health_connect", "providerRecordId" to record.metadata.id)) }
+        saveStepDays(steps, zone)
+        sleep.forEach { saveSleep(it) }
+        glucose.forEach { record -> repository.upsertUserRecord("glucoseReadings", id("glucose", record.metadata.id, record.time), HealthPayloads.importedGlucose(record.metadata.id, record.level.inMilligramsPerDeciliter, record.time)) }
+        bp.forEach { record -> repository.upsertUserRecord("bpReadings", id("bp", record.metadata.id, record.time), HealthPayloads.importedBp(record.metadata.id, record.systolic.inMillimetersOfMercury, record.diastolic.inMillimetersOfMercury, record.time)) }
+        weight.forEach { record -> repository.upsertUserRecord("weightLogs", id("weight", record.metadata.id, record.time), HealthPayloads.importedWeight(record.metadata.id, record.weight.inKilograms, record.time)) }
 
         repository.upsertUserRecord("deviceConnections", "health_connect", mapOf("provider" to "health_connect", "status" to "connected", "permissions" to permissions.associateWith { it in granted }, "lastSyncedAt" to FieldValue.serverTimestamp()))
         return HealthSyncSummary(steps.size, sleep.size, glucose.size, bp.size, weight.size)
@@ -82,15 +89,18 @@ class HealthConnectManager(private val context: Context, private val repository:
         if (!isAvailable) return null
         val granted = client.permissionController.getGrantedPermissions()
         if (granted.isEmpty()) return null
+        val zone = ZoneId.systemDefault()
         val now = Instant.now()
-        val startOfDay = now.truncatedTo(ChronoUnit.DAYS)
+        // The member's own midnight. (This used to be UTC midnight, which is 5:30 AM in India, so the
+        // morning's steps were missing from "today".)
+        val startOfDay = now.atZone(zone).toLocalDate().atStartOfDay(zone).toInstant()
         val filter = TimeRangeFilter.between(startOfDay, now)
 
         var totalSteps = 0
         if (HealthPermission.getReadPermission(StepsRecord::class) in granted) {
             val steps = client.readRecords(ReadRecordsRequest<StepsRecord>(filter)).records
             totalSteps = steps.sumOf { it.count }.toInt()
-            steps.forEach { record -> repository.upsertUserRecord("walkLogs", id("steps", record.metadata.id, record.startTime), mapOf("steps" to record.count, "startTime" to Date.from(record.startTime), "endTime" to Date.from(record.endTime), "source" to "health_connect", "providerRecordId" to record.metadata.id)) }
+            saveStepDays(steps, zone)
         }
 
         var sleepMinutesTotal = 0
@@ -100,11 +110,22 @@ class HealthConnectManager(private val context: Context, private val repository:
             val sleepFilter = TimeRangeFilter.between(now.minus(18, ChronoUnit.HOURS), now)
             val sleep = client.readRecords(ReadRecordsRequest<SleepSessionRecord>(sleepFilter)).records
             sleepMinutesTotal = sleep.sumOf { (it.endTime.epochSecond - it.startTime.epochSecond) / 60 }.toInt()
-            sleep.forEach { record -> repository.upsertUserRecord("sleepLogs", id("sleep", record.metadata.id, record.startTime), mapOf("sleepTime" to Date.from(record.startTime), "wakeTime" to Date.from(record.endTime), "duration" to (record.endTime.epochSecond - record.startTime.epochSecond) / 3600.0, "source" to "health_connect", "providerRecordId" to record.metadata.id)) }
+            sleep.forEach { saveSleep(it) }
         }
 
         if (totalSteps == 0 && sleepMinutesTotal == 0) return null
         return TodaySyncSummary(totalSteps, sleepMinutesTotal / 60, sleepMinutesTotal % 60)
+    }
+
+    /** One document per local day: a month of step intervals used to be thousands of writes per sync. */
+    private fun saveStepDays(records: List<StepsRecord>, zone: ZoneId) {
+        StepAggregation.perDay(records.map { StepInterval(it.startTime, it.endTime, it.count) }, zone).forEach { day ->
+            repository.upsertUserRecord("walkLogs", HealthPayloads.importedStepsDocId(day), HealthPayloads.importedStepsDay(day))
+        }
+    }
+
+    private fun saveSleep(record: SleepSessionRecord) {
+        repository.upsertUserRecord("sleepLogs", id("sleep", record.metadata.id, record.startTime), HealthPayloads.importedSleep(record.metadata.id, record.startTime, record.endTime))
     }
 
     private fun id(prefix: String, providerId: String, time: Instant): String = "${prefix}_${providerId.ifBlank { time.toEpochMilli().toString() }}"

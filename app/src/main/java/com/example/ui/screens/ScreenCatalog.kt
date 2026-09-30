@@ -420,7 +420,6 @@ fun CatalogScreen(state: NirogState, route: String) {
                                         "pre_consultation" -> { saving = false; state.pendingConsultationId = result.value; state.currentScreen = "payment_confirmation" }
                                         else -> {
                                             saving = false; message = "Saved and synced securely"
-                                            if (spec.route == "add_sugar" || spec.route == "quick_sugar") state.formValues["${spec.route}.value"]?.toIntOrNull()?.let { state.fastingSugarValue = it }
                                             experience.successRoute?.let { state.currentScreen = it }
                                         }
                                     }
