@@ -12,7 +12,9 @@ ran on local emulators or in GitHub Actions.
 | Branch head when this work started (Sprint 3 release work, unmerged) | `fe5a55daaedffe48210c09603620c9f66c5c43b4`, CI run 196 green |
 | Rules tests at baseline | 172 passing |
 | Functions tests at baseline | 56 passing |
-| Rules tests now | 193 passing (CI green on c5263e4) |
+| CI on the branch | Run 212, commit `0c7ccd4`: all jobs green (Android debug tests + lint, R8 release build + manifest check, rules, functions, console e2e) |
+| Android unit/Compose tests | 240 run in CI, all passing on run 212 |
+| Rules tests now | 193 passing |
 | Functions tests now | 99 passing locally on the Firestore/Auth emulators |
 | Emulator e2e now | 26/26 console checks and 16/16 member-journey checks, run locally |
 | Android unit + Compose tests at baseline | passing in CI run 196 (no pre-existing failures) |
