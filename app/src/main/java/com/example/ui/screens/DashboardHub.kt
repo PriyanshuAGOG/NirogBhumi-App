@@ -74,10 +74,12 @@ fun MainHub(state: NirogState) {
         // greeting and below the bottom nav bar.
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { innerPadding ->
+        Column(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
+        com.nirogbhumi.app.ui.PendingDeletionBanner(state)
         Box(
             modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
+                .fillMaxWidth()
+                .weight(1f)
         ) {
             when (state.activeTab) {
                 "Today" -> TodayTab(state)
@@ -90,6 +92,7 @@ fun MainHub(state: NirogState) {
             if (state.shouldShowTour) {
                 OnboardingTourOverlay(state)
             }
+        }
         }
     }
 }

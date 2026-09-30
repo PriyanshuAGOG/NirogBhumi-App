@@ -30,3 +30,6 @@ interface HealthLogBackend {
     fun addHealthLog(collection: String, values: Map<String, Any?>, done: (CloudResult<String>) -> Unit)
     fun updateHealthLog(collection: String, documentId: String, values: Map<String, Any?>, done: (CloudResult<Unit>) -> Unit)
 }
+
+/** A short-lived link to a completed data export, or only its storage path when links cannot be signed yet. */
+data class ExportLink(val url: String?, val storagePath: String)

@@ -56,6 +56,9 @@ interface HealthRepository : HealthLogBackend {
             })
         }
     fun requestDataExport(done: (CloudResult<Unit>) -> Unit)
+    // A fresh short-lived download link (15 minutes) for one of the caller's completed exports. `url` is null when
+    // the server cannot sign links yet; the caller then downloads through its own authenticated Storage access.
+    fun getExportDownloadLink(requestId: String, done: (CloudResult<ExportLink>) -> Unit)
     // Schedules the account (and its data) for permanent deletion after a
     // grace period; succeeds with the scheduled time in epoch millis. What is
     // erased versus kept (health readings are only kept, de-identified, if the
@@ -388,6 +391,19 @@ class FirebaseHealthRepository : HealthRepository {
         callable.call()
             .addOnSuccessListener { AnalyticsLogger.log("data_export_requested"); done(CloudResult.Success(Unit)) }
             .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Export could not be requested", it)) }
+    }
+
+    override fun getExportDownloadLink(requestId: String, done: (CloudResult<ExportLink>) -> Unit) {
+        val done = reporting("getExportDownloadLink", done)
+        val callable = functions?.getHttpsCallable("getExportDownloadLink") ?: return done(CloudResult.Failure("Firebase is not configured"))
+        callable.call(mapOf("requestId" to requestId))
+            .addOnSuccessListener { result ->
+                val data = result.data as? Map<*, *>
+                val path = data?.get("storagePath") as? String
+                if (path == null) done(CloudResult.Failure("The download link could not be created"))
+                else done(CloudResult.Success(ExportLink(url = (data["url"] as? String)?.takeIf { it.startsWith("https://") }, storagePath = path)))
+            }
+            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "The download link could not be created", it)) }
     }
 
     override fun requestAccountDeletion(done: (CloudResult<Long>) -> Unit) {

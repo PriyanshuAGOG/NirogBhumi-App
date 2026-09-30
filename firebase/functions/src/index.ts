@@ -872,8 +872,17 @@ export const requestDataExport = onCall({ region }, async request => {
 // Schedules the caller's own account for deletion after a grace period (see
 // accountDeletion.ts for the full lifecycle and what gets removed). Idempotent:
 // asking again while a request is pending just reports the existing one.
+// Deleting an account is irreversible, so the sign-in behind it must be recent: a borrowed or left-open phone
+// with a days-old session cannot start it. The app answers REAUTH_REQUIRED by asking the member to confirm
+// their password or a fresh SMS code, then tries again.
+const RECENT_AUTH_SECONDS = 5 * 60;
+function requireRecentSignIn(auth: { token: Record<string, unknown> }) {
+  const authTime = Number(auth.token.auth_time ?? 0);
+  if (!authTime || Date.now() / 1000 - authTime > RECENT_AUTH_SECONDS) throw new HttpsError('failed-precondition', 'REAUTH_REQUIRED');
+}
 export const requestAccountDeletion = onCall({ region }, async request => {
   const auth = requireUser(request);
+  requireRecentSignIn(auth);
   const result = await scheduleAccountDeletion(db, auth.uid, 'app');
   if (!result.alreadyPending) {
     await db.collection('auditLogs').add({ actorId: auth.uid, actorRole: String(auth.token.role ?? 'user'), action: 'request_account_deletion', entityType: 'deletionRequest', entityId: result.requestId, metadata: { scheduledFor: result.scheduledFor.toDate().toISOString() }, createdAt: FieldValue.serverTimestamp() });

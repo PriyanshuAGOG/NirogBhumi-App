@@ -129,6 +129,9 @@ class NirogState {
     // manager, not just the platform-wide admin role.
     var coachProgramIds by mutableStateOf(setOf<String>())
 
+    // Epoch millis a scheduled account deletion will run at, or null when none is pending. Drives the banner shown everywhere.
+    var pendingDeletionMillis by mutableStateOf<Long?>(null)
+
     // Active Tab under Dashboard
     var activeTab by mutableStateOf("Today") // "Today", "Track", "Insights", "Care", "Learn"
 

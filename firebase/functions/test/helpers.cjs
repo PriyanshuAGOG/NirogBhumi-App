@@ -33,8 +33,10 @@ async function resetFirestore() {
 }
 
 /** Invoke an onCall function as `uid` with the given custom-claim role. */
-function call(fn, data, uid = 'user1', role) {
-  return fn.run({ auth: uid ? { uid, token: role ? { role } : {} } : undefined, data, rawRequest: {}, acceptsStreaming: false });
+function call(fn, data, uid = 'user1', role, tokenExtra = {}) {
+  // auth_time is when the person last signed in (seconds); by default they just did.
+  const token = { auth_time: Math.floor(Date.now() / 1000), ...(role ? { role } : {}), ...tokenExtra };
+  return fn.run({ auth: uid ? { uid, token } : undefined, data, rawRequest: {}, acceptsStreaming: false });
 }
 
 /** Invoke a Firestore onDocumentCreated trigger with a fake event. */

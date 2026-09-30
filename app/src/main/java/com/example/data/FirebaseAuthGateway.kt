@@ -83,4 +83,52 @@ object FirebaseAuthGateway {
         auth.sendPasswordResetEmail(email).addOnSuccessListener { onSuccess() }
             .addOnFailureListener { onError(it.message ?: "Reset email could not be sent") }
     }
+
+    // ---- confirming it is really the member (before something irreversible) ----
+
+    fun signInMethod(): com.nirogbhumi.app.ui.SignInMethod =
+        com.nirogbhumi.app.ui.SignInMethods.from(auth()?.currentUser?.providerData?.map { it.providerId }.orEmpty())
+
+    fun currentEmail(): String? = auth()?.currentUser?.email
+    fun currentPhone(): String? = auth()?.currentUser?.phoneNumber
+
+    /** Re-checks the password, then refreshes the sign-in token so the server sees a recent sign-in. */
+    fun reauthWithPassword(password: String, onSuccess: () -> Unit, onError: (String) -> Unit) {
+        val user = auth()?.currentUser ?: return onError("Sign in is required")
+        val email = user.email ?: return onError("This account has no email address")
+        user.reauthenticate(com.google.firebase.auth.EmailAuthProvider.getCredential(email, password))
+            .addOnSuccessListener { user.getIdToken(true).addOnSuccessListener { onSuccess() }.addOnFailureListener { onError(it.message ?: "Please try again") } }
+            .addOnFailureListener { onError("That password didn't match. Please try again.") }
+    }
+
+    /** Sends a fresh SMS code to the number on this account. `onSent` gets the verification id ("AUTO_VERIFIED" when the phone verified itself). */
+    fun sendReauthOtp(activity: Activity, onSent: (String) -> Unit, onError: (String) -> Unit) {
+        val auth = auth() ?: return onError("Firebase is not configured")
+        val user = auth.currentUser ?: return onError("Sign in is required")
+        val phone = user.phoneNumber ?: return onError("This account has no phone number")
+        val callbacks = object : PhoneAuthProvider.OnVerificationStateChangedCallbacks() {
+            override fun onVerificationCompleted(credential: PhoneAuthCredential) {
+                user.reauthenticate(credential).addOnSuccessListener { onSent("AUTO_VERIFIED") }.addOnFailureListener { onError(it.message ?: "Automatic verification failed") }
+            }
+            override fun onVerificationFailed(error: FirebaseException) = onError(error.message ?: "The code could not be sent")
+            override fun onCodeSent(id: String, token: PhoneAuthProvider.ForceResendingToken) = onSent(id)
+        }
+        PhoneAuthProvider.verifyPhoneNumber(
+            PhoneAuthOptions.newBuilder(auth).setPhoneNumber(phone).setTimeout(60, TimeUnit.SECONDS).setActivity(activity).setCallbacks(callbacks).build()
+        )
+    }
+
+    fun reauthWithOtp(id: String, code: String, onSuccess: () -> Unit, onError: (String) -> Unit) {
+        val user = auth()?.currentUser ?: return onError("Sign in is required")
+        if (id == "AUTO_VERIFIED") {
+            user.getIdToken(true).addOnSuccessListener { onSuccess() }.addOnFailureListener { onError(it.message ?: "Please try again") }
+            return
+        }
+        if (id.isBlank()) return onError("Ask for a new code first")
+        user.reauthenticate(PhoneAuthProvider.getCredential(id, code))
+            .addOnSuccessListener { user.getIdToken(true).addOnSuccessListener { onSuccess() }.addOnFailureListener { onError(it.message ?: "Please try again") } }
+            .addOnFailureListener { onError("That code didn't match. Please try again.") }
+    }
+
+    fun signOut() { auth()?.signOut() }
 }

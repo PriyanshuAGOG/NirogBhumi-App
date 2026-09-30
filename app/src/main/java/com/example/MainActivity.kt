@@ -315,6 +315,7 @@ class MainActivity : ComponentActivity() {
 fun ActiveScreenContent(state: NirogState) {
   val context = LocalContext.current
   com.nirogbhumi.app.ui.HealthDataLifecycle(state)
+  com.nirogbhumi.app.ui.DeletionStatusLifecycle(state)
   LaunchedEffect(state.repository.userId) {
     if (state.repository.userId != null) {
       runCatching { com.google.firebase.messaging.FirebaseMessaging.getInstance().token.addOnSuccessListener { token -> state.repository.saveProfile(mapOf("fcmToken" to token, "fcmTokenUpdatedAt" to com.google.firebase.firestore.FieldValue.serverTimestamp())) {} } }
