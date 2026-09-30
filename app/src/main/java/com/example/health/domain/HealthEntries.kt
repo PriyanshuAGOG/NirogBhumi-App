@@ -107,6 +107,8 @@ data class ActivityEntry(
     override val measuredAtMillis: Long,
     override val createdAtMillis: Long?,
     override val source: HealthSource,
+    /** One document holding a whole day's steps (new imports) rather than a single interval record (legacy imports). */
+    val isDailyTotal: Boolean = false,
 ) : HealthEntry
 
 data class MedicationEntry(
@@ -218,7 +220,8 @@ object HealthParsers {
         val steps = RecordValues.double(v["steps"])?.toLong()?.takeIf { it > 0 }
         val minutes = RecordValues.int(v["minutes"])?.takeIf { it > 0 }
         if (steps == null && minutes == null) return null
-        return ActivityEntry(id, minutes, if (source.isImported || steps != null) steps else null, RecordValues.string(v["activityType"]), at, created, source)
+        val daily = RecordValues.string(v["granularity"]) == "day"
+        return ActivityEntry(id, minutes, if (source.isImported || steps != null) steps else null, RecordValues.string(v["activityType"]), at, created, source, daily)
     }
 
     fun medication(id: String, v: Map<String, Any?>): MedicationEntry? {

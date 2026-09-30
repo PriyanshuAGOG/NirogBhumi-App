@@ -120,6 +120,16 @@ object HealthStateBuilder {
                 .thenByDescending { it.id },
         )
 
+    /**
+     * Older builds imported one step document per interval; current builds import one total per day.
+     * Where both exist for a day the daily total wins, otherwise the same steps would be counted twice.
+     */
+    fun dedupeSteps(activity: List<ActivityEntry>, zone: ZoneId): List<ActivityEntry> {
+        val daysWithTotal = activity.filter { it.isDailyTotal }.map { dateOf(it.measuredAtMillis, zone) }.toSet()
+        if (daysWithTotal.isEmpty()) return activity
+        return activity.filterNot { !it.isDailyTotal && it.source.isImported && (it.deviceSteps ?: 0L) > 0 && dateOf(it.measuredAtMillis, zone) in daysWithTotal }
+    }
+
     fun dateOf(millis: Long, zone: ZoneId): LocalDate = Instant.ofEpochMilli(millis).atZone(zone).toLocalDate()
 
     fun build(input: HealthInputs, nowMillis: Long, zone: ZoneId): HealthUiState {
@@ -127,7 +137,7 @@ object HealthStateBuilder {
         val bp = newestFirst(input.bp)
         val weight = newestFirst(input.weight)
         val sleep = newestFirst(input.sleep)
-        val activity = newestFirst(input.activity)
+        val activity = dedupeSteps(newestFirst(input.activity), zone)
         val medication = newestFirst(input.medication)
         val labs = newestFirst(input.labReports)
         val today = dateOf(nowMillis, zone)
