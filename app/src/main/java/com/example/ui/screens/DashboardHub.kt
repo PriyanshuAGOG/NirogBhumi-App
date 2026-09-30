@@ -1818,8 +1818,8 @@ fun InsightsTab(state: NirogState) {
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
                             text = when {
-                                avg > 130 -> "Your average fasting sugar this week is $avg mg/dL, above the typical target range. A short walk after meals and a consistent dinner time can help. Please discuss any persistent high readings with your doctor."
-                                avg < 80 -> "Your average fasting sugar this week is $avg mg/dL, on the lower side. If you feel dizzy or shaky, eat something and tell your doctor about these readings."
+                                avg > com.nirogbhumi.app.health.domain.GlucoseRanges.HIGH_ABOVE -> "Your average fasting sugar this week is $avg mg/dL, above the typical target range. A short walk after meals and a consistent dinner time can help. Please discuss any persistent high readings with your doctor."
+                                avg < com.nirogbhumi.app.health.domain.GlucoseRanges.LOW_BELOW -> "Your average fasting sugar this week is $avg mg/dL, on the lower side. If you feel dizzy or shaky, eat something and tell your doctor about these readings."
                                 else -> "Your average fasting sugar this week is $avg mg/dL, within a typical range. Keep up your current routine, and keep logging so trends stay accurate."
                             },
                             fontSize = 13.sp,

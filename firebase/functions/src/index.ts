@@ -110,8 +110,12 @@ function glucoseStatus(value: number, type: string) {
   // a malformed reading would silently read as 'in_range' and skip the
   // critical-alert path entirely.
   if (!Number.isFinite(value)) return 'invalid';
-  if (value >= 300 || value <= 54) return 'critical';
-  if ((type === 'fasting' && value > 125) || (type !== 'fasting' && value > 180)) return 'needs_attention';
+  // Same table as the app (GlucoseRanges in HealthState.kt): critical below 54 or at/above 300; low below 70;
+  // high above 130 (fasting, random, device) or above 180 after a meal. HbA1c is a percentage and is never classified here.
+  if (type === 'hba1c') return 'in_range';
+  if (value >= 300 || value < 54) return 'critical';
+  if (value < 70) return 'needs_attention';
+  if ((type === 'post_meal' && value > 180) || (type !== 'post_meal' && value > 130)) return 'needs_attention';
   return 'in_range';
 }
 
@@ -137,29 +141,68 @@ async function recordBatchCheckin(uid: string) {
   });
 }
 
+// Passive data (a watch or phone import, a lab value, a migration) is not a check-in: the member did not do anything.
+// Same definition as the app (TodayStatus in HealthState.kt).
+const isPassiveSource = (source: unknown) => source === 'health_connect' || source === 'device' || source === 'migration';
+
 export const onGlucoseReadingCreate = onDocumentCreated({ document: 'glucoseReadings/{readingId}', region }, async event => {
   const snap = event.data; if (!snap) return;
-  const data = snap.data(); const value = Number(data.value); const status = glucoseStatus(value, String(data.readingType));
+  const data = snap.data(); const value = Number(data.value); const type = String(data.readingType);
+  const status = glucoseStatus(value, type);
   await snap.ref.set({ status, categorizedAt: FieldValue.serverTimestamp() }, { merge: true });
-  // Don't overwrite the user's last-known-good reading with a NaN from a
-  // malformed entry - only mirror it forward once it's actually a number.
-  if (Number.isFinite(value)) {
+  // Don't overwrite the user's last-known-good reading with a NaN from a malformed entry, and only a FASTING reading
+  // is the "fasting sugar" (an after-meal or HbA1c value must not be mirrored under that name).
+  if (Number.isFinite(value) && type === 'fasting') {
     await db.doc(`users/${data.userId}`).set({ latestMetrics: { fastingSugar: value, glucoseStatus: status, glucoseUpdatedAt: FieldValue.serverTimestamp() }, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   }
   // Critical alerts use their own notification type so sendPendingNotifications()
   // never defers them for quiet hours or the daily reminder cap - see there.
-  if (status === 'critical') await db.collection('notifications').add({ userId: data.userId, profileId: data.profileId, title: 'Please review this reading', body: 'Repeat the measurement and contact your doctor promptly, especially if you feel unwell.', type: 'critical_alert', status: 'scheduled', scheduledFor: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp() });
-  await recordBatchCheckin(String(data.userId));
+  if (status === 'critical' && !isPassiveSource(data.source)) await db.collection('notifications').add({ userId: data.userId, profileId: data.profileId, title: 'Please review this reading', body: 'Repeat the measurement and contact your doctor promptly, especially if you feel unwell.', type: 'critical_alert', status: 'scheduled', scheduledFor: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp() });
+  if (!isPassiveSource(data.source) && type !== 'hba1c') await recordBatchCheckin(String(data.userId));
 });
 
-export const onBPReadingCreate = onDocumentCreated({ document: 'bpReadings/{readingId}', region }, async event => {
-  const snap = event.data; if (!snap) return; const d = snap.data();
+// A member may correct a reading for 60 minutes (rules). The server's own label must follow the corrected value, or a
+// reading fixed from 310 to 130 would keep raising a critical flag in the coach's view.
+export const onGlucoseReadingUpdate = onDocumentUpdated({ document: 'glucoseReadings/{readingId}', region }, async event => {
+  const before = event.data?.before.data(); const after = event.data?.after.data();
+  if (!before || !after) return;
+  if (before.value === after.value && before.readingType === after.readingType) return; // the server's own status write, or an unrelated change
+  const value = Number(after.value); const type = String(after.readingType);
+  const status = glucoseStatus(value, type);
+  if (status !== after.status) await event.data!.after.ref.set({ status, categorizedAt: FieldValue.serverTimestamp() }, { merge: true });
+  const user = await db.doc(`users/${after.userId}`).get();
+  if (Number.isFinite(value) && type === 'fasting' && user.get('latestMetrics.fastingSugar') === Number(before.value)) {
+    await user.ref.set({ latestMetrics: { fastingSugar: value, glucoseStatus: status, glucoseUpdatedAt: FieldValue.serverTimestamp() }, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  }
+  if (status === 'critical' && before.status !== 'critical' && !isPassiveSource(after.source)) {
+    await db.collection('notifications').add({ userId: after.userId, profileId: after.profileId, title: 'Please review this reading', body: 'Repeat the measurement and contact your doctor promptly, especially if you feel unwell.', type: 'critical_alert', status: 'scheduled', scheduledFor: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp() });
+  }
+});
+
+function bpStatusOf(d: Record<string, unknown>) {
   const systolic = Number(d.systolic); const diastolic = Number(d.diastolic);
   const valid = Number.isFinite(systolic) && Number.isFinite(diastolic);
   const critical = valid && (systolic >= 180 || diastolic >= 120);
-  await snap.ref.set({ status: !valid ? 'invalid' : critical ? 'critical' : 'recorded', categorizedAt: FieldValue.serverTimestamp() }, { merge: true });
-  if (critical) await db.collection('notifications').add({ userId: d.userId, profileId: d.profileId, title: 'Please review your BP reading', body: 'Repeat the measurement and seek urgent medical advice, especially if you feel unwell.', type: 'critical_alert', status: 'scheduled', scheduledFor: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp() });
-  await recordBatchCheckin(String(d.userId));
+  return { status: !valid ? 'invalid' : critical ? 'critical' : 'recorded', critical };
+}
+
+export const onBPReadingCreate = onDocumentCreated({ document: 'bpReadings/{readingId}', region }, async event => {
+  const snap = event.data; if (!snap) return; const d = snap.data();
+  const { status, critical } = bpStatusOf(d);
+  await snap.ref.set({ status, categorizedAt: FieldValue.serverTimestamp() }, { merge: true });
+  if (critical && !isPassiveSource(d.source)) await db.collection('notifications').add({ userId: d.userId, profileId: d.profileId, title: 'Please review your BP reading', body: 'Repeat the measurement and seek urgent medical advice, especially if you feel unwell.', type: 'critical_alert', status: 'scheduled', scheduledFor: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp() });
+  if (!isPassiveSource(d.source)) await recordBatchCheckin(String(d.userId));
+});
+
+export const onBPReadingUpdate = onDocumentUpdated({ document: 'bpReadings/{readingId}', region }, async event => {
+  const before = event.data?.before.data(); const after = event.data?.after.data();
+  if (!before || !after) return;
+  if (before.systolic === after.systolic && before.diastolic === after.diastolic) return;
+  const { status, critical } = bpStatusOf(after);
+  if (status !== after.status) await event.data!.after.ref.set({ status, categorizedAt: FieldValue.serverTimestamp() }, { merge: true });
+  if (critical && before.status !== 'critical' && !isPassiveSource(after.source)) {
+    await db.collection('notifications').add({ userId: after.userId, profileId: after.profileId, title: 'Please review your BP reading', body: 'Repeat the measurement and seek urgent medical advice, especially if you feel unwell.', type: 'critical_alert', status: 'scheduled', scheduledFor: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp() });
+  }
 });
 
 // Announcement creation/fan-out/deletion is handled by the createAnnouncement/

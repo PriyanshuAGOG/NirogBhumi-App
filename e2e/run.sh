@@ -18,6 +18,8 @@ cd "$(dirname "$0")/.."
   npx vite build --outDir ../e2e/dist-emulator --emptyOutDir --logLevel warn)
 
 # The functions emulator has no default bucket for a demo project; give it one.
+# Support requests are emailed to this inbox (the function skips the email when it is not set).
+export SUPPORT_EMAIL=support@example.org
 export FIREBASE_CONFIG='{"projectId":"demo-nirog-bhumi","storageBucket":"demo-nirog-bhumi.appspot.com"}'
 npx --yes firebase-tools@15.22.3 emulators:exec --only auth,firestore,functions,storage --project demo-nirog-bhumi \
   "node e2e/seed.mjs && node e2e/console.e2e.mjs && node e2e/member-journey.e2e.mjs"

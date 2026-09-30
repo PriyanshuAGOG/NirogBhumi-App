@@ -686,7 +686,7 @@ fun QuickLogFastingOverlay(state: NirogState) {
                         onClick = {
                             saving = true
                             val mgDl = state.quickLogFastingValue
-                            val status = if (mgDl > 125) "High" else if (mgDl < 80) "Low" else "Normal"
+                            val status = com.nirogbhumi.app.health.domain.HealthLabels.glucoseStatus(com.nirogbhumi.app.health.domain.GlucoseRanges.status(mgDl.toDouble(), com.nirogbhumi.app.health.domain.GlucoseKind.FASTING))
                             fun onDone(result: com.nirogbhumi.app.data.CloudResult<*>) {
                                 saving = false
                                 if (result is com.nirogbhumi.app.data.CloudResult.Success<*>) {

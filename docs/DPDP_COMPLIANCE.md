@@ -15,9 +15,9 @@ Firebase/Cloud, the payment gateway, notification and diagnostics vendors are
 | **Consent** free, specific, informed, unambiguous, itemized | Onboarding: 3 required itemized checkboxes; optional consents separate & opt-in | — |
 | **Consent record** (proof of what was agreed, when) | `recordConsentReceipt()` → immutable `users/{uid}/consentReceipts` (server-timestamped, versioned); rules forbid update/delete | — |
 | **Withdrawal** as easy as giving | Privacy & consent: optional consents toggle off instantly; required consent → account anonymize/delete | — |
-| **Right to access** | Data Controls → export (Cloud Function `requestDataExport` → JSON of ~20 collections) | — |
+| **Right to access** | Data Controls → export (Cloud Function `requestDataExport` → a ZIP with `data.json`, CSVs and a README, downloaded through a 15-minute owner-only link; an emailed link (3 h) when the account has an email; files deleted after 30 days) | — |
 | **Right to correction/completion** | Profile edit; health logs editable/quick-correct | — |
-| **Right to erasure** | Profile → Export or delete my data (`requestAccountDeletion`: scheduled 7 days out, cancellable, then runs automatically via `processApprovedDeletions`); admin console **Data Requests** page for emailed requests; hosted `account-deletion.html` (works without the app). Erases identity, uploads, chats, inbox, and health readings unless the member opted into anonymized research. Covered by 15 emulator tests. | Confirm the scheduler runs in prod after first deploy (Cloud Scheduler job `processApprovedDeletions`) |
+| **Right to erasure** | Profile → Export or delete my data (`requestAccountDeletion`: typed confirmation, a sign-in younger than 5 minutes enforced by the server, scheduled 7 days out, cancellable from the screen or the banner shown on every main screen, then runs automatically via `processApprovedDeletions`); admin console **Data Requests** page for emailed requests; hosted `account-deletion.html` (works without the app). Erases identity, uploads, chats, inbox, and health readings unless the member opted into anonymized research. Covered by 15 emulator tests. | Confirm the scheduler runs in prod after first deploy (Cloud Scheduler job `processApprovedDeletions`) |
 | **Right to grievance redressal** | Legal Center "Grievance Officer & complaints"; hosted `grievance.html` | **Appoint a Grievance Officer**, publish name + address + working mailbox |
 | **Right to nominate** | Stated in Privacy Policy §6 / Legal Center "Your rights" | Operational process for acting on a nomination |
 | **Children's data (s.9)** — verifiable parental consent; no tracking/targeted ads | Add Family Member: under-18 detection → guardian-consent affirmation + `isMinor`/`guardianConsent` stored; no ad SDKs in app | Keep ad/tracking SDKs out; document age-assurance approach |
@@ -30,11 +30,13 @@ Firebase/Cloud, the payment gateway, notification and diagnostics vendors are
 
 ## Consent versioning / re-consent
 
-`CONSENT_VERSION` (in `NirogModels.kt`, currently `"2025-07"`) is stamped on
-every consent receipt and on `users/{uid}.consent`. When the notice/policies
-materially change, bump this string; a future slice can compare the stored
-version and route returning users back through the consent screen. The hosted
-policy pages and this constant should be bumped together.
+`CONSENT_VERSION` (in `NirogModels.kt`, currently `"2026-09"`) is stamped on every consent receipt and on
+`users/{uid}.consent.version` (the version of the notice the member accepted for the **required** consents). When the
+notice/policies materially change, bump this string together with the hosted pages. Members whose recorded version is
+older see an "updated privacy notice" banner on the main screens with **Read it** and **I agree**; agreeing writes a new
+dated receipt and updates the recorded version. Nothing is blocked while they decide, but the banner stays until they act.
+Toggling an optional consent (research, marketing) does **not** change the recorded version; its receipt carries the version in force.
+Members who have never recorded a version go through the normal onboarding consent step instead.
 
 ## Owner checklist (before Play submission)
 

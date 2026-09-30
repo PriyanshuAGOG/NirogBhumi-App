@@ -4,19 +4,35 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 
-/** Existing app thresholds, kept in one place so every screen labels a reading the same way (clinician sign-off is tracked in the launch checklist). */
+/**
+ * The one table of blood-sugar ranges (mg/dL) every screen, widget and the server uses, so the same reading is never
+ * "Normal" in one place and "High" in another. PROVISIONAL: these follow commonly published adult targets (before a meal
+ * 70-130, after a meal under 180, below 54 or at/above 300 needs urgent attention) and still need sign-off from the
+ * clinician advising Nirog Bhumi - see docs/RELEASE_CHECKLIST.md. The server copy lives in
+ * firebase/functions/src/index.ts (`glucoseStatus`); change both together.
+ */
 object GlucoseRanges {
-    const val LOW_BELOW = 80.0
+    const val CRITICAL_BELOW = 54.0
+    const val CRITICAL_AT_OR_ABOVE = 300.0
+    const val LOW_BELOW = 70.0
+    /** Fasting, random and device readings. */
     const val HIGH_ABOVE = 130.0
+    /** One to two hours after a meal. */
+    const val POST_MEAL_HIGH_ABOVE = 180.0
+
+    fun status(value: Double, kind: GlucoseKind): GlucoseStatus = when {
+        kind == GlucoseKind.HBA1C -> GlucoseStatus.NORMAL   // a percentage on another scale: never classified here
+        value < LOW_BELOW -> GlucoseStatus.LOW
+        value > (if (kind == GlucoseKind.POST_MEAL) POST_MEAL_HIGH_ABOVE else HIGH_ABOVE) -> GlucoseStatus.HIGH
+        else -> GlucoseStatus.NORMAL
+    }
+
+    fun isCritical(value: Double) = value < CRITICAL_BELOW || value >= CRITICAL_AT_OR_ABOVE
 }
 
 enum class GlucoseStatus { LOW, NORMAL, HIGH }
 
-fun GlucoseEntry.status(): GlucoseStatus = when {
-    value > GlucoseRanges.HIGH_ABOVE -> GlucoseStatus.HIGH
-    value < GlucoseRanges.LOW_BELOW -> GlucoseStatus.LOW
-    else -> GlucoseStatus.NORMAL
-}
+fun GlucoseEntry.status(): GlucoseStatus = GlucoseRanges.status(value, kind)
 
 /**
  * What "checked in today" means, everywhere (Today card, prompts, streak copy, reports):
@@ -89,7 +105,8 @@ data class HealthUiState(
     /** Most recent sleep that counts (suspect entries excluded). */
     val lastSleep: SleepEntry? = null,
 
-    val today: TodayStatus = TodayStatus(LocalDate.MIN, false, false, false, false, false, false, false, 0L, 0, null),
+    // Before the first snapshot arrives there is still a real "today" (date maths on an impossible date such as LocalDate.MIN overflows and crashed Rhythm on a cold start).
+    val today: TodayStatus = TodayStatus(LocalDate.now(), false, false, false, false, false, false, false, 0L, 0, null),
     val week: PeriodSummary = PeriodSummary(7, 0, null, null, 0, null, 0, null, null, 0, null, 0, null, 0, 0, 0L, 0),
     val month: PeriodSummary = PeriodSummary(30, 0, null, null, 0, null, 0, null, null, 0, null, 0, null, 0, 0, 0L, 0),
 ) {

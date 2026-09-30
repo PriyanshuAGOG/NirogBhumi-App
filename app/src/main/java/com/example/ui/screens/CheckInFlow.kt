@@ -313,8 +313,8 @@ fun DailyCheckInScreen(state: NirogState) {
                                     val v = sugarInput.toIntOrNull() ?: run { error = "Enter a valid number"; return@Button }
                                     if (v < 20 || v > 800) { error = "Enter a value between 20 and 800 mg/dL"; return@Button }
                                     saving = true
-                                    val status = if (v > 130) "High" else if (v < 80) "Low" else "Normal"
                                     val kind = if (sugarType == "Fasting") GlucoseKind.FASTING else GlucoseKind.POST_MEAL
+                                    val status = com.nirogbhumi.app.health.domain.HealthLabels.glucoseStatus(com.nirogbhumi.app.health.domain.GlucoseRanges.status(v.toDouble(), kind))
                                     fun onDone(r: CloudResult<*>) {
                                         saving = false
                                         if (r is CloudResult.Success) {

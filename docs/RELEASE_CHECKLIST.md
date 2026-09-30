@@ -40,7 +40,7 @@
 
 - Phone OTP: success, invalid, resend, quota, SIM/network failure, and account disabled.
 - All 86 screen routes at 390×844, small Android, tablet, font scale 1.3, dark system bars, TalkBack, Hindi text expansion, offline/reconnect, and process death.
-- Sugar/BP caution thresholds reviewed and signed off by a qualified clinician.
+- Sugar/BP caution thresholds reviewed and signed off by a qualified clinician. The blood-sugar table is now in ONE place in the app (`GlucoseRanges` in `HealthState.kt`) and mirrored once on the server (`glucoseStatus` in `functions/src/index.ts`): low below 70, high above 130 (fasting, random, device) or above 180 after a meal, urgent below 54 or at/above 300; HbA1c is never classified. They are **provisional**: have the advising clinician confirm or change them, then change both places together (tests in `HealthEntriesTest` and `health-triggers.test.cjs` pin the boundaries).
 - Private uploads cannot be accessed by another user or an unassigned expert.
 - Consultation requests (no payment in the app): request -> "waiting" -> confirmed in the console -> push + 1-hour reminder -> reschedule/decline/cancel; Plans & guidance from the coach; Data Controls (export, schedule/cancel deletion). Payments, a store and refunds are out of scope for v1.
 - Notification quiet hours, permissions, per-day cap, timezone, and medication safety copy.

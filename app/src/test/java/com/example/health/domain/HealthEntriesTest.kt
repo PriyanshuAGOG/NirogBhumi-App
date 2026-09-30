@@ -109,9 +109,14 @@ class HealthEntriesTest {
     }
 
     @Test fun `glucose thresholds are shared by every screen`() {
-        fun s(v: Double) = GlucoseEntry("g", v, GlucoseKind.FASTING, measured, created, HealthSource.MANUAL).status()
-        assertEquals(GlucoseStatus.LOW, s(79.0)); assertEquals(GlucoseStatus.NORMAL, s(80.0))
+        fun s(v: Double, kind: GlucoseKind = GlucoseKind.FASTING) = GlucoseEntry("g", v, kind, measured, created, HealthSource.MANUAL).status()
+        assertEquals(GlucoseStatus.LOW, s(69.0)); assertEquals(GlucoseStatus.NORMAL, s(70.0))
         assertEquals(GlucoseStatus.NORMAL, s(130.0)); assertEquals(GlucoseStatus.HIGH, s(131.0))
+        // after a meal the high line is 180, not 130
+        assertEquals(GlucoseStatus.NORMAL, s(150.0, GlucoseKind.POST_MEAL)); assertEquals(GlucoseStatus.NORMAL, s(180.0, GlucoseKind.POST_MEAL)); assertEquals(GlucoseStatus.HIGH, s(181.0, GlucoseKind.POST_MEAL))
+        // HbA1c is a percentage on another scale and is never classified as mg/dL
+        assertEquals(GlucoseStatus.NORMAL, s(6.5, GlucoseKind.HBA1C))
+        assertEquals(true, GlucoseRanges.isCritical(53.0)); assertEquals(false, GlucoseRanges.isCritical(54.0)); assertEquals(true, GlucoseRanges.isCritical(300.0)); assertEquals(false, GlucoseRanges.isCritical(299.0))
     }
 
     // ---- bp / activity / medication ----

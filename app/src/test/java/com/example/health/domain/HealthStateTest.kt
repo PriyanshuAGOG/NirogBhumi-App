@@ -111,7 +111,7 @@ class HealthStateTest {
     }
 
     @Test fun `in-range percentage uses the shared thresholds`() {
-        val s = build(HealthInputs(glucose = listOf(glucose("a", 100.0, t(29, 7)), glucose("b", 131.0, t(28, 7)), glucose("c", 79.0, t(27, 7)), glucose("d", 130.0, t(26, 7)))))
+        val s = build(HealthInputs(glucose = listOf(glucose("a", 100.0, t(29, 7)), glucose("b", 131.0, t(28, 7)), glucose("c", 69.0, t(27, 7)), glucose("d", 130.0, t(26, 7)))))
         assertEquals(50, s.week.glucoseInRangePercent)
     }
 
@@ -139,5 +139,15 @@ class HealthStateTest {
         val s = build(HealthInputs(isLoading = true, isStale = true, errors = mapOf(HealthMetric.SLEEP to "Couldn't load sleep")))
         assertTrue(s.isLoading); assertTrue(s.isStale); assertEquals("Couldn't load sleep", s.errors[HealthMetric.SLEEP])
         assertFalse(s.hasAnyReading)
+    }
+
+    @Test fun `the empty state before any data has a usable today`() {
+        val s = HealthUiState()
+        // date maths on it must not overflow (it used to be LocalDate.MIN and Rhythm crashed on a cold start)
+        assertEquals(s.today.date.minusDays(29), s.today.date.minusDays(29))
+        assertTrue(s.today.date.isAfter(java.time.LocalDate.of(2020, 1, 1)))
+        assertTrue(HealthStateBuilder.checkInDates(s).isEmpty())
+        assertNull(Insights.sugarDirection(s))
+        assertNull(Insights.weeklySummary(s))
     }
 }
