@@ -92,14 +92,16 @@ class NirogState {
     var photoUrl by mutableStateOf("")
 
     // Health Details Setup
-    var selectedDiabetesStatus by mutableStateOf("None")
+    // Fixed answers (see health/domain/ProfileChoices.kt). Null until the member answers, so a skipped
+    // question is never reported as "No diabetes".
+    var diabetesType by mutableStateOf<com.nirogbhumi.app.health.domain.DiabetesType?>(null)
+    var diabetesTypeOther by mutableStateOf("")
     var selectedBpStatus by mutableStateOf("Normal")
     var selectedOnMedication by mutableStateOf("No")
     var selectedDoctorSupervision by mutableStateOf("Yes")
-    var selectedGoal by mutableStateOf("Manage blood sugar levels")
-    val selectedGoals = mutableStateListOf<String>().apply {
-        add("Control sugar")
-        add("Improve lifestyle")
+    val selectedGoals = mutableStateListOf<com.nirogbhumi.app.health.domain.HealthGoal>().apply {
+        add(com.nirogbhumi.app.health.domain.HealthGoal.CONTROL_SUGAR)
+        add(com.nirogbhumi.app.health.domain.HealthGoal.IMPROVE_LIFESTYLE)
     }
 
     // Program Code Storing
@@ -175,6 +177,10 @@ class NirogState {
     var updateCheckBusy by mutableStateOf(false)
     var updateCheckError by mutableStateOf("")
 }
+
+/** The member's diabetes answer as one value, or null when the question has not been answered. */
+fun NirogState.diabetesAnswer(): com.nirogbhumi.app.health.domain.DiabetesAnswer? =
+    diabetesType?.let { com.nirogbhumi.app.health.domain.DiabetesAnswer(it, diabetesTypeOther.ifBlank { null }) }
 
 /** Mirrors the programStaff() Firestore rule (admin() || assignedCoach(programId)). */
 fun NirogState.canManageProgram(programId: String): Boolean =

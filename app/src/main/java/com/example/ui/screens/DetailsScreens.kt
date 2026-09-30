@@ -29,7 +29,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -260,11 +263,11 @@ fun BookConsultationStepper(state: NirogState) {
                 1 -> {
                     Text("Select consultation type", fontSize = 18.sp, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
 
-                    ConsultTypeOption("Metabolic Consultation", "Direct analysis of fasting / post-meal logs with metabolic specialist.", "30 min video • ₹499", state.selectedOnMedication == "Yes") {
+                    ConsultTypeOption("Blood sugar consultation", "We go through your sugar readings together with a specialist.", "30 min video • ₹499", state.selectedOnMedication == "Yes") {
                         state.selectedOnMedication = "Yes"
                         state.selectedConsultType = "diabetes_lifestyle"
                     }
-                    ConsultTypeOption("Ayurvedic Doctor Consult", "Personalized assessment of Prakriti element cycles and balancing tea protocols.", "45 min video • ₹650", state.selectedOnMedication == "No") {
+                    ConsultTypeOption("Ayurvedic Doctor Consult", "A personal look at your body type and daily routine, with simple Ayurvedic suggestions.", "45 min video • ₹650", state.selectedOnMedication == "No") {
                         state.selectedOnMedication = "No"
                         state.selectedConsultType = "naturopathy"
                     }
@@ -600,7 +603,7 @@ fun ActiveJourneyScreen(state: NirogState) {
                 }
             }
 
-            Text("Daily Protocols", fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+            Text("Today's checklist", fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
 
             // Protocol checked card checklist - auto-completable items reflect
             // real logged data (tapping while incomplete deep-links to the
@@ -1563,11 +1566,12 @@ fun ProfileEditScreen(state: NirogState) {
     var editCity by remember { mutableStateOf(state.profileCity) }
     var editLanguage by remember { mutableStateOf(state.profileLanguage) }
 
-    var editDiabetes by remember { mutableStateOf(state.selectedDiabetesStatus) }
+    var editDiabetes by remember { mutableStateOf(state.diabetesType) }
+    var editDiabetesOther by remember { mutableStateOf(state.diabetesTypeOther) }
     var editBp by remember { mutableStateOf(state.selectedBpStatus) }
     var editMedication by remember { mutableStateOf(state.selectedOnMedication) }
     var editDoctor by remember { mutableStateOf(state.selectedDoctorSupervision) }
-    var editGoal by remember { mutableStateOf(state.selectedGoal) }
+    val editGoals = remember { mutableStateListOf<com.nirogbhumi.app.health.domain.HealthGoal>().apply { addAll(state.selectedGoals) } }
 
     Column(
         modifier = Modifier
@@ -1721,36 +1725,20 @@ fun ProfileEditScreen(state: NirogState) {
             ) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     Text(
-                        text = "Metabolic Profile",
+                        text = "Health profile",
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFF1B3221)
                     )
 
-                    // Diabetes Selection
-                    Column {
-                        Text("Diabetes Status", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            listOf("None", "Prediabetes", "Type 2", "Type 1", "Not sure").forEach { choice ->
-                                val isSelected = editDiabetes == choice || (choice == "Type 2" && editDiabetes == "Type 2 diabetes")
-                                Button(
-                                    onClick = { editDiabetes = choice },
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = if (isSelected) Color(0xFF314936) else Color(0xFFF1EDE6),
-                                        contentColor = if (isSelected) Color.White else Color(0xFF1B3221)
-                                    ),
-                                    shape = RoundedCornerShape(8.dp),
-                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
-                                ) {
-                                    Text(choice, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                }
-                            }
-                        }
-                    }
+                    // Diabetes type (fixed answers; "Other" opens a short text box)
+                    com.nirogbhumi.app.ui.components.DiabetesTypePicker(
+                        selected = editDiabetes,
+                        otherText = editDiabetesOther,
+                        onSelect = { editDiabetes = it },
+                        onOtherText = { editDiabetesOther = it },
+                        labelColor = Color(0xFF1B3221),
+                    )
 
                     // BP Selection
                     Column {
@@ -1830,17 +1818,19 @@ fun ProfileEditScreen(state: NirogState) {
                         }
                     }
 
-                    // Selected Goal
+                    // Goals (pick as many as you like)
                     Column {
-                        Text("Your Primary Goal", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+                        Text("What would you like help with?", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
                         Spacer(modifier = Modifier.height(6.dp))
-                        listOf("Manage blood sugar levels", "Control sugar and reverse naturally", "Improve overall metabolic health", "Track and manage parent's diabetes").forEach { choice ->
-                            val isSelected = editGoal == choice
+                        com.nirogbhumi.app.health.domain.HealthGoal.entries.forEach { goal ->
+                            val isSelected = goal in editGoals
                             Card(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(vertical = 4.dp)
-                                    .clickable { editGoal = choice }
+                                    .heightIn(min = 48.dp)
+                                    .clickable { if (isSelected) editGoals.remove(goal) else editGoals.add(goal) }
+                                    .semantics { role = Role.Checkbox; selected = isSelected }
                                     .border(
                                         width = if (isSelected) 1.5.dp else 0.5.dp,
                                         color = if (isSelected) Color(0xFF314936) else Color(0xFFD8D0C0),
@@ -1850,7 +1840,7 @@ fun ProfileEditScreen(state: NirogState) {
                                 shape = RoundedCornerShape(8.dp)
                             ) {
                                 Text(
-                                    text = choice,
+                                    text = goal.label,
                                     fontSize = 13.sp,
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                     color = Color(0xFF1B3221),
@@ -1874,20 +1864,21 @@ fun ProfileEditScreen(state: NirogState) {
                     state.profileWeight = editWeight
                     state.profileCity = editCity
                     state.profileLanguage = editLanguage
-                    state.selectedDiabetesStatus = editDiabetes
+                    state.diabetesType = editDiabetes
+                    state.diabetesTypeOther = editDiabetesOther
                     state.selectedBpStatus = editBp
                     state.selectedOnMedication = editMedication
                     state.selectedDoctorSupervision = editDoctor
-                    state.selectedGoal = editGoal
-                    state.repository.saveProfile(mapOf(
+                    state.selectedGoals.clear(); state.selectedGoals.addAll(editGoals)
+                    state.repository.saveProfile((editDiabetes?.let { com.nirogbhumi.app.health.domain.DiabetesTypes.toStored(com.nirogbhumi.app.health.domain.DiabetesAnswer(it, editDiabetesOther)) }.orEmpty()) + mapOf(
                         "fullName" to editName, "age" to editAge.toIntOrNull(), "gender" to editGender,
                         "heightCm" to editHeight.toDoubleOrNull(), "weightKg" to editWeight.toDoubleOrNull(),
                         "city" to editCity, "preferredLanguage" to editLanguage,
-                        "diabetesStatus" to editDiabetes, "bpStatus" to editBp,
+                        "bpStatus" to editBp,
                         "onMedication" to editMedication, "doctorSupervision" to editDoctor,
-                        "primaryGoal" to editGoal
+                        "goals" to com.nirogbhumi.app.health.domain.HealthGoals.toStored(editGoals)
                     )) { result -> state.cloudMessage = when (result) {
-                        is com.nirogbhumi.app.data.CloudResult.Success -> "Profile synced securely"
+                        is com.nirogbhumi.app.data.CloudResult.Success -> "Profile saved"
                         is com.nirogbhumi.app.data.CloudResult.Failure -> result.message
                     } }
                     state.currentScreen = "dashboard"
@@ -2074,7 +2065,8 @@ fun FamilyProfilesScreen(state: NirogState) {
         var relationship by remember { mutableStateOf("") }
         var age by remember { mutableStateOf("") }
         var city by remember { mutableStateOf("") }
-        var diabetesStatus by remember { mutableStateOf("Not sure") }
+        var familyDiabetes by remember { mutableStateOf(com.nirogbhumi.app.health.domain.DiabetesType.NOT_SURE) }
+        var familyDiabetesOther by remember { mutableStateOf("") }
         var consented by remember { mutableStateOf(false) }
         var saving by remember { mutableStateOf(false) }
         AlertDialog(
@@ -2088,13 +2080,13 @@ fun FamilyProfilesScreen(state: NirogState) {
                         OutlinedTextField(age, { age = it.filter(Char::isDigit) }, label = { Text("Age") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f))
                         OutlinedTextField(city, { city = it }, label = { Text("City") }, modifier = Modifier.weight(1f))
                     }
-                    Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf("No diabetes", "Prediabetes", "Type 2 diabetes", "Type 1 diabetes", "Not sure").forEach { t ->
-                            Surface(shape = RoundedCornerShape(12.dp), color = if (diabetesStatus == t) Color(0xFF314936) else Color(0xFFEBF7E8), modifier = Modifier.clickable { diabetesStatus = t }) {
-                                Text(t, color = if (diabetesStatus == t) Color.White else Color(0xFF1B3221), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
-                            }
-                        }
-                    }
+                    com.nirogbhumi.app.ui.components.DiabetesTypePicker(
+                        selected = familyDiabetes,
+                        otherText = familyDiabetesOther,
+                        onSelect = { familyDiabetes = it },
+                        onOtherText = { familyDiabetesOther = it },
+                        labelColor = Color(0xFF1B3221),
+                    )
                     // DPDP Act 2023 s.9: a child's (under-18) data may be processed
                     // only with verifiable parental/guardian consent, and never for
                     // tracking or targeted advertising. When the entered age is under
@@ -2128,7 +2120,9 @@ fun FamilyProfilesScreen(state: NirogState) {
                             "relationship" to relationship.trim().ifBlank { null },
                             "age" to age.toIntOrNull(),
                             "city" to city.trim().ifBlank { null },
-                            "selection" to diabetesStatus,
+                            "selection" to com.nirogbhumi.app.health.domain.DiabetesAnswer(familyDiabetes, familyDiabetesOther).describe(),
+                            "diabetesType" to familyDiabetes.wire,
+                            "diabetesTypeOther" to if (familyDiabetes == com.nirogbhumi.app.health.domain.DiabetesType.OTHER) com.nirogbhumi.app.health.domain.DiabetesTypes.sanitizeOther(familyDiabetesOther) else null,
                             "isMinor" to isMinor,
                             "guardianConsent" to true,
                             "guardianConsentAt" to com.google.firebase.firestore.FieldValue.serverTimestamp()

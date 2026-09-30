@@ -686,7 +686,7 @@ fun QuickLogFastingOverlay(state: NirogState) {
                             fun onDone(result: com.nirogbhumi.app.data.CloudResult<*>) {
                                 saving = false
                                 if (result is com.nirogbhumi.app.data.CloudResult.Success<*>) {
-                                    state.cloudMessage = "Synced securely"
+                                    state.cloudMessage = "Saved"
                                     confirming = true
                                     widgetScope.launch {
                                         com.nirogbhumi.app.widget.updateHealthQuickLogWidget(context, mgDl, status)

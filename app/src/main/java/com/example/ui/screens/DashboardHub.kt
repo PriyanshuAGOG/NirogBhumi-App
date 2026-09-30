@@ -911,7 +911,7 @@ fun TodayTab(state: NirogState) {
                 Spacer(modifier = Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text("Learn & Explore", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B2219))
-                    Text("Ayurvedic wisdom & modern metabolic science", fontSize = 11.5.sp, color = NirogColor.inkMuted)
+                    Text("Simple reads on Ayurveda and everyday health", fontSize = 11.5.sp, color = NirogColor.inkMuted)
                 }
                 Text("Browse", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = NirogColor.forest)
             }
@@ -1918,7 +1918,7 @@ fun CareTab(state: NirogState) {
                     Text("You're not doing this alone", fontSize = 20.sp, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color.White)
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        "Join a Nirog Bhumi program to unlock a coach, a batch of people on the same journey, and a program calendar.",
+                        "Care+ is for members of a Nirog Bhumi program. If your coach gave you a code, enter it to join. Everything else in the app works without one.",
                         fontSize = 13.sp, color = NirogColor.forestPale, lineHeight = 18.sp
                     )
                     Spacer(modifier = Modifier.height(16.dp))
@@ -1934,7 +1934,7 @@ fun CareTab(state: NirogState) {
                 }
             }
 
-            CareRow(Icons.Outlined.Groups, "A coach, not a chatbot", "A named program coach who checks in on your batch and answers questions.") {}
+            CareRow(Icons.Outlined.Groups, "A real coach for your batch", "A named program coach who checks in and answers your questions.") {}
             CareRow(Icons.Outlined.Forum, "A batch on the same path", "Group chat and a coach announcements channel with people doing this with you.") {}
             CareRow(Icons.Outlined.CalendarMonth, "A real program calendar", "Live sessions, group walks, and lab-review weeks - never a silent schedule change.") {}
         } else {
@@ -2247,7 +2247,7 @@ fun LearnTab(state: NirogState) {
                 color = NirogColor.forest
             )
             Text(
-                text = "Discover Ayurvedic wisdom & modern metabolic sciences.",
+                text = "Simple reads on Ayurveda and everyday health.",
                 fontSize = 15.sp,
                 color = NirogColor.inkTertiary,
                 modifier = Modifier.padding(top = 4.dp)

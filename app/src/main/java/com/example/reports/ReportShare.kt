@@ -35,7 +35,7 @@ object ReportShare {
             week.weightSummary?.let { "Weight: $it" },
             week.sleepSummary?.let { "Sleep: $it" },
             health.week.steps.takeIf { it > 0 }?.let { "Walking: $it steps this week" },
-            "Goals: ${state.selectedGoals.joinToString()}",
+            "Goals: ${state.selectedGoals.joinToString { it.label }}",
             "Program: ${if (state.isProgramActive) "Active" else "Not active"}"
         ).forEach { line ->
             // wrap to the page width so long summaries are never cut off

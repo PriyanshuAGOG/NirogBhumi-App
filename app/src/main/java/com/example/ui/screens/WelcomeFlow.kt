@@ -31,6 +31,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nirogbhumi.app.ui.NirogState
+import com.nirogbhumi.app.ui.diabetesAnswer
 import com.nirogbhumi.app.data.FirebaseAuthGateway
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
@@ -69,7 +70,13 @@ private fun applyProfileDocument(state: NirogState, document: com.google.firebas
     (document.get("weightKg") as? Number)?.let { state.profileWeight = it.toString() }
     document.getString("city")?.let { state.profileCity = it }
     document.getString("preferredLanguage")?.let { state.profileLanguage = it }
-    document.getString("diabetesStatus")?.let { state.selectedDiabetesStatus = it }
+    com.nirogbhumi.app.health.domain.DiabetesTypes
+        .fromStored(document.getString("diabetesType"), document.getString("diabetesTypeOther"), document.getString("diabetesStatus"))
+        ?.let { state.diabetesType = it.type; state.diabetesTypeOther = it.otherText.orEmpty() }
+    (document.get("goals") as? List<*>)?.let { stored ->
+        val goals = com.nirogbhumi.app.health.domain.HealthGoals.fromStored(stored)
+        if (goals.isNotEmpty() || stored.isEmpty()) { state.selectedGoals.clear(); state.selectedGoals.addAll(goals) }
+    }
     document.getString("bpStatus")?.let { state.selectedBpStatus = it }
     document.getString("onMedication")?.let { state.selectedOnMedication = it }
     document.getString("doctorSupervision")?.let { state.selectedDoctorSupervision = it }
@@ -206,7 +213,7 @@ fun SplashScreen(state: NirogState) {
             Spacer(modifier = Modifier.height(12.dp))
 
             Text(
-                text = "Your daily rhythm for better metabolic health.",
+                text = "Your daily rhythm for better health.",
                 fontSize = 15.sp,
                 color = Ink.copy(alpha = 0.7f),
                 textAlign = TextAlign.Center,
@@ -364,7 +371,7 @@ fun ValueSlidesScreen(state: NirogState) {
     val slideContents = listOf(
         Triple(
             "Know your pattern.",
-            "Visual glucose trends and circadian cycles mapped automatically to understand your system's unique metabolic responses.",
+            "See how your blood sugar moves through the day and the week, charted for you automatically.",
             "PATTERN"
         ),
         Triple(
@@ -374,7 +381,7 @@ fun ValueSlidesScreen(state: NirogState) {
         ),
         Triple(
             "Share better data with professionals.",
-            "Download clinical-grade weekly report summaries to empower your general physician, coach, or Ayurvedic expert panel.",
+            "Share a simple weekly summary with your doctor, coach or Ayurvedic expert.",
             "COOPERATE"
         )
     )
@@ -457,7 +464,7 @@ fun ValueSlidesScreen(state: NirogState) {
                             shape = RoundedCornerShape(16.dp)
                         ) {
                             Column(modifier = Modifier.padding(16.dp)) {
-                                Text("TODAY'S PRACTICAL PROTOCOL", fontSize = 10.sp, color = Earth, fontWeight = FontWeight.Bold)
+                                Text("TODAY'S SIMPLE STEP", fontSize = 10.sp, color = Earth, fontWeight = FontWeight.Bold)
                                 Spacer(modifier = Modifier.height(6.dp))
                                 Text("Drink Vijaysar water", fontSize = 16.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Serif, color = Ink)
                                 Spacer(modifier = Modifier.height(4.dp))
@@ -480,7 +487,7 @@ fun ValueSlidesScreen(state: NirogState) {
                             Box(
                                 modifier = Modifier.border(1.dp, DeepGreen, RoundedCornerShape(12.dp)).padding(horizontal = 14.dp, vertical = 6.dp)
                             ) {
-                                Text("Download clinical summary", color = DeepGreen, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Text("Download summary", color = DeepGreen, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -1000,7 +1007,7 @@ fun EmailAuthScreen(state: NirogState) {
             Spacer(modifier = Modifier.height(6.dp))
 
             Text(
-                text = "Metabolic details require private protected authentication.",
+                text = "Your health details are private. Sign in to see them.",
                 fontSize = 13.sp,
                 color = Ink.copy(alpha = 0.6f),
                 textAlign = TextAlign.Center,
@@ -1203,7 +1210,7 @@ fun PasswordResetScreen(state: NirogState) {
             Spacer(modifier = Modifier.height(8.dp))
 
             Text(
-                text = "Type your registered metabolic profile email below and we will transmit direct instructions.",
+                text = "Enter the email you signed up with and we will send you a link to reset your password.",
                 fontSize = 14.sp,
                 color = Ink.copy(alpha = 0.65f),
                 textAlign = TextAlign.Center,
@@ -1370,15 +1377,15 @@ fun ConsentScreen(state: NirogState) {
 
             // Information details
             ConsentInformationBullet("What we collect", "Circadian resting statistics, glucose values, steps progress and dietary patterns manually documented.", Icons.Filled.Storage, DeepGreen)
-            ConsentInformationBullet("Why we collect it", "To produce comprehensive weekly charts and guide metabolic experts about patterns.", Icons.Filled.Insights, Earth)
-            ConsentInformationBullet("Who reviews it", "Exclusively verified wellness consultants you engage. Safe role-locked clinical isolation.", Icons.Filled.Lock, Water)
+            ConsentInformationBullet("Why we collect it", "To show you weekly charts and let your care team see your patterns.", Icons.Filled.Insights, Earth)
+            ConsentInformationBullet("Who reviews it", "Only the verified Nirog Bhumi coaches and experts you choose to work with.", Icons.Filled.Lock, Water)
             ConsentInformationBullet("What this app does not do", "Nirog Bhumi does not diagnose conditions or change medication, diet, exercise, or treatment for you.", Icons.Filled.DoNotDisturbOn, Color(0xFFBA1A1A))
 
             Spacer(modifier = Modifier.height(12.dp))
 
             // Triple critical checkboxes
             ConsentCheckRow(checked = check1, onCheckedChange = { check1 = it }, label = "I agree to health data tracking & secure cloud database persistence.")
-            ConsentCheckRow(checked = check2, onCheckedChange = { check2 = it }, label = "I authorize certified Nirog Bhumi experts to review metabolic charts when consults are booked.")
+            ConsentCheckRow(checked = check2, onCheckedChange = { check2 = it }, label = "I allow certified Nirog Bhumi experts to see my health readings when I book a consultation.")
             ConsentCheckRow(checked = check3, onCheckedChange = { check3 = it }, label = "I understand this application is for health tracking and lifestyle support, not medicine prescription.")
 
             TextButton(onClick = { state.legalReturnRoute = "consent"; state.currentScreen = "legal_center" }) {
@@ -1721,7 +1728,7 @@ fun SelfOrCaregiverScreen(state: NirogState) {
                 // Option 1: Myself
                 CaregiverOptionCard(
                     title = "Myself",
-                    desc = "My own metabolic health, physical walk goals, and water cycles tracking.",
+                    desc = "My own health: blood sugar, walking and daily habits.",
                     isSelected = state.isTrackingForSelf,
                     onClick = { state.isTrackingForSelf = true }
                 )
@@ -1839,22 +1846,22 @@ fun HealthProfileSetupScreen(state: NirogState) {
             )
 
             Text(
-                text = "Select states that characterize the metabolic profile. Safe baseline personalization parameters apply.",
+                text = "Tell us a little about your health so the app can fit you. You can change this later.",
                 fontSize = 15.sp,
                 color = Ink.copy(alpha = 0.65f)
             )
 
-            // Q1: Diabetes Status
-            HealthProfileSelectorRow(
-                question = "Diabetes Status",
-                options = listOf("None", "Pre-diabetic", "Type 2", "Type 1", "Gestational"),
-                selectedValue = state.selectedDiabetesStatus,
-                onSelect = { state.selectedDiabetesStatus = it }
+            // Q1: Type of diabetes (fixed answers; "Other" opens a short text box)
+            com.nirogbhumi.app.ui.components.DiabetesTypePicker(
+                selected = state.diabetesType,
+                otherText = state.diabetesTypeOther,
+                onSelect = { state.diabetesType = it },
+                onOtherText = { state.diabetesTypeOther = it },
             )
 
             // Q2: BP Status
             HealthProfileSelectorRow(
-                question = "Blood Pressure status",
+                question = "Blood pressure",
                 options = listOf("Normal", "High BP", "Low BP", "Not sure"),
                 selectedValue = state.selectedBpStatus,
                 onSelect = { state.selectedBpStatus = it }
@@ -1870,7 +1877,7 @@ fun HealthProfileSetupScreen(state: NirogState) {
 
             // Q4: Supervised under Doctor
             HealthProfileSelectorRow(
-                question = "Active Physician supervision?",
+                question = "Are you seeing a doctor for this?",
                 options = listOf("Yes", "No"),
                 selectedValue = state.selectedDoctorSupervision,
                 onSelect = { state.selectedDoctorSupervision = it }
@@ -1895,8 +1902,7 @@ fun HealthProfileSetupScreen(state: NirogState) {
                         // on, so persist directly and only navigate back once
                         // it actually lands.
                         saving = true
-                        state.repository.saveProfile(mapOf(
-                            "diabetesStatus" to state.selectedDiabetesStatus,
+                        state.repository.saveProfile(diabetesFields(state) + mapOf(
                             "bpStatus" to state.selectedBpStatus,
                             "onMedication" to state.selectedOnMedication,
                             "doctorSupervision" to state.selectedDoctorSupervision,
@@ -1965,16 +1971,7 @@ fun HealthProfileSelectorRow(question: String, options: List<String>, selectedVa
 // SCREEN 9: MAIN GOAL SELECTION (MULTISELECT CHIPS)
 @Composable
 fun GoalSelectionScreen(state: NirogState) {
-    val goalOptionsList = listOf(
-        "Control sugar",
-        "Improve lifestyle",
-        "Reverse diabetes journey",
-        "Track parent’s health",
-        "Improve BP",
-        "Sleep better",
-        "Walk more",
-        "Join a program"
-    )
+    val goalOptionsList = com.nirogbhumi.app.health.domain.HealthGoal.entries
 
     Column(
         modifier = Modifier
@@ -2017,7 +2014,7 @@ fun GoalSelectionScreen(state: NirogState) {
             Spacer(modifier = Modifier.height(8.dp))
 
             Text(
-                text = "Select all purposes that apply to you. Multiple target focus metrics allowed.",
+                text = "Pick everything you would like help with. You can choose more than one.",
                 fontSize = 15.sp,
                 color = Ink.copy(alpha = 0.65f)
             )
@@ -2064,7 +2061,7 @@ fun GoalSelectionScreen(state: NirogState) {
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(
-                                        text = goalItem,
+                                        text = goalItem.label,
                                         fontWeight = FontWeight.Bold,
                                         color = Ink,
                                         fontSize = 13.sp,
@@ -2302,15 +2299,15 @@ fun OnboardingCompleteScreen(state: NirogState) {
                 modifier = Modifier.fillMaxWidth(0.9f)
             ) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Sanctuary initialized for ${state.profileName}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Earth)
+                    Text("You are all set, ${state.profileName.ifBlank { "welcome" }}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Earth)
                     Divider(color = Line.copy(alpha = 0.3f))
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("Diabetes status:", fontSize = 12.sp, color = Ink.copy(alpha = 0.6f))
-                        Text(state.selectedDiabetesStatus, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Ink)
+                        Text("Diabetes:", fontSize = 12.sp, color = Ink.copy(alpha = 0.6f))
+                        Text(state.diabetesAnswer()?.describe() ?: "Not answered", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Ink)
                     }
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("Target goals:", fontSize = 12.sp, color = Ink.copy(alpha = 0.6f))
-                        Text("${state.selectedGoals.size} targets active", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Ink)
+                        Text("Your goals:", fontSize = 12.sp, color = Ink.copy(alpha = 0.6f))
+                        Text("${state.selectedGoals.size} chosen", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Ink)
                     }
                     if (state.isProgramActive) {
                         Box(
@@ -2390,14 +2387,13 @@ fun OnboardingCompleteScreen(state: NirogState) {
                     // so it never needs scheduling directly from here.
                     val signupHour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
                     val seededHourHint = if (signupHour in 7..21) signupHour else 19
-                    state.repository.saveProfile(mapOf(
+                    state.repository.saveProfile(diabetesFields(state) + mapOf(
                         "onboardingComplete" to true,
                         "trackingFor" to if (state.isTrackingForSelf) "self" else "family",
-                        "diabetesStatus" to state.selectedDiabetesStatus,
                         "bpStatus" to state.selectedBpStatus,
                         "onMedication" to state.selectedOnMedication,
                         "doctorSupervision" to state.selectedDoctorSupervision,
-                        "goals" to state.selectedGoals.toList(),
+                        "goals" to com.nirogbhumi.app.health.domain.HealthGoals.toStored(state.selectedGoals),
                         "healthProfileCompleted" to state.healthProfileCompleted,
                         "checkinHourHint" to seededHourHint,
                     )) { result ->
@@ -2425,3 +2421,7 @@ fun OnboardingCompleteScreen(state: NirogState) {
 
 // Helper utility spacing constraints
 private fun Modifier.fillModifierOnboarding() = this.fillMaxWidth()
+
+/** The diabetes answer as profile fields (stable code, optional text for "Other", readable label for older readers). Nothing is saved when the question was skipped. */
+private fun diabetesFields(state: NirogState): Map<String, Any?> =
+    state.diabetesAnswer()?.let { com.nirogbhumi.app.health.domain.DiabetesTypes.toStored(it) }.orEmpty()

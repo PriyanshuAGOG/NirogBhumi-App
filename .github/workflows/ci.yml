@@ -52,6 +52,25 @@ jobs:
           path: |
             app/build/outputs/apk/debug/*.apk
             app/build/reports/**
+            gradle.log
+
+  # A separate, short job that prints only what broke in the Android build. Its log is tiny, so the
+  # cause is visible without scrolling through Gradle cache summaries.
+  android-failure-digest:
+    name: Android failure digest
+    needs: [android]
+    if: failure()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          name: android-debug-and-reports
+          path: digest
+      - name: Print compile errors and failed tests
+        run: |
+          log=$(find digest -name gradle.log | head -1)
+          echo "== compile errors =="; grep -E "^e: " "$log" | sed 's#file:///home/runner/work/NirogBhumi-App/NirogBhumi-App/##' | head -80 || true
+          echo "== failed tests / tasks =="; grep -E "FAILED|What went wrong" -A3 "$log" | head -80 || true
 
   android-release:
     name: Android release build (R8/minify)

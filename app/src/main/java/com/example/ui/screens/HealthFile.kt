@@ -48,6 +48,7 @@ import com.nirogbhumi.app.data.CloudResult
 import com.nirogbhumi.app.health.domain.DoctorReport
 import com.nirogbhumi.app.health.domain.HealthLabels
 import com.nirogbhumi.app.ui.collectHealth
+import com.nirogbhumi.app.ui.diabetesAnswer
 import com.nirogbhumi.app.ui.NirogState
 import com.nirogbhumi.app.ui.components.NirogCard
 import com.nirogbhumi.app.ui.components.PrimaryButton
@@ -132,7 +133,7 @@ fun HealthFileScreen(state: NirogState) {
         )
         Spacer(Modifier.size(NirogSpace.sm))
         Text(
-          "Diabetes: ${state.selectedDiabetesStatus} · BP: ${state.selectedBpStatus} · On medication: ${state.selectedOnMedication}",
+          profileSummary(state, " · "),
           style = NirogType.body,
           color = NirogColor.inkSecondary,
         )
@@ -222,7 +223,7 @@ fun HealthFileScreen(state: NirogState) {
           state.profileGender.takeIf { it.isNotBlank() },
           state.profileCity.takeIf { it.isNotBlank() },
         ).joinToString(" | "),
-        conditions = "Diabetes: ${state.selectedDiabetesStatus} | BP: ${state.selectedBpStatus} | On medication: ${state.selectedOnMedication}",
+        conditions = profileSummary(state, " | "),
         sugarLine = sugarLine30d?.let { "Blood sugar average (30 days): $it" } ?: "Blood sugar: not logged yet",
         bpLine = latestBp?.let { "Latest blood pressure: ${it.systolic}/${it.diastolic} mmHg" } ?: "Blood pressure: not logged yet",
         weightLine = latestWeight?.let { "Latest weight: ${HealthLabels.weight(it.valueKg)}" } ?: "Weight: not logged yet",
@@ -467,4 +468,14 @@ private fun buildAndSaveHealthFilePdf(
 
     FileProvider.getUriForFile(context, "${context.packageName}.files", file)
   }
+}
+
+/** What the member told us about their health, in one line. Questions they skipped are left out rather than reported as "None". */
+private fun profileSummary(state: NirogState, separator: String): String {
+  if (!state.healthProfileCompleted) return "Health profile not filled in"
+  return listOfNotNull(
+    state.diabetesAnswer()?.let { "Diabetes: ${it.describe()}" },
+    "Blood pressure: ${state.selectedBpStatus}",
+    "On medication: ${state.selectedOnMedication}",
+  ).joinToString(separator)
 }
