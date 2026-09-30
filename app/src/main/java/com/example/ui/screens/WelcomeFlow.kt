@@ -89,6 +89,7 @@ private fun applyProfileDocument(state: NirogState, document: com.google.firebas
         (consent["medicalDisclaimer"] as? Boolean)?.let { state.consentMedicalDisclaimer = it }
         (consent["research"] as? Boolean)?.let { state.consentResearch = it }
         (consent["marketing"] as? Boolean)?.let { state.consentMarketing = it }
+        state.consentVersionOnRecord = consent["version"] as? String
     }
     document.getString("photoUrl")?.let { state.photoUrl = it }
     document.getBoolean("programActive")?.let { state.isProgramActive = it }

@@ -35,3 +35,8 @@ fun maskPhone(phone: String?): String {
     val country = digits.takeWhile { it == '+' || it.isDigit() }.take(if (digits.startsWith("+")) 3 else 0)
     return "${country.ifEmpty { "" }} ••••• ${digits.takeLast(4)}".trim()
 }
+
+object ConsentPolicy {
+    /** True when the member accepted an earlier notice than the one in force. Never recorded (null) is handled by onboarding, not here. */
+    fun needsReview(recordedVersion: String?, currentVersion: String): Boolean = recordedVersion != null && recordedVersion != currentVersion
+}

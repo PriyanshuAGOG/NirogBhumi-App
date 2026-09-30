@@ -2412,7 +2412,10 @@ fun PrivacyConsentScreen(state: NirogState) {
     fun toggleOptionalConsent(key: String, next: Boolean, setBusy: (Boolean) -> Unit, current: Boolean, apply: (Boolean) -> Unit) {
         setBusy(true)
         apply(next)
-        state.repository.saveProfile(mapOf("consent" to mapOf(key to next, "version" to CONSENT_VERSION))) { result ->
+        // "version" is deliberately NOT written here: it records which notice the member accepted for the required
+        // consents, and flipping an optional switch must not mark a newer notice as accepted. The receipt below
+        // carries the version in force for this one change.
+        state.repository.saveProfile(mapOf("consent" to mapOf(key to next))) { result ->
             setBusy(false)
             if (result is com.nirogbhumi.app.data.CloudResult.Failure) {
                 apply(current)

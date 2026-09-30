@@ -76,6 +76,7 @@ fun MainHub(state: NirogState) {
     ) { innerPadding ->
         Column(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
         com.nirogbhumi.app.ui.PendingDeletionBanner(state)
+        com.nirogbhumi.app.ui.ConsentUpdateBanner(state)
         Box(
             modifier = Modifier
                 .fillMaxWidth()

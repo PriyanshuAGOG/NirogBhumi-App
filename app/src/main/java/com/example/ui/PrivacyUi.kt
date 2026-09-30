@@ -147,3 +147,40 @@ fun ReauthDialog(onConfirmed: () -> Unit, onDismiss: () -> Unit, onSignOut: () -
         dismissButton = { TextButton(enabled = !busy, onClick = onDismiss) { Text("Cancel", color = Color(0xFF737972)) } },
     )
 }
+
+/**
+ * "We updated our privacy notice." Shown on the main screens to members who accepted an earlier version. They can
+ * read it, then accept; accepting writes a new dated receipt with the version in force. Nothing is blocked while
+ * they decide, but the notice stays until they act.
+ */
+@Composable
+fun ConsentUpdateBanner(state: NirogState, modifier: Modifier = Modifier) {
+    if (!ConsentPolicy.needsReview(state.consentVersionOnRecord, CONSENT_VERSION)) return
+    var busy by remember { mutableStateOf(false) }
+    Column(modifier.fillMaxWidth().background(Color(0xFFF4E9D3)).padding(horizontal = 16.dp, vertical = 10.dp).semantics { liveRegion = LiveRegionMode.Polite }) {
+        Text("We've updated our privacy notice. Please take a look and accept it to keep things up to date.", fontSize = 13.sp, color = Color(0xFF4B3B1B), fontWeight = FontWeight.SemiBold)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            TextButton(
+                onClick = { state.legalInitialSection = "Privacy Policy"; state.legalReturnRoute = "dashboard"; state.currentScreen = "legal_center" },
+                modifier = Modifier.heightIn(min = 48.dp),
+            ) { Text("Read it", color = Color(0xFF314936), fontWeight = FontWeight.Bold) }
+            Button(
+                enabled = !busy,
+                onClick = {
+                    busy = true
+                    // Required consents were already given; optional ones keep the member's current choice.
+                    val purposes = mapOf("healthData" to true, "expertReview" to state.consentExpertReview, "medicalDisclaimer" to true, "research" to state.consentResearch, "marketing" to state.consentMarketing)
+                    state.repository.saveProfile(mapOf("consent" to (purposes + mapOf("version" to CONSENT_VERSION, "acceptedAt" to com.google.firebase.firestore.FieldValue.serverTimestamp())))) { result ->
+                        busy = false
+                        if (result is CloudResult.Success) {
+                            state.consentVersionOnRecord = CONSENT_VERSION
+                            state.repository.recordConsentReceipt(purposes, CONSENT_VERSION) {}
+                        } else state.cloudMessage = (result as CloudResult.Failure).message
+                    }
+                },
+                modifier = Modifier.heightIn(min = 48.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF314936)),
+            ) { Text(if (busy) "Saving..." else "I agree", color = Color.White, fontWeight = FontWeight.Bold) }
+        }
+    }
+}

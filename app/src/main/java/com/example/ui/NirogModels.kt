@@ -14,7 +14,7 @@ import com.nirogbhumi.app.data.CloudDocument
 // consent receipt and on users/{uid}.consent so we can prove what was agreed
 // to and, when this bumps after a material policy change, ask for fresh
 // consent (DPDP Act 2023). Bump this string when the notice materially changes.
-const val CONSENT_VERSION = "2025-07"
+const val CONSENT_VERSION = "2026-09"
 
 // Data Models
 data class ConsultationSlot(
@@ -128,6 +128,10 @@ class NirogState {
     // announcement/pin actions recognize the actual per-batch program
     // manager, not just the platform-wide admin role.
     var coachProgramIds by mutableStateOf(setOf<String>())
+
+    // Which version of the privacy notice the member accepted for the required consents (null = never recorded).
+    // When it differs from CONSENT_VERSION the dashboard asks them to review and accept the update.
+    var consentVersionOnRecord by mutableStateOf<String?>(null)
 
     // Epoch millis a scheduled account deletion will run at, or null when none is pending. Drives the banner shown everywhere.
     var pendingDeletionMillis by mutableStateOf<Long?>(null)

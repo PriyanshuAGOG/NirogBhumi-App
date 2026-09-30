@@ -44,4 +44,10 @@ class DeletionGuardsTest {
         assertEquals("your phone", maskPhone("123"))
         assertFalse(maskPhone("+919876544321").contains("98765"))
     }
+
+    @Test fun consentReviewIsAskedOnlyForAnOlderAcceptedVersion() {
+        assertTrue(ConsentPolicy.needsReview("2025-07", "2026-09"))
+        assertFalse(ConsentPolicy.needsReview("2026-09", "2026-09"))
+        assertFalse(ConsentPolicy.needsReview(null, "2026-09"))   // never recorded: onboarding asks, not this banner
+    }
 }
