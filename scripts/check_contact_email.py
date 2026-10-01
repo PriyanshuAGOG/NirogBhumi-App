@@ -26,7 +26,7 @@ for rel in files:
             if m.lower() == OFFICIAL or SKIP_MATCH.search(m):
                 continue
             # URLs such as https://user@host/ in docs/tests describing blocked links are not addresses.
-            if re.search(r"https?://[^\s]*" + re.escape(m), line):
+            if re.search(r"[a-z]+://[^\s]*" + re.escape(m), line):
                 continue
             problems.append(f"{rel}:{n}: {m}")
 
