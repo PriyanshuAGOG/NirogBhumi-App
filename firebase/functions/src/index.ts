@@ -13,6 +13,7 @@ import { cancelOwnConsultation, handleConsultationChange } from './consultations
 import { dayKeyIST, isMondayIST, sendWeeklyDigests, updateBatchPulse } from './scheduledJobs.js';
 import { exportDownloadLink, processExportRequest, purgeExpiredExports } from './exportJob.js';
 import { notifySupportRequest } from './supportMail.js';
+import { OFFICIAL_CONTACT_EMAIL } from './email.js';
 import { DELETION_GRACE_DAYS, cancelAccountDeletion as cancelDeletionRequest, processDueDeletions, scheduleAccountDeletion } from './accountDeletion.js';
 
 initializeApp();
@@ -1048,9 +1049,9 @@ export const getExportDownloadLink = onCall({ region }, async request => {
     throw error;
   }
 });
-// New support request -> an email to the support inbox (SUPPORT_EMAIL). Idempotent per request.
+// New support request -> an email to the official contact address (SUPPORT_EMAIL can override it). Idempotent per request.
 export const onSupportRequestCreate = onDocumentCreated({ document: 'supportRequests/{requestId}', region }, async event => {
-  await notifySupportRequest(db, event.params.requestId, process.env.SUPPORT_EMAIL);
+  await notifySupportRequest(db, event.params.requestId, process.env.SUPPORT_EMAIL || OFFICIAL_CONTACT_EMAIL);
 });
 // Real, time-limited signed URL for the Health File "share link / QR code"
 // feature - the client previously used the Storage download-token URL

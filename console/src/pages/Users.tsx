@@ -314,7 +314,7 @@ export default function Users() {
               type="email"
               value={newEmail}
               onChange={(e) => setNewEmail(e.target.value)}
-              placeholder="name@nirogbhumi.app"
+              placeholder="Email address"
             />
           </div>
           <div className="field">

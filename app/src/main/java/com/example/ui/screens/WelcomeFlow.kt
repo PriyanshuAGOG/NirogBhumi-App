@@ -31,6 +31,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nirogbhumi.app.ui.NirogState
+import com.nirogbhumi.app.ui.OfficialContact
 import com.nirogbhumi.app.ui.diabetesAnswer
 import com.nirogbhumi.app.data.FirebaseAuthGateway
 import com.google.firebase.auth.FirebaseAuth
@@ -1396,7 +1397,7 @@ fun ConsentScreen(state: NirogState) {
             // DPDP Act 2023 notice: the law requires that, at or before consent,
             // we tell you your rights, how to withdraw, and how to complain.
             Text(
-                "Under India's DPDP Act, 2023 you can access, correct, or delete your data and withdraw optional consent any time in Privacy & consent. Anonymized research and product updates are separate and off by default. Questions or complaints: grievance@nirogbhumi.com, or the Data Protection Board of India.",
+                "Under India's DPDP Act, 2023 you can access, correct, or delete your data and withdraw optional consent any time in Privacy & consent. Anonymized research and product updates are separate and off by default. Questions or complaints: ${OfficialContact.EMAIL}, or the Data Protection Board of India.",
                 color = Ink.copy(alpha = 0.6f),
                 fontSize = 12.sp,
                 lineHeight = 17.sp

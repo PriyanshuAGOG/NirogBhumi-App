@@ -148,6 +148,9 @@ jobs:
       # store description over Play's limit or a missing graphic is not.
       - name: Check store listing limits, release notes and graphics
         run: python3 scripts/check_release_gates.py
+      # One official contact address everywhere (support, privacy, deletion, Grievance Officer).
+      - name: Check that only the official contact email is used
+        run: python3 scripts/check_contact_email.py
 
   functions:
     name: Firebase Functions type-check

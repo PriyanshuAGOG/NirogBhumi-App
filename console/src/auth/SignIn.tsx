@@ -93,7 +93,7 @@ export default function SignIn() {
                 autoComplete="username"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@nirogbhumi.app"
+                placeholder="Email address"
                 required
               />
             </label>
@@ -123,7 +123,7 @@ export default function SignIn() {
                 autoComplete="username"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@nirogbhumi.app"
+                placeholder="Email address"
                 required
               />
             </label>

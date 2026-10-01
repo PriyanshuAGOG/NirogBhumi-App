@@ -39,7 +39,7 @@ fun AdminWebDashboard(state: NirogState) {
 
     // Admin login security simulation
     var isAdminLoggedIn by remember { mutableStateOf(false) }
-    var adminEmail by remember { mutableStateOf("admin@nirogbhumi.org") }
+    var adminEmail by remember { mutableStateOf("") }
     var adminPassword by remember { mutableStateOf("••••••••") }
 
     if (!isAdminLoggedIn) {

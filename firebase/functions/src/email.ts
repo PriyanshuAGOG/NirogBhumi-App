@@ -31,3 +31,6 @@ export async function queueEmail(db: Firestore, key: string, message: MailMessag
     throw error;
   }
 }
+
+/** The one official contact address (support alerts go here unless SUPPORT_EMAIL says otherwise). */
+export const OFFICIAL_CONTACT_EMAIL = 'priyanshu@nirogbhumi.com';
