@@ -29,7 +29,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -48,13 +51,22 @@ import androidx.compose.ui.unit.sp
 import androidx.health.connect.client.PermissionController
 import com.nirogbhumi.app.health.HealthConnectManager
 import com.nirogbhumi.app.health.HealthConnectStatus
-import com.nirogbhumi.app.health.computeSleepGlucoseInsight
-import com.nirogbhumi.app.health.computeMedicationGlucoseInsight
-import com.nirogbhumi.app.health.computeMealTimingInsight
+import com.nirogbhumi.app.health.domain.ClockText
+import com.nirogbhumi.app.health.domain.GlucoseEntry
+import com.nirogbhumi.app.health.domain.GlucoseStatus
+import com.nirogbhumi.app.health.domain.HealthLabels
+import com.nirogbhumi.app.health.domain.HealthMetric
+import com.nirogbhumi.app.health.domain.Insights
+import com.nirogbhumi.app.health.domain.TrendMetric
+import com.nirogbhumi.app.health.domain.status
+import com.nirogbhumi.app.ui.collectHealth
+import com.nirogbhumi.app.ui.components.EditWindowFootnote
+import com.nirogbhumi.app.ui.components.HealthHistoryRow
+import com.nirogbhumi.app.ui.components.MetricTrendCard
+import com.nirogbhumi.app.ui.components.StaleDataNotice
 import com.nirogbhumi.app.ui.NirogState
 import com.nirogbhumi.app.ui.CONSENT_VERSION
 import com.nirogbhumi.app.ui.canManageProgram
-import com.nirogbhumi.app.ui.SugarLog
 import com.nirogbhumi.app.ui.components.NirogCard
 import com.nirogbhumi.app.ui.components.RowCard
 import com.nirogbhumi.app.ui.theme.NirogColor
@@ -66,38 +78,10 @@ import kotlinx.coroutines.launch
 // Screen 1: Sugar Metric detailed deepdive
 @Composable
 fun BloodSugarDetailScreen(state: NirogState) {
-    DisposableEffect(Unit) {
-        // 180, not 30 - a 90-day trend chart needs enough history even for
-        // members logging fasting+post-meal readings most days.
-        val subscription = state.repository.listenUserCollection("glucoseReadings", 180, orderByField = "measuredAt", descending = true) { result ->
-            when (result) {
-                is com.nirogbhumi.app.data.CloudResult.Success -> {
-                    val synced = result.value.mapIndexedNotNull { index, doc ->
-                        val readingType = doc.values["readingType"] as? String
-                        // HbA1c is a lab percentage on a different scale than mg/dL readings,
-                        // so it's excluded here to avoid corrupting the mg/dL trend/average.
-                        if (readingType == "hba1c") return@mapIndexedNotNull null
-                        val value = (doc.values["value"] as? Number)?.toInt() ?: return@mapIndexedNotNull null
-                        val type = if (readingType == "fasting") "Fasting" else "Post-meal"
-                        val timestamp = (doc.values["measuredAt"] as? com.google.firebase.Timestamp)
-                            ?: (doc.values["createdAt"] as? com.google.firebase.Timestamp)
-                        val time = timestamp?.toDate()?.let {
-                            java.text.SimpleDateFormat("MMM d, h:mm a", java.util.Locale.getDefault()).format(it)
-                        } ?: "Synced"
-                        val status = if (value > 130) "High" else if (value < 80) "Low" else "Normal"
-                        SugarLog(index + 1, value, type, time, status, measuredAtMillis = timestamp?.toDate()?.time ?: System.currentTimeMillis())
-                    }
-                    if (synced.isNotEmpty()) {
-                        state.sugarLogs.clear()
-                        state.sugarLogs.addAll(synced)
-                        state.fastingSugarValue = synced.firstOrNull { it.type == "Fasting" }?.value ?: state.fastingSugarValue
-                    }
-                }
-                is com.nirogbhumi.app.data.CloudResult.Failure -> Unit
-            }
-        }
-        onDispose { subscription.cancel() }
-    }
+    val health = state.collectHealth()
+    val now = System.currentTimeMillis()
+    var editing by remember { mutableStateOf<GlucoseEntry?>(null) }
+    val readings = health.glucose
 
     Column(
         modifier = Modifier
@@ -135,7 +119,8 @@ fun BloodSugarDetailScreen(state: NirogState) {
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Summary Card - computed from real logged readings, not a fixed value
+            StaleDataNotice(health)
+            // Summary Card - computed from the member's real readings over the last 30 days
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -144,102 +129,66 @@ fun BloodSugarDetailScreen(state: NirogState) {
                 shape = RoundedCornerShape(24.dp)
             ) {
                 Column(modifier = Modifier.padding(20.dp)) {
-                    Text("CURRENT AVERAGE", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF737972))
+                    Text("AVERAGE · LAST 30 DAYS", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF737972))
                     Spacer(modifier = Modifier.height(4.dp))
-                    if (state.sugarLogs.isEmpty()) {
-                        Text("No readings logged yet", fontSize = 16.sp, color = Color(0xFF737972), modifier = Modifier.padding(top = 8.dp))
-                    } else {
-                        val avg = state.sugarLogs.map { it.value }.average().toInt()
-                        val normalPercent = (state.sugarLogs.count { it.status == "Normal" } * 100 / state.sugarLogs.size)
-                        Row(verticalAlignment = Alignment.Bottom) {
-                            Text("$avg", fontSize = 42.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("mg/dL", fontSize = 14.sp, color = Color(0xFF737972), modifier = Modifier.padding(bottom = 6.dp))
+                    val avg = health.month.glucoseAverage
+                    when {
+                        health.isLoading && readings.isEmpty() -> Text("Loading your readings…", fontSize = 16.sp, color = Color(0xFF737972), modifier = Modifier.padding(top = 8.dp))
+                        health.errors[HealthMetric.GLUCOSE] != null && readings.isEmpty() -> Column {
+                            Text(health.errors[HealthMetric.GLUCOSE] ?: "", fontSize = 15.sp, color = Color(0xFF737972), modifier = Modifier.padding(top = 8.dp))
+                            TextButton(onClick = { state.health.retry() }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Try again", color = Color(0xFF314936), fontWeight = FontWeight.Bold) }
                         }
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Text(
-                            "Your readings were within a typical range $normalPercent% of the time across your last ${state.sugarLogs.size} logs.",
-                            fontSize = 13.sp,
-                            color = Color(0xFF434842),
-                            lineHeight = 18.sp
-                        )
+                        avg == null -> Text("No readings in the last 30 days", fontSize = 16.sp, color = Color(0xFF737972), modifier = Modifier.padding(top = 8.dp))
+                        else -> {
+                            Row(verticalAlignment = Alignment.Bottom) {
+                                Text("${avg.toInt()}", fontSize = 42.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("mg/dL", fontSize = 14.sp, color = Color(0xFF737972), modifier = Modifier.padding(bottom = 6.dp))
+                            }
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                "Your readings were within a typical range ${health.month.glucoseInRangePercent ?: 0}% of the time across ${health.month.glucoseCount} readings.",
+                                fontSize = 13.sp,
+                                color = Color(0xFF434842),
+                                lineHeight = 18.sp
+                            )
+                        }
+                    }
+                    health.latestHbA1c?.let { a1c ->
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text("Latest HbA1c: ${HealthLabels.glucoseValue(a1c)} · ${HealthLabels.day(a1c.measuredAtMillis, now, health.zone)}", fontSize = 12.sp, color = Color(0xFF737972))
                     }
                 }
             }
 
-            // Trend chart built from real logged readings - shared 7/30/90-day
-            // range chart with BP/Sleep Overview (OverviewScreens.kt).
-            Text("Recent Trend", fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
-            RangeTrendChart(state.sugarLogs.map { it.measuredAtMillis to it.value.toFloat() }, "sugar")
+            if (readings.isEmpty() && !health.isLoading) {
+                EmptyStateCard(Icons.Filled.WaterDrop, "No blood sugar readings yet. Tap + to add one.")
+            }
+            if (readings.isNotEmpty()) {
+                MetricTrendCard(health, TrendMetric.GLUCOSE, title = "Recent trend")
 
-            // High/Normal History Rows List
-            Text("Logged History", fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+                // High/Normal History Rows List
+                Text("Logged History", fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
 
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                state.sugarLogs.forEach { log ->
-                    SugarLogHistoryRow(log)
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    readings.take(30).forEach { e ->
+                        HealthHistoryRow(
+                            title = HealthLabels.glucoseValue(e),
+                            subtitle = "${HealthLabels.glucoseKind(e.kind)} · ${HealthLabels.dayAndTime(e.measuredAtMillis, now, health.zone)}",
+                            entry = e, nowMillis = now, onEdit = { editing = e },
+                            badge = if (e.isHbA1c) null else HealthLabels.glucoseStatus(e.status()),
+                        )
+                    }
+                    EditWindowFootnote()
                 }
             }
 
             Spacer(modifier = Modifier.height(32.dp))
         }
     }
-}
-
-@Composable
-fun SugarLogHistoryRow(log: SugarLog) {
-    val isHigh = log.status == "High"
-    val isLow = log.status == "Low"
-    val statusColor = if (isHigh) Color(0xFFBA1A1A) else if (isLow) Color(0xFF43242A) else Color(0xFF426820)
-    val statusContainerColor = if (isHigh) Color(0xFFFFDAD6) else if (isLow) Color(0xFFFFD9DE) else Color(0xFFE5F1E2)
-
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.3f), shape = RoundedCornerShape(16.dp)),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        shape = RoundedCornerShape(16.dp)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                // Circular rating outline
-                Box(
-                    modifier = Modifier
-                        .size(44.dp)
-                        .background(statusContainerColor, CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        "${log.value}",
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF1B3221),
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 16.sp
-                    )
-                }
-
-                Spacer(modifier = Modifier.width(16.dp))
-
-                Column {
-                    Text(log.type, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221), fontSize = 15.sp)
-                    Text(log.time, fontSize = 12.sp, color = Color(0xFF737972))
-                }
-            }
-
-            // Flag badge
-            Box(
-                modifier = Modifier
-                    .background(statusColor.copy(alpha = 0.12f), RoundedCornerShape(6.dp))
-                    .padding(horizontal = 8.dp, vertical = 4.dp)
-            ) {
-                Text(log.status, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = statusColor)
-            }
+    editing?.let { e ->
+        GlucoseEditDialog(e, { editing = null }) { edits, report ->
+            state.health.correct("glucoseReadings", e.id, edits) { r -> report((r as? CloudResult.Failure)?.message) }
         }
     }
 }
@@ -314,11 +263,11 @@ fun BookConsultationStepper(state: NirogState) {
                 1 -> {
                     Text("Select consultation type", fontSize = 18.sp, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
 
-                    ConsultTypeOption("Metabolic Consultation", "Direct analysis of fasting / post-meal logs with metabolic specialist.", "30 min video • ₹499", state.selectedOnMedication == "Yes") {
+                    ConsultTypeOption("Blood sugar consultation", "We go through your sugar readings together with a specialist.", "30 min video • ₹499", state.selectedOnMedication == "Yes") {
                         state.selectedOnMedication = "Yes"
                         state.selectedConsultType = "diabetes_lifestyle"
                     }
-                    ConsultTypeOption("Ayurvedic Doctor Consult", "Personalized assessment of Prakriti element cycles and balancing tea protocols.", "45 min video • ₹650", state.selectedOnMedication == "No") {
+                    ConsultTypeOption("Ayurvedic Doctor Consult", "A personal look at your body type and daily routine, with simple Ayurvedic suggestions.", "45 min video • ₹650", state.selectedOnMedication == "No") {
                         state.selectedOnMedication = "No"
                         state.selectedConsultType = "naturopathy"
                     }
@@ -536,9 +485,11 @@ private val DAILY_PROTOCOLS = listOf(
 
 @Composable
 fun ActiveJourneyScreen(state: NirogState) {
-    var loggedReadingToday by remember { mutableStateOf(false) }
-    var walkLoggedToday by remember { mutableStateOf(false) }
-    var sleepLoggedToday by remember { mutableStateOf(false) }
+    val health = state.collectHealth()
+    // Same definitions as every other screen (HealthUiState.today): no separate per-screen listeners.
+    val loggedReadingToday = health.today.hasSugar
+    val walkLoggedToday = health.today.activityMinutesToday > 0
+    val sleepLoggedToday = health.today.hasSleep
     // Persisted like the "daily_post_dinner_walk" checklist item (a
     // checklistLogs doc keyed by day) instead of state.completedProtocols,
     // which lived only in memory and silently reset on every app restart
@@ -553,15 +504,6 @@ fun ActiveJourneyScreen(state: NirogState) {
             val ts = (doc.values["measuredAt"] as? Timestamp) ?: (doc.values["createdAt"] as? Timestamp)
             return ts != null && com.nirogbhumi.app.ui.localDayKey(ts.toDate().time) == todayKey
         }
-        val sugarSub = state.repository.listenUserCollection("glucoseReadings", 7, orderByField = "measuredAt", descending = true) { result ->
-            if (result is CloudResult.Success) loggedReadingToday = result.value.any(::loggedToday)
-        }
-        val walkSub = state.repository.listenUserCollection("walkLogs", 5, orderByField = "createdAt", descending = true) { result ->
-            if (result is CloudResult.Success) walkLoggedToday = result.value.any(::loggedToday)
-        }
-        val sleepSub = state.repository.listenUserCollection("sleepLogs", 5, orderByField = "createdAt", descending = true) { result ->
-            if (result is CloudResult.Success) sleepLoggedToday = result.value.any(::loggedToday)
-        }
         val checklistSub = state.repository.listenUserCollection("checklistLogs", 10, orderByField = "createdAt", descending = true) { result ->
             if (result is CloudResult.Success) {
                 movementDoneToday = result.value.any { doc ->
@@ -569,12 +511,12 @@ fun ActiveJourneyScreen(state: NirogState) {
                 }
             }
         }
-        onDispose { sugarSub.cancel(); walkSub.cancel(); sleepSub.cancel(); checklistSub.cancel() }
+        onDispose { checklistSub.cancel() }
     }
 
     fun isDone(protocol: DailyProtocol): Boolean = when (protocol.id) {
         "fasting_reading" -> loggedReadingToday
-        "checkin" -> state.checkedInToday
+        "checkin" -> health.today.checkedIn
         "walk" -> walkLoggedToday
         "sleep" -> sleepLoggedToday
         else -> movementDoneToday
@@ -661,7 +603,7 @@ fun ActiveJourneyScreen(state: NirogState) {
                 }
             }
 
-            Text("Daily Protocols", fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+            Text("Today's checklist", fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
 
             // Protocol checked card checklist - auto-completable items reflect
             // real logged data (tapping while incomplete deep-links to the
@@ -720,24 +662,10 @@ fun ActiveJourneyScreen(state: NirogState) {
 // Screen 5: Detailed Insight sleeping-correlation dashboard
 @Composable
 fun InsightDetailScreen(state: NirogState) {
-    var sleepLogs by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>>(emptyList()) }
-    var glucoseReadings by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>>(emptyList()) }
-    var medicationLogs by remember { mutableStateOf<List<com.nirogbhumi.app.data.CloudDocument>>(emptyList()) }
-    DisposableEffect(state.repository.userId) {
-        val sleepSub = state.repository.listenUserCollection("sleepLogs", limit = 60, orderByField = "createdAt", descending = true) { result ->
-            if (result is CloudResult.Success) sleepLogs = result.value
-        }
-        val glucoseSub = state.repository.listenUserCollection("glucoseReadings", limit = 60, orderByField = "measuredAt", descending = true) { result ->
-            if (result is CloudResult.Success) glucoseReadings = result.value
-        }
-        val medicationSub = state.repository.listenUserCollection("medicationLogs", limit = 60, orderByField = "measuredAt", descending = true) { result ->
-            if (result is CloudResult.Success) medicationLogs = result.value
-        }
-        onDispose { sleepSub.cancel(); glucoseSub.cancel(); medicationSub.cancel() }
-    }
-    val insight = remember(sleepLogs, glucoseReadings) { computeSleepGlucoseInsight(sleepLogs, glucoseReadings) }
-    val medicationInsight = remember(medicationLogs, glucoseReadings) { computeMedicationGlucoseInsight(medicationLogs, glucoseReadings) }
-    val mealInsight = remember(glucoseReadings) { computeMealTimingInsight(glucoseReadings) }
+    val health = state.collectHealth()
+    val insight = remember(health) { com.nirogbhumi.app.health.domain.Insights.sleepGlucose(health.sleep, health.glucose, health.zone) }
+    val medicationInsight = remember(health) { com.nirogbhumi.app.health.domain.Insights.medicationGlucose(health.medication, health.glucose, health.zone) }
+    val mealInsight = remember(health) { com.nirogbhumi.app.health.domain.Insights.mealTiming(health.glucose, health.zone) }
 
     Column(
         modifier = Modifier
@@ -798,7 +726,7 @@ fun InsightDetailScreen(state: NirogState) {
                         )
                     }
                 }
-            } else if (state.sugarLogs.size < 5) {
+            } else if (health.sugarReadings.size < 5) {
                 Card(
                     modifier = Modifier.fillMaxWidth().border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.35f), shape = RoundedCornerShape(20.dp)),
                     colors = CardDefaults.cardColors(containerColor = Color.White),
@@ -808,7 +736,7 @@ fun InsightDetailScreen(state: NirogState) {
                         Icon(Icons.Filled.Insights, contentDescription = null, tint = Color(0xFF9CB79F), modifier = Modifier.size(28.dp))
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            "Not enough data yet for your personal comparison (${state.sugarLogs.size}/5 sugar readings logged).",
+                            "Not enough data yet for your personal comparison (${health.sugarReadings.size}/5 sugar readings logged).",
                             fontSize = 13.sp,
                             color = Color(0xFF737972),
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -905,20 +833,14 @@ fun InsightDetailScreen(state: NirogState) {
             // consistently the last 7 days have actually been logged, using
             // the same sleepLogs/glucoseReadings already fetched above.
             Text("This week's logging", fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
-            val nowMillis = remember { System.currentTimeMillis() }
-            val weekAgoDayKey = remember(nowMillis) { com.nirogbhumi.app.ui.localDayKey(nowMillis) - 6 }
-            val sleepDaysThisWeek = remember(sleepLogs, nowMillis) {
-                sleepLogs.mapNotNull { log ->
-                    val ts = (log.values["measuredAt"] as? Timestamp) ?: (log.values["createdAt"] as? Timestamp)
-                    ts?.toDate()?.time?.let { com.nirogbhumi.app.ui.localDayKey(it) }
-                }.filter { it >= weekAgoDayKey }.toSet().size
+            val readingDaysThisWeek = remember(health) {
+                val first = health.today.date.minusDays(6)
+                health.sugarReadings
+                    .map { com.nirogbhumi.app.health.domain.HealthStateBuilder.dateOf(it.measuredAtMillis, health.zone) }
+                    .filter { !it.isBefore(first) && !it.isAfter(health.today.date) }
+                    .toSet().size
             }
-            val readingDaysThisWeek = remember(glucoseReadings, nowMillis) {
-                glucoseReadings.mapNotNull { doc ->
-                    val ts = (doc.values["measuredAt"] as? Timestamp) ?: (doc.values["createdAt"] as? Timestamp)
-                    ts?.toDate()?.time?.let { com.nirogbhumi.app.ui.localDayKey(it) }
-                }.filter { it >= weekAgoDayKey }.toSet().size
-            }
+            val sleepDaysThisWeek = health.week.sleepNights
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Card(
                     modifier = Modifier.weight(1f).border(width = 0.5.dp, color = Color(0xFFC3C8C0).copy(alpha = 0.3f), shape = RoundedCornerShape(18.dp)),
@@ -948,11 +870,10 @@ fun InsightDetailScreen(state: NirogState) {
             // logged since starting, not a manually-incremented counter.
             Text("Resolve the correlation pattern", fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
 
-            val nightsSinceStart = remember(sleepLogs, state.experimentStartedAtMillis) {
-                if (state.experimentStartedAtMillis <= 0) 0 else sleepLogs.count { log ->
-                    val ts = (log.values["measuredAt"] as? Timestamp) ?: (log.values["createdAt"] as? Timestamp)
-                    val hours = (log.values["duration"] as? Number)?.toDouble() ?: 0.0
-                    ts != null && ts.toDate().time >= state.experimentStartedAtMillis && hours >= 7.0
+            val nightsSinceStart = remember(health, state.experimentStartedAtMillis) {
+                // A night counts when it ended after the experiment began and lasted 7 hours or more.
+                if (state.experimentStartedAtMillis <= 0) 0 else health.sleep.count {
+                    !it.isSuspect && it.measuredAtMillis >= state.experimentStartedAtMillis && it.durationMinutes >= 7 * 60
                 }
             }
             val experimentDaysElapsed = remember(state.experimentStartedAtMillis) {
@@ -1638,11 +1559,12 @@ fun ProfileEditScreen(state: NirogState) {
     var editCity by remember { mutableStateOf(state.profileCity) }
     var editLanguage by remember { mutableStateOf(state.profileLanguage) }
 
-    var editDiabetes by remember { mutableStateOf(state.selectedDiabetesStatus) }
+    var editDiabetes by remember { mutableStateOf(state.diabetesType) }
+    var editDiabetesOther by remember { mutableStateOf(state.diabetesTypeOther) }
     var editBp by remember { mutableStateOf(state.selectedBpStatus) }
     var editMedication by remember { mutableStateOf(state.selectedOnMedication) }
     var editDoctor by remember { mutableStateOf(state.selectedDoctorSupervision) }
-    var editGoal by remember { mutableStateOf(state.selectedGoal) }
+    val editGoals = remember { mutableStateListOf<com.nirogbhumi.app.health.domain.HealthGoal>().apply { addAll(state.selectedGoals) } }
 
     Column(
         modifier = Modifier
@@ -1796,36 +1718,20 @@ fun ProfileEditScreen(state: NirogState) {
             ) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     Text(
-                        text = "Metabolic Profile",
+                        text = "Health profile",
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFF1B3221)
                     )
 
-                    // Diabetes Selection
-                    Column {
-                        Text("Diabetes Status", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            listOf("None", "Prediabetes", "Type 2", "Type 1", "Not sure").forEach { choice ->
-                                val isSelected = editDiabetes == choice || (choice == "Type 2" && editDiabetes == "Type 2 diabetes")
-                                Button(
-                                    onClick = { editDiabetes = choice },
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = if (isSelected) Color(0xFF314936) else Color(0xFFF1EDE6),
-                                        contentColor = if (isSelected) Color.White else Color(0xFF1B3221)
-                                    ),
-                                    shape = RoundedCornerShape(8.dp),
-                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
-                                ) {
-                                    Text(choice, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                }
-                            }
-                        }
-                    }
+                    // Diabetes type (fixed answers; "Other" opens a short text box)
+                    com.nirogbhumi.app.ui.components.DiabetesTypePicker(
+                        selected = editDiabetes,
+                        otherText = editDiabetesOther,
+                        onSelect = { editDiabetes = it },
+                        onOtherText = { editDiabetesOther = it },
+                        labelColor = Color(0xFF1B3221),
+                    )
 
                     // BP Selection
                     Column {
@@ -1905,17 +1811,19 @@ fun ProfileEditScreen(state: NirogState) {
                         }
                     }
 
-                    // Selected Goal
+                    // Goals (pick as many as you like)
                     Column {
-                        Text("Your Primary Goal", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+                        Text("What would you like help with?", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
                         Spacer(modifier = Modifier.height(6.dp))
-                        listOf("Manage blood sugar levels", "Control sugar and reverse naturally", "Improve overall metabolic health", "Track and manage parent's diabetes").forEach { choice ->
-                            val isSelected = editGoal == choice
+                        com.nirogbhumi.app.health.domain.HealthGoal.entries.forEach { goal ->
+                            val isSelected = goal in editGoals
                             Card(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(vertical = 4.dp)
-                                    .clickable { editGoal = choice }
+                                    .heightIn(min = 48.dp)
+                                    .clickable { if (isSelected) editGoals.remove(goal) else editGoals.add(goal) }
+                                    .semantics { role = Role.Checkbox; selected = isSelected }
                                     .border(
                                         width = if (isSelected) 1.5.dp else 0.5.dp,
                                         color = if (isSelected) Color(0xFF314936) else Color(0xFFD8D0C0),
@@ -1925,7 +1833,7 @@ fun ProfileEditScreen(state: NirogState) {
                                 shape = RoundedCornerShape(8.dp)
                             ) {
                                 Text(
-                                    text = choice,
+                                    text = goal.label,
                                     fontSize = 13.sp,
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                     color = Color(0xFF1B3221),
@@ -1949,20 +1857,21 @@ fun ProfileEditScreen(state: NirogState) {
                     state.profileWeight = editWeight
                     state.profileCity = editCity
                     state.profileLanguage = editLanguage
-                    state.selectedDiabetesStatus = editDiabetes
+                    state.diabetesType = editDiabetes
+                    state.diabetesTypeOther = editDiabetesOther
                     state.selectedBpStatus = editBp
                     state.selectedOnMedication = editMedication
                     state.selectedDoctorSupervision = editDoctor
-                    state.selectedGoal = editGoal
-                    state.repository.saveProfile(mapOf(
+                    state.selectedGoals.clear(); state.selectedGoals.addAll(editGoals)
+                    state.repository.saveProfile((editDiabetes?.let { com.nirogbhumi.app.health.domain.DiabetesTypes.toStored(com.nirogbhumi.app.health.domain.DiabetesAnswer(it, editDiabetesOther)) }.orEmpty()) + mapOf(
                         "fullName" to editName, "age" to editAge.toIntOrNull(), "gender" to editGender,
                         "heightCm" to editHeight.toDoubleOrNull(), "weightKg" to editWeight.toDoubleOrNull(),
                         "city" to editCity, "preferredLanguage" to editLanguage,
-                        "diabetesStatus" to editDiabetes, "bpStatus" to editBp,
+                        "bpStatus" to editBp,
                         "onMedication" to editMedication, "doctorSupervision" to editDoctor,
-                        "primaryGoal" to editGoal
+                        "goals" to com.nirogbhumi.app.health.domain.HealthGoals.toStored(editGoals)
                     )) { result -> state.cloudMessage = when (result) {
-                        is com.nirogbhumi.app.data.CloudResult.Success -> "Profile synced securely"
+                        is com.nirogbhumi.app.data.CloudResult.Success -> "Profile saved"
                         is com.nirogbhumi.app.data.CloudResult.Failure -> result.message
                     } }
                     state.currentScreen = "dashboard"
@@ -2149,7 +2058,8 @@ fun FamilyProfilesScreen(state: NirogState) {
         var relationship by remember { mutableStateOf("") }
         var age by remember { mutableStateOf("") }
         var city by remember { mutableStateOf("") }
-        var diabetesStatus by remember { mutableStateOf("Not sure") }
+        var familyDiabetes by remember { mutableStateOf(com.nirogbhumi.app.health.domain.DiabetesType.NOT_SURE) }
+        var familyDiabetesOther by remember { mutableStateOf("") }
         var consented by remember { mutableStateOf(false) }
         var saving by remember { mutableStateOf(false) }
         AlertDialog(
@@ -2163,13 +2073,13 @@ fun FamilyProfilesScreen(state: NirogState) {
                         OutlinedTextField(age, { age = it.filter(Char::isDigit) }, label = { Text("Age") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f))
                         OutlinedTextField(city, { city = it }, label = { Text("City") }, modifier = Modifier.weight(1f))
                     }
-                    Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf("No diabetes", "Prediabetes", "Type 2 diabetes", "Type 1 diabetes", "Not sure").forEach { t ->
-                            Surface(shape = RoundedCornerShape(12.dp), color = if (diabetesStatus == t) Color(0xFF314936) else Color(0xFFEBF7E8), modifier = Modifier.clickable { diabetesStatus = t }) {
-                                Text(t, color = if (diabetesStatus == t) Color.White else Color(0xFF1B3221), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
-                            }
-                        }
-                    }
+                    com.nirogbhumi.app.ui.components.DiabetesTypePicker(
+                        selected = familyDiabetes,
+                        otherText = familyDiabetesOther,
+                        onSelect = { familyDiabetes = it },
+                        onOtherText = { familyDiabetesOther = it },
+                        labelColor = Color(0xFF1B3221),
+                    )
                     // DPDP Act 2023 s.9: a child's (under-18) data may be processed
                     // only with verifiable parental/guardian consent, and never for
                     // tracking or targeted advertising. When the entered age is under
@@ -2203,7 +2113,9 @@ fun FamilyProfilesScreen(state: NirogState) {
                             "relationship" to relationship.trim().ifBlank { null },
                             "age" to age.toIntOrNull(),
                             "city" to city.trim().ifBlank { null },
-                            "selection" to diabetesStatus,
+                            "selection" to com.nirogbhumi.app.health.domain.DiabetesAnswer(familyDiabetes, familyDiabetesOther).describe(),
+                            "diabetesType" to familyDiabetes.wire,
+                            "diabetesTypeOther" to if (familyDiabetes == com.nirogbhumi.app.health.domain.DiabetesType.OTHER) com.nirogbhumi.app.health.domain.DiabetesTypes.sanitizeOther(familyDiabetesOther) else null,
                             "isMinor" to isMinor,
                             "guardianConsent" to true,
                             "guardianConsentAt" to com.google.firebase.firestore.FieldValue.serverTimestamp()
@@ -2478,186 +2390,6 @@ fun relativeTimeLabel(date: java.util.Date): String {
     }
 }
 
-// Data export & account deletion - both real, and both go through Cloud
-// Functions (requestDataExport / requestAccountDeletion), which rate-limit and
-// queue the work. Deletion is scheduled for 7 days out so an accidental tap or
-// a borrowed phone can't destroy an account instantly, and can be cancelled in
-// that window; after that it runs automatically. Everything that identifies the
-// member is erased. Health readings are erased too unless the member opted in
-// to anonymized research in Privacy & consent, in which case they stay with
-// every link back to the person removed. See
-// firebase/functions/src/accountDeletion.ts for exactly what happens to each
-// collection.
-@Composable
-fun DataControlsScreen(state: NirogState) {
-    var exporting by remember { mutableStateOf(false) }
-    var exportRequested by remember { mutableStateOf(false) }
-    var confirmingDelete by remember { mutableStateOf(false) }
-    var busy by remember { mutableStateOf(false) }
-    var showDeletionExplainer by remember { mutableStateOf(false) }
-    // null = none pending (or not loaded yet); otherwise the epoch millis the deletion will run at.
-    var scheduledForMillis by remember { mutableStateOf<Long?>(null) }
-    var statusLoaded by remember { mutableStateOf(false) }
-
-    LaunchedEffect(Unit) {
-        state.repository.getPendingAccountDeletion { result ->
-            statusLoaded = true
-            if (result is CloudResult.Success) scheduledForMillis = result.value
-        }
-    }
-    val dateLabel = scheduledForMillis?.let { java.text.SimpleDateFormat("d MMMM yyyy", java.util.Locale.getDefault()).format(java.util.Date(it)) }
-
-    Column(modifier = Modifier.fillMaxSize().background(Color(0xFFF8F6EF)).verticalScroll(rememberScrollState())) {
-        DetailScreenHeader("Export or delete my data", onBack = { state.currentScreen = "profile" })
-        Column(modifier = Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                shape = RoundedCornerShape(20.dp),
-                border = BorderStroke(0.5.dp, Color(0xFFD8D0C0))
-            ) {
-                Column(modifier = Modifier.padding(20.dp)) {
-                    Icon(Icons.Filled.DownloadForOffline, contentDescription = null, tint = Color(0xFF1B3221))
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text("Export your data", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF1B3221))
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        "A copy of everything you've logged - readings, reports, chats with your coach, program activity - as a file you can keep or share with a doctor.",
-                        fontSize = 13.sp, color = Color(0xFF697169), lineHeight = 18.sp
-                    )
-                    Spacer(modifier = Modifier.height(14.dp))
-                    if (exportRequested) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = Color(0xFF3F7D58), modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Requested - you'll get a notification when it's ready.", fontSize = 13.sp, color = Color(0xFF3F7D58), fontWeight = FontWeight.SemiBold)
-                        }
-                    } else {
-                        Button(
-                            enabled = !exporting,
-                            onClick = {
-                                exporting = true
-                                state.repository.requestDataExport { result ->
-                                    exporting = false
-                                    if (result is CloudResult.Success) exportRequested = true
-                                    else state.cloudMessage = (result as CloudResult.Failure).message
-                                }
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF314936)),
-                            shape = RoundedCornerShape(20.dp)
-                        ) { Text(if (exporting) "Requesting..." else "Request my data", color = Color.White, fontWeight = FontWeight.Bold) }
-                    }
-                }
-            }
-
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFFF5DFD6)),
-                shape = RoundedCornerShape(20.dp)
-            ) {
-                Column(modifier = Modifier.padding(20.dp)) {
-                    Icon(Icons.Filled.DeleteForever, contentDescription = null, tint = Color(0xFFB4472F))
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text("Delete my account", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF7B332E))
-                    Spacer(modifier = Modifier.height(4.dp))
-                    if (dateLabel != null) {
-                        Text(
-                            "Your account is scheduled to be permanently deleted on $dateLabel. Until then everything is still here and you can keep using the app.",
-                            fontSize = 13.sp, color = Color(0xFF7B332E), lineHeight = 18.sp, fontWeight = FontWeight.SemiBold
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Button(
-                            enabled = !busy,
-                            onClick = {
-                                busy = true
-                                state.repository.cancelAccountDeletion { result ->
-                                    busy = false
-                                    if (result is CloudResult.Success) { scheduledForMillis = null; state.cloudMessage = "Deletion cancelled - your account stays exactly as it was." }
-                                    else state.cloudMessage = (result as CloudResult.Failure).message
-                                }
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF314936)),
-                            shape = RoundedCornerShape(20.dp)
-                        ) { Text(if (busy) "Cancelling..." else "Keep my account - cancel deletion", color = Color.White, fontWeight = FontWeight.Bold) }
-                    } else {
-                        Text(
-                            "Permanently removes your account, name, contact details, reports, chats and login. You have 7 days to change your mind. This can't be undone afterwards.",
-                            fontSize = 13.sp, color = Color(0xFF7B332E), lineHeight = 18.sp
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        TextButton(
-                            onClick = { showDeletionExplainer = true },
-                            contentPadding = PaddingValues(0.dp),
-                            modifier = Modifier.height(28.dp)
-                        ) {
-                            Text("What exactly gets deleted?", fontSize = 12.5.sp, fontWeight = FontWeight.Bold, color = Color(0xFF7B332E), textDecoration = TextDecoration.Underline)
-                        }
-                        Spacer(modifier = Modifier.height(10.dp))
-                        OutlinedButton(
-                            enabled = !busy && statusLoaded,
-                            onClick = { confirmingDelete = true },
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFB4472F))
-                        ) { Text("Delete my account") }
-                    }
-                }
-            }
-        }
-        Spacer(modifier = Modifier.height(32.dp))
-    }
-
-    if (confirmingDelete) {
-        AlertDialog(
-            onDismissRequest = { if (!busy) confirmingDelete = false },
-            title = { Text("Delete your account?", fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221)) },
-            text = { Text("In 7 days your account, name, contact details, uploaded reports, chats and login will be permanently deleted. You can cancel from this screen any time before then.", fontSize = 13.sp, color = Color(0xFF434842)) },
-            confirmButton = {
-                Button(
-                    enabled = !busy,
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB4472F)),
-                    onClick = {
-                        busy = true
-                        state.repository.requestAccountDeletion { result ->
-                            busy = false
-                            confirmingDelete = false
-                            if (result is CloudResult.Success) scheduledForMillis = result.value
-                            else state.cloudMessage = (result as CloudResult.Failure).message
-                        }
-                    }
-                ) { Text(if (busy) "Scheduling..." else "Delete my account", color = Color.White) }
-            },
-            dismissButton = { TextButton(enabled = !busy, onClick = { confirmingDelete = false }) { Text("Keep my account", color = Color(0xFF737972)) } }
-        )
-    }
-
-    if (showDeletionExplainer) {
-        AlertDialog(
-            onDismissRequest = { showDeletionExplainer = false },
-            title = { Text("What gets deleted", fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221)) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.verticalScroll(rememberScrollState())) {
-                    Text(
-                        "Always deleted: your name, email, phone number, profile, family profiles, uploaded reports and photos, consultations, program activity, coach messages, chat messages and voice notes, support requests, notifications - and your login.",
-                        fontSize = 13.sp, color = Color(0xFF434842), lineHeight = 18.sp
-                    )
-                    Text(
-                        "Your health readings (sugar, blood pressure, sleep, walks, weight, medications, check-ins) are deleted too - unless you've switched on \"Anonymized research\" in Privacy & consent. In that case they stay on file with every link back to you removed, and are only ever used in aggregate.",
-                        fontSize = 13.sp, color = Color(0xFF434842), lineHeight = 18.sp
-                    )
-                    Text(
-                        "Kept only as the law requires: payment and invoice records (with your identity removed where possible) and security logs.",
-                        fontSize = 13.sp, color = Color(0xFF434842), lineHeight = 18.sp
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { showDeletionExplainer = false }) {
-                    Text("Got it", color = Color(0xFF314936), fontWeight = FontWeight.Bold)
-                }
-            }
-        )
-    }
-}
-
 // Full privacy & consent center - what's agreed to, what's optional and
 // actually toggleable here (Expert review persists through the same
 // saveProfile("consent"...) shape the onboarding consent step writes),
@@ -2680,7 +2412,10 @@ fun PrivacyConsentScreen(state: NirogState) {
     fun toggleOptionalConsent(key: String, next: Boolean, setBusy: (Boolean) -> Unit, current: Boolean, apply: (Boolean) -> Unit) {
         setBusy(true)
         apply(next)
-        state.repository.saveProfile(mapOf("consent" to mapOf(key to next, "version" to CONSENT_VERSION))) { result ->
+        // "version" is deliberately NOT written here: it records which notice the member accepted for the required
+        // consents, and flipping an optional switch must not mark a newer notice as accepted. The receipt below
+        // carries the version in force for this one change.
+        state.repository.saveProfile(mapOf("consent" to mapOf(key to next))) { result ->
             setBusy(false)
             if (result is com.nirogbhumi.app.data.CloudResult.Failure) {
                 apply(current)
@@ -2923,8 +2658,9 @@ fun SupportScreen(state: NirogState) {
                     onClick = {
                         sending = true
                         state.repository.addHealthLog("supportRequests", mapOf(
-                            "subject" to subject.trim(),
-                            "message" to message.trim(),
+                            "subject" to subject.trim().take(150),
+                            "message" to message.trim().take(4000),
+                            "appVersion" to com.nirogbhumi.app.BuildConfig.VERSION_NAME,
                             "status" to "open"
                         )) { result ->
                             sending = false
@@ -4559,102 +4295,4 @@ fun TimePickerAlertDialog(initial: String, onDismiss: () -> Unit, onConfirm: (St
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel", color = Color(0xFF737972)) } }
     )
-}
-
-private fun openWebUrl(context: android.content.Context, url: String) {
-    if (url.isBlank()) return
-    runCatching {
-        context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)))
-    }
-}
-
-// Articles - replaces the generic Firestore-backed catalog list with real posts
-// pulled live from nirogbhumi.com's public WordPress API. Reading the rest of an
-// article opens the real page on the site rather than re-rendering raw post HTML
-// natively, since that HTML can contain arbitrary embeds that don't translate
-// reliably to Compose.
-@Composable
-fun ArticlesScreen(state: NirogState) {
-    val context = LocalContext.current
-    var result by remember { mutableStateOf<Result<List<com.nirogbhumi.app.content.NirogBhumiArticle>>?>(null) }
-    LaunchedEffect(Unit) {
-        result = com.nirogbhumi.app.content.NirogBhumiContentApi.fetchArticles()
-    }
-
-    Column(modifier = Modifier.fillMaxSize().background(Color(0xFFF8F6EF)).verticalScroll(rememberScrollState())) {
-        DetailScreenHeader("Learn", onBack = { state.currentScreen = "dashboard" })
-        Text(
-            "The latest from nirogbhumi.com.", fontSize = 13.sp, color = Color(0xFF697169),
-            modifier = Modifier.padding(horizontal = 20.dp)
-        )
-        Spacer(modifier = Modifier.height(12.dp))
-
-        when (val current = result) {
-            null -> Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 24.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Color(0xFF9CB79F))
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Loading articles from nirogbhumi.com...", fontSize = 13.sp, color = Color(0xFF697169))
-            }
-            else -> current.fold(
-                onSuccess = { articles ->
-                    if (articles.isEmpty()) {
-                        EmptyStateCard(Icons.Filled.MenuBook, "No articles available from nirogbhumi.com right now.")
-                    } else {
-                        Column(modifier = Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            articles.forEach { article -> ArticleCard(article) { openWebUrl(context, article.link) } }
-                        }
-                    }
-                },
-                onFailure = {
-                    Column(modifier = Modifier.padding(horizontal = 20.dp)) {
-                        EmptyStateCard(Icons.Filled.CloudOff, "Couldn't reach nirogbhumi.com right now. Check your connection and try again.")
-                        OutlinedButton(
-                            onClick = { openWebUrl(context, "https://nirogbhumi.com") },
-                            modifier = Modifier.fillMaxWidth().height(48.dp),
-                            shape = RoundedCornerShape(24.dp)
-                        ) { Text("Open nirogbhumi.com instead") }
-                    }
-                }
-            )
-        }
-        Spacer(modifier = Modifier.height(32.dp))
-    }
-}
-
-@Composable
-private fun ArticleCard(article: com.nirogbhumi.app.content.NirogBhumiArticle, onClick: () -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        shape = RoundedCornerShape(20.dp),
-        border = BorderStroke(0.5.dp, Color(0xFFD8D0C0))
-    ) {
-        Column {
-            article.imageUrl?.let { url ->
-                coil.compose.AsyncImage(
-                    model = url, contentDescription = article.title,
-                    modifier = Modifier.fillMaxWidth().height(160.dp),
-                    contentScale = androidx.compose.ui.layout.ContentScale.Crop
-                )
-            }
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text(article.title, fontFamily = FontFamily.Serif, fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
-                if (article.excerpt.isNotBlank()) {
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(article.excerpt, fontSize = 13.sp, color = Color(0xFF434842), maxLines = 3, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-                }
-                Spacer(modifier = Modifier.height(10.dp))
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text(article.dateLabel, fontSize = 11.sp, color = Color(0xFF737972))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Read on nirogbhumi.com", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF314936))
-                        Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Color(0xFF314936), modifier = Modifier.size(14.dp))
-                    }
-                }
-            }
-        }
-    }
 }

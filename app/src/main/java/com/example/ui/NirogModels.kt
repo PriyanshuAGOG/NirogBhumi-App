@@ -6,6 +6,7 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.nirogbhumi.app.data.FirebaseHealthRepository
+import com.nirogbhumi.app.data.HealthDataStore
 import com.nirogbhumi.app.data.HealthRepository
 import com.nirogbhumi.app.data.CloudDocument
 
@@ -13,23 +14,9 @@ import com.nirogbhumi.app.data.CloudDocument
 // consent receipt and on users/{uid}.consent so we can prove what was agreed
 // to and, when this bumps after a material policy change, ask for fresh
 // consent (DPDP Act 2023). Bump this string when the notice materially changes.
-const val CONSENT_VERSION = "2025-07"
+const val CONSENT_VERSION = "2026-09"
 
 // Data Models
-data class SugarLog(
-    val id: Int,
-    val value: Int,
-    val type: String, // "Fasting" or "Post-meal"
-    val time: String,
-    val status: String, // "High", "Normal" or "Low"
-    // Defaults to "now" so the existing optimistic quick-log call sites (which
-    // log the instant a reading is entered) don't need updating - only the
-    // Firestore-sync call sites pass the reading's real measuredAt, which the
-    // 7/30/90-day trend chart needs for real day-bucketing instead of relying
-    // on the pre-formatted display string in `time`.
-    val measuredAtMillis: Long = System.currentTimeMillis()
-)
-
 data class ConsultationSlot(
     val date: String,
     val time: String
@@ -38,6 +25,8 @@ data class ConsultationSlot(
 // Shared Memory State Manager
 class NirogState {
     val repository: HealthRepository = FirebaseHealthRepository()
+    // The one source every screen reads health records from (see HealthDataStore).
+    val health = HealthDataStore(repository)
     var cloudMessage by mutableStateOf("")
     val formValues = mutableStateMapOf<String, String>()
     val routeSelections = mutableStateMapOf<String, String>()
@@ -103,14 +92,16 @@ class NirogState {
     var photoUrl by mutableStateOf("")
 
     // Health Details Setup
-    var selectedDiabetesStatus by mutableStateOf("None")
+    // Fixed answers (see health/domain/ProfileChoices.kt). Null until the member answers, so a skipped
+    // question is never reported as "No diabetes".
+    var diabetesType by mutableStateOf<com.nirogbhumi.app.health.domain.DiabetesType?>(null)
+    var diabetesTypeOther by mutableStateOf("")
     var selectedBpStatus by mutableStateOf("Normal")
     var selectedOnMedication by mutableStateOf("No")
     var selectedDoctorSupervision by mutableStateOf("Yes")
-    var selectedGoal by mutableStateOf("Manage blood sugar levels")
-    val selectedGoals = mutableStateListOf<String>().apply {
-        add("Control sugar")
-        add("Improve lifestyle")
+    val selectedGoals = mutableStateListOf<com.nirogbhumi.app.health.domain.HealthGoal>().apply {
+        add(com.nirogbhumi.app.health.domain.HealthGoal.CONTROL_SUGAR)
+        add(com.nirogbhumi.app.health.domain.HealthGoal.IMPROVE_LIFESTYLE)
     }
 
     // Program Code Storing
@@ -138,20 +129,16 @@ class NirogState {
     // manager, not just the platform-wide admin role.
     var coachProgramIds by mutableStateOf(setOf<String>())
 
+    // Which version of the privacy notice the member accepted for the required consents (null = never recorded).
+    // When it differs from CONSENT_VERSION the dashboard asks them to review and accept the update.
+    var consentVersionOnRecord by mutableStateOf<String?>(null)
+
+    // Epoch millis a scheduled account deletion will run at, or null when none is pending. Drives the banner shown everywhere.
+    var pendingDeletionMillis by mutableStateOf<Long?>(null)
+
     // Active Tab under Dashboard
     var activeTab by mutableStateOf("Today") // "Today", "Track", "Insights", "Care", "Learn"
 
-    // User Metrics State - starts at nil/zero until the user logs a real reading
-    var fastingSugarValue by mutableStateOf(0)
-    var sleepHours by mutableStateOf(0)
-    var sleepMinutes by mutableStateOf(0)
-    var stepsLogged by mutableStateOf(0)
-    var latestBpReading by mutableStateOf<String?>(null)
-
-    // True once ANY real reading (sugar/BP/weight) has been logged today - the one
-    // shared signal the Today/Track prompts and Rhythm agree on, so a completed
-    // check-in never keeps re-prompting with an empty-feeling "do this now" card.
-    var checkedInToday by mutableStateOf(false)
     // Lets a quick-log entry point (a chip, a tile's "+" ) jump the Daily Check-in
     // wizard straight to the relevant step instead of starting over at sugar.
     var checkinStartStep by mutableStateOf(0)
@@ -160,9 +147,6 @@ class NirogState {
     // screen that shows it, same one-shot pattern as the check-in streak
     // milestone in CheckInFlow.kt.
     var walkMilestoneCount by mutableStateOf<Long?>(null)
-
-    // Sugar History & Tracking State - populated only from real Firestore reads
-    val sugarLogs = mutableStateListOf<SugarLog>()
 
     // Log FASTING sugar bottom sheet state
     var isQuickLogFastingOpen by mutableStateOf(false)
@@ -200,6 +184,10 @@ class NirogState {
     var updateCheckBusy by mutableStateOf(false)
     var updateCheckError by mutableStateOf("")
 }
+
+/** The member's diabetes answer as one value, or null when the question has not been answered. */
+fun NirogState.diabetesAnswer(): com.nirogbhumi.app.health.domain.DiabetesAnswer? =
+    diabetesType?.let { com.nirogbhumi.app.health.domain.DiabetesAnswer(it, diabetesTypeOther.ifBlank { null }) }
 
 /** Mirrors the programStaff() Firestore rule (admin() || assignedCoach(programId)). */
 fun NirogState.canManageProgram(programId: String): Boolean =

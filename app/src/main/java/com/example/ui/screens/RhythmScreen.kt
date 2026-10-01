@@ -22,11 +22,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -35,15 +31,18 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
-import com.nirogbhumi.app.data.CloudResult
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import com.nirogbhumi.app.health.domain.HealthStateBuilder
+import com.nirogbhumi.app.ui.collectHealth
+import java.time.LocalDate
+import java.time.temporal.ChronoUnit
 import com.nirogbhumi.app.ui.NirogState
-import com.nirogbhumi.app.ui.localDayKey
 import com.nirogbhumi.app.ui.components.PrimaryButton
 import com.nirogbhumi.app.ui.components.SectionLabel
 import com.nirogbhumi.app.ui.theme.NirogColor
 import com.nirogbhumi.app.ui.theme.NirogSpace
 import com.nirogbhumi.app.ui.theme.NirogType
-import com.google.firebase.Timestamp
 
 /**
  * Rhythm (PRD v2, Pillar D) - the deliberately NON-PUNITIVE consistency view.
@@ -53,31 +52,18 @@ import com.google.firebase.Timestamp
  * Copy is warm and forward-looking; after a quiet stretch it offers a gentle
  * way back in, never a broken-streak guilt message.
  *
- * Logged-days are derived from real Firestore data (the member's blood-sugar
- * readings) - nothing here is fabricated. Before the first reading it shows an
+ * Logged days are the member's check-in days (sugar, BP, weight or medicine
+ * entered by hand - the same definition as Today) - nothing here is fabricated. Before the first reading it shows an
  * honest empty state.
  */
 @Composable
 fun RhythmScreen(state: NirogState) {
-  var loggedDayKeys by remember { mutableStateOf<Set<Long>>(emptySet()) }
-  var loaded by remember { mutableStateOf(false) }
-
-  DisposableEffect(Unit) {
-    val sub = state.repository.listenUserCollection("glucoseReadings", 90, orderByField = "measuredAt", descending = true) { result ->
-      if (result is CloudResult.Success) {
-        loggedDayKeys = result.value.mapNotNull { doc ->
-          val ts = (doc.values["createdAt"] as? Timestamp) ?: (doc.values["measuredAt"] as? Timestamp)
-          ts?.let { localDayKey(it.toDate().time) }
-        }.toSet()
-      }
-      loaded = true
-    }
-    onDispose { sub.cancel() }
-  }
-
-  val todayKey = localDayKey(System.currentTimeMillis())
-  val last7 = (0..6).count { (todayKey - it) in loggedDayKeys }
-  val daysSinceLast = loggedDayKeys.maxOrNull()?.let { todayKey - it }
+  val health = state.collectHealth()
+  val checkInDays = remember(health) { HealthStateBuilder.checkInDates(health) }
+  val loaded = !health.isLoading
+  val today = health.today.date
+  val last7 = (0..6).count { today.minusDays(it.toLong()) in checkInDays }
+  val daysSinceLast = checkInDays.filter { !it.isAfter(today) }.maxOrNull()?.let { ChronoUnit.DAYS.between(it, today).toInt() }
 
   Column(
     Modifier
@@ -119,7 +105,7 @@ fun RhythmScreen(state: NirogState) {
 
           SectionLabel("Last 30 days", modifier = Modifier.align(Alignment.Start))
           Spacer(Modifier.size(NirogSpace.md))
-          ThirtyDayGrid(todayKey = todayKey, loggedDayKeys = loggedDayKeys)
+          ThirtyDayGrid(today = today, loggedDays = checkInDays)
 
           Spacer(Modifier.size(NirogSpace.lg))
           Box(
@@ -130,7 +116,7 @@ fun RhythmScreen(state: NirogState) {
               .padding(NirogSpace.lg),
           ) {
             Text(
-              warmRecap(loaded, last7, loggedDayKeys.isEmpty()),
+              warmRecap(loaded, last7, checkInDays.isEmpty()),
               style = NirogType.body,
               color = NirogColor.inkSecondary,
             )
@@ -207,10 +193,14 @@ private fun RhythmRing(loggedCount: Int, total: Int) {
 }
 
 @Composable
-private fun ThirtyDayGrid(todayKey: Long, loggedDayKeys: Set<Long>) {
+private fun ThirtyDayGrid(today: LocalDate, loggedDays: Set<LocalDate>) {
   // 30 cells (5 rows x 6), oldest first, ending today. Logged = green,
   // missed = neutral (never red).
-  Column(verticalArrangement = Arrangement.spacedBy(NirogSpace.xs)) {
+  val loggedCount = (0..29).count { today.minusDays(it.toLong()) in loggedDays }
+  Column(
+    verticalArrangement = Arrangement.spacedBy(NirogSpace.xs),
+    modifier = Modifier.semantics(mergeDescendants = true) { contentDescription = "You checked in on $loggedCount of the last 30 days" },
+  ) {
     for (rowIndex in 0 until 5) {
       Row(
         Modifier.fillMaxWidth(),
@@ -218,8 +208,7 @@ private fun ThirtyDayGrid(todayKey: Long, loggedDayKeys: Set<Long>) {
       ) {
         for (colIndex in 0 until 6) {
           val cellIndex = rowIndex * 6 + colIndex // 0..29
-          val dayKey = todayKey - (29 - cellIndex)
-          val logged = dayKey in loggedDayKeys
+          val logged = today.minusDays((29 - cellIndex).toLong()) in loggedDays
           Box(
             Modifier
               .weight(1f)

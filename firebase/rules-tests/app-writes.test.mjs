@@ -7,7 +7,7 @@
 import { readFileSync } from 'node:fs';
 import { before, after, beforeEach, describe, it } from 'node:test';
 import { initializeTestEnvironment, assertSucceeds, assertFails } from '@firebase/rules-unit-testing';
-import { addDoc, collection, deleteDoc, doc, getDoc, getDocs, query, setDoc, updateDoc, where, serverTimestamp } from 'firebase/firestore';
+import { addDoc, collection, deleteDoc, doc, getDoc, getDocs, increment, query, setDoc, updateDoc, where, serverTimestamp } from 'firebase/firestore';
 
 let testEnv;
 before(async () => {
@@ -64,19 +64,28 @@ describe('health logs (addHealthLog / updateHealthLog / upsertUserRecord)', () =
   const shapes = {
     glucoseReadings: { value: 110, unit: 'mg/dL', context: 'Fasting', measuredAt: new Date() },
     bpReadings: { systolic: 120, diastolic: 80 },
-    sleepLogs: { hours: 7, quality: 'Good' },
+    sleepLogs: { sleepStartAt: new Date(Date.now() - 8 * 3600_000), sleepEndAt: new Date(Date.now() - 3600_000), durationMinutes: 420, measuredAt: new Date(Date.now() - 3600_000) },
     walkLogs: { minutes: 20 },
     weightLogs: { valueKg: 70 },
     medicationLogs: { name: 'Metformin', dose: '500mg', measuredAt: new Date() },
     checklistLogs: { item: 'Walk', done: true },
     labReports: { reportType: 'HbA1c', fileUrl: 'https://x' },
   };
+  const correctableEdits = {
+    glucoseReadings: { value: 118 }, bpReadings: { systolic: 124 }, walkLogs: { minutes: 25 }, weightLogs: { valueKg: 69.5 },
+    medicationLogs: { taken: false },
+    sleepLogs: { sleepStartAt: new Date(Date.now() - 8.5 * 3600_000), durationMinutes: 450 },
+  };
   for (const [name, values] of Object.entries(shapes)) {
     it(`create + correct + delete own ${name}`, async () => {
       const db = member('mem');
       const ref = doc(collection(db, name));
       await assertSucceeds(setDoc(ref, { ...values, userId: 'mem', profileId: 'mem', createdAt: ts() }));
-      await assertSucceeds(setDoc(ref, { note: 'edited' }, { merge: true }));
+      // Readings a member logs are corrected through the audited path (60-minute window, see health-log-window.test.mjs);
+      // other record types keep the plain owner-edit rule.
+      const edit = correctableEdits[name];
+      if (edit) await assertSucceeds(setDoc(ref, { ...edit, updatedAt: ts(), lastCorrectedAt: ts(), correctionCount: increment(1) }, { merge: true }));
+      else await assertSucceeds(setDoc(ref, { note: 'edited' }, { merge: true }));
       await assertSucceeds(getDoc(ref));
       await assertSucceeds(deleteDoc(ref));
     });
@@ -112,6 +121,15 @@ describe('health logs (addHealthLog / updateHealthLog / upsertUserRecord)', () =
     await assertSucceeds(setDoc(doc(collection(db, 'supportRequests')), { userId: 'mem', status: 'open', message: 'help', createdAt: ts() }));
     await assertSucceeds(setDoc(doc(collection(db, 'consultations')), { userId: 'mem', status: 'payment_pending', paymentStatus: 'pending', createdAt: ts() }));
     await assertFails(setDoc(doc(collection(db, 'consultations')), { userId: 'mem', status: 'confirmed', paymentStatus: 'paid', createdAt: ts() }));
+  });
+  it('support requests are length-capped and cannot forge the email status; the outbound mail queue is server-only', async () => {
+    const db = member('mem');
+    await assertSucceeds(setDoc(doc(collection(db, 'supportRequests')), { userId: 'mem', status: 'open', subject: 'Help', message: 'x'.repeat(4000), appVersion: '1.0.3', createdAt: ts() }));
+    await assertFails(setDoc(doc(collection(db, 'supportRequests')), { userId: 'mem', status: 'open', subject: 'x'.repeat(151), message: 'hi', createdAt: ts() }));
+    await assertFails(setDoc(doc(collection(db, 'supportRequests')), { userId: 'mem', status: 'open', subject: 'Help', message: 'x'.repeat(4001), createdAt: ts() }));
+    await assertFails(setDoc(doc(collection(db, 'supportRequests')), { userId: 'mem', status: 'open', subject: 'Help', message: 'hi', emailStatus: 'sent_to_inbox', createdAt: ts() }));
+    await assertFails(setDoc(doc(collection(db, 'mail')), { to: ['victim@example.com'], message: { subject: 'Spoofed', text: 'phish' } }));
+    await assertFails(getDoc(doc(db, 'mail/export_someone')));
   });
   it('a member cannot schedule their own push notifications, but can log a received one', async () => {
     const db = member('mem');

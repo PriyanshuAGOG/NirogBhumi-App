@@ -26,7 +26,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.nirogbhumi.app.health.domain.GlucoseStatus
+import com.nirogbhumi.app.health.domain.HealthLabels
+import com.nirogbhumi.app.health.domain.HealthStateBuilder
+import com.nirogbhumi.app.health.domain.HealthUiState
+import com.nirogbhumi.app.health.domain.status
 import com.nirogbhumi.app.ui.NirogState
+import com.nirogbhumi.app.ui.collectHealth
 import com.nirogbhumi.app.ui.components.InsightCard
 import com.nirogbhumi.app.ui.components.NirogCard
 import com.nirogbhumi.app.ui.components.PrimaryButton
@@ -40,14 +46,15 @@ import com.nirogbhumi.app.ui.theme.NirogType
 /**
  * Body Report (PRD v2 USP) - the instant payoff shown right after a check-in.
  *
- * It reads the member's most-recent logged values from [NirogState] (never
+ * It reads today's entries from the shared health state (never
  * fabricated: a metric that hasn't been logged shows "Not logged today"), maps
  * each to a status via plain clinical thresholds, offers one warm plain-language
  * takeaway, and points at the cumulative Health File. No scores, no grades.
  */
 @Composable
 fun BodyReportScreen(state: NirogState) {
-  val rows = buildBodyReportRows(state)
+  val health = state.collectHealth()
+  val rows = buildBodyReportRows(health)
 
   Column(
     Modifier
@@ -130,49 +137,47 @@ private data class ReportRow(
   val statusKind: StatusKind,
 )
 
-private fun buildBodyReportRows(state: NirogState): List<ReportRow> {
+private fun buildBodyReportRows(health: HealthUiState): List<ReportRow> {
   val rows = mutableListOf<ReportRow>()
+  val today = health.today.date
+  fun isToday(millis: Long) = HealthStateBuilder.dateOf(millis, health.zone) == today
 
-  // Fasting sugar
-  val sugar = state.fastingSugarValue
-  if (sugar > 0) {
-    val (label, kind) = when {
-      sugar < 70 -> "Low" to StatusKind.Attention
-      sugar in 70..99 -> "In range" to StatusKind.InRange
-      sugar in 100..125 -> "Watch" to StatusKind.Attention
-      else -> "High" to StatusKind.Critical
+  // Blood sugar: today's latest reading, labelled with the same ranges as every other screen.
+  val sugar = health.latestGlucose?.takeIf { isToday(it.measuredAtMillis) }
+  if (sugar != null) {
+    val (label, kind) = when (sugar.status()) {
+      GlucoseStatus.LOW -> "Low" to StatusKind.Attention
+      GlucoseStatus.NORMAL -> "In range" to StatusKind.InRange
+      GlucoseStatus.HIGH -> "High" to StatusKind.Critical
     }
-    rows += ReportRow("Fasting sugar", "$sugar", label, kind)
+    rows += ReportRow("Blood sugar (${HealthLabels.glucoseKind(sugar.kind).lowercase()})", "${sugar.value.toInt()}", label, kind)
   } else {
-    rows += ReportRow("Fasting sugar", null, "", StatusKind.Neutral)
+    rows += ReportRow("Blood sugar", null, "", StatusKind.Neutral)
   }
 
   // Blood pressure
-  val bp = state.latestBpReading
-  if (!bp.isNullOrBlank() && bp.contains('/')) {
-    val parts = bp.split('/')
-    val sys = parts.getOrNull(0)?.trim()?.toIntOrNull()
-    val dia = parts.getOrNull(1)?.filter { it.isDigit() }?.toIntOrNull()
+  val bp = health.latestBp?.takeIf { isToday(it.measuredAtMillis) }
+  if (bp != null) {
     val (label, kind) = when {
-      sys == null || dia == null -> "Recorded" to StatusKind.Neutral
-      sys >= 180 || dia >= 120 -> "High" to StatusKind.Critical
-      sys >= 140 || dia >= 90 -> "Watch" to StatusKind.Attention
+      bp.systolic >= 180 || bp.diastolic >= 120 -> "High" to StatusKind.Critical
+      bp.systolic >= 140 || bp.diastolic >= 90 -> "Watch" to StatusKind.Attention
       else -> "Steady" to StatusKind.InRange
     }
-    rows += ReportRow("Blood pressure", bp, label, kind)
+    rows += ReportRow("Blood pressure", HealthLabels.bp(bp), label, kind)
   } else {
     rows += ReportRow("Blood pressure", null, "", StatusKind.Neutral)
   }
 
-  // Sleep (informational)
-  val sleepTotal = state.sleepHours * 60 + state.sleepMinutes
-  if (sleepTotal > 0) {
-    rows += ReportRow("Sleep", "${state.sleepHours}h ${state.sleepMinutes}m", "Logged", StatusKind.Synced)
+  health.latestWeight?.takeIf { isToday(it.measuredAtMillis) }?.let {
+    rows += ReportRow("Weight", HealthLabels.weight(it.valueKg), "Logged", StatusKind.Synced)
   }
 
-  // Steps (informational)
-  if (state.stepsLogged > 0) {
-    rows += ReportRow("Steps so far", "${state.stepsLogged}", "Synced", StatusKind.Synced)
+  // Sleep and steps (informational)
+  health.today.sleepMinutesToday?.takeIf { it > 0 }?.let { minutes ->
+    rows += ReportRow("Sleep", "${minutes / 60}h ${minutes % 60}m", "Logged", StatusKind.Synced)
+  }
+  if (health.today.stepsToday > 0) {
+    rows += ReportRow("Steps so far", "${health.today.stepsToday}", "Synced", StatusKind.Synced)
   }
 
   return rows

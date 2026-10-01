@@ -212,7 +212,6 @@ class MainActivity : ComponentActivity() {
                       TextButton(
                         onClick = {
                           state.currentScreen = "critical_reading_caution"
-                          state.fastingSugarValue = 192
                         },
                         colors = ButtonDefaults.textButtonColors(contentColor = if (state.currentScreen == "critical_reading_caution") Color(0xFF314936) else Color.Gray)
                       ) {
@@ -315,6 +314,8 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun ActiveScreenContent(state: NirogState) {
   val context = LocalContext.current
+  com.nirogbhumi.app.ui.HealthDataLifecycle(state)
+  com.nirogbhumi.app.ui.DeletionStatusLifecycle(state)
   LaunchedEffect(state.repository.userId) {
     if (state.repository.userId != null) {
       runCatching { com.google.firebase.messaging.FirebaseMessaging.getInstance().token.addOnSuccessListener { token -> state.repository.saveProfile(mapOf("fcmToken" to token, "fcmTokenUpdatedAt" to com.google.firebase.firestore.FieldValue.serverTimestamp())) {} } }
@@ -372,11 +373,16 @@ fun ActiveScreenContent(state: NirogState) {
       "family_profiles" -> FamilyProfilesScreen(state)
       "orders" -> OrdersScreen(state)
       "articles" -> ArticlesScreen(state)
+      "article_reader" -> ArticleReaderScreen(state)
+      "article_detail" -> RedirectTo(state, "articles")   // the old Firestore-backed article list is retired; one source now
       "daily_checkin" -> DailyCheckInScreen(state)
       "body_report" -> BodyReportScreen(state)
       "rhythm" -> RhythmScreen(state)
       "health_file" -> HealthFileScreen(state)
       "bp_overview" -> BpOverviewScreen(state)
+      "weight_overview" -> WeightOverviewScreen(state)
+      "store_web" -> SafeWebViewScreen("Store", BuildConfig.STORE_URL, onBack = { state.currentScreen = "dashboard" })
+      "trends_30" -> TrendsScreen(state)
       "sleep_overview" -> SleepOverviewScreen(state)
       "walking_overview" -> WalkingActivityScreen(state)
       "program_calendar" -> ProgramCalendarScreen(state)
@@ -401,15 +407,17 @@ fun ActiveScreenContent(state: NirogState) {
       "insight_detail" -> InsightDetailScreen(state)
       "walk_timer" -> WalkTimerScreen(state)
       "legal_center" -> LegalCenterScreen(state)
-      "empty_state" -> MobileEmptyStateView {
-        state.currentScreen = "dashboard"
-        state.fastingSugarValue = 94
-      }
+      "empty_state" -> MobileEmptyStateView { state.currentScreen = "dashboard" }
       "error_state" -> MobileErrorStateView { state.currentScreen = "dashboard" }
       "offline_state" -> MobileOfflineStateView { state.currentScreen = "dashboard" }
-      "critical_reading_caution" -> MobileCriticalCautionStateView(state.fastingSugarValue) {
+      "critical_reading_caution" -> MobileCriticalCautionStateView(192) {
         state.currentScreen = "dashboard"
       }
+      // Old generic logging templates: every health reading now goes through one flow so the stored shape can't drift.
+      "add_sugar", "quick_sugar" -> RedirectTo(state, "daily_checkin", checkinStep = 0)
+      "add_bp" -> RedirectTo(state, "daily_checkin", checkinStep = 1)
+      "add_sleep" -> RedirectTo(state, "sleep_overview")
+      "quick_walk" -> RedirectTo(state, "walking_overview")
       "screen_directory" -> ScreenDirectory(state)
       else -> CatalogScreen(state, state.currentScreen)
     }
@@ -632,7 +640,7 @@ fun QuickLogFastingOverlay(state: NirogState) {
                     )
                     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            text = "Slide to record the fasting value displayed on your metabolic monitor.",
+                            text = "Slide to match the fasting number on your glucose meter.",
                             fontSize = 13.sp,
                             color = Color(0xFF737972),
                             modifier = Modifier.weight(1f),
@@ -677,22 +685,15 @@ fun QuickLogFastingOverlay(state: NirogState) {
                         enabled = !saving,
                         onClick = {
                             saving = true
-                            state.fastingSugarValue = state.quickLogFastingValue
-                            val status = if (state.quickLogFastingValue > 125) "High" else if (state.quickLogFastingValue < 80) "Low" else "Normal"
-                            val values = mapOf(
-                                "value" to state.quickLogFastingValue,
-                                "unit" to "mg/dL",
-                                "readingType" to "fasting",
-                                "measuredAt" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
-                                "source" to "manual"
-                            )
+                            val mgDl = state.quickLogFastingValue
+                            val status = com.nirogbhumi.app.health.domain.HealthLabels.glucoseStatus(com.nirogbhumi.app.health.domain.GlucoseRanges.status(mgDl.toDouble(), com.nirogbhumi.app.health.domain.GlucoseKind.FASTING))
                             fun onDone(result: com.nirogbhumi.app.data.CloudResult<*>) {
                                 saving = false
                                 if (result is com.nirogbhumi.app.data.CloudResult.Success<*>) {
-                                    state.cloudMessage = "Synced securely"
+                                    state.cloudMessage = "Saved"
                                     confirming = true
                                     widgetScope.launch {
-                                        com.nirogbhumi.app.widget.updateHealthQuickLogWidget(context, state.quickLogFastingValue, status)
+                                        com.nirogbhumi.app.widget.updateHealthQuickLogWidget(context, mgDl, status)
                                     }
                                 } else if (result is com.nirogbhumi.app.data.CloudResult.Failure) {
                                     state.cloudMessage = result.message
@@ -700,16 +701,12 @@ fun QuickLogFastingOverlay(state: NirogState) {
                             }
                             val existingDocId = savedDocId
                             if (existingDocId == null) {
-                                state.sugarLogs.add(0, com.nirogbhumi.app.ui.SugarLog(state.sugarLogs.size + 1, state.quickLogFastingValue, "Fasting", "Today, Just Now", status))
-                                state.repository.addHealthLog("glucoseReadings", values) { result ->
+                                state.health.logGlucose(mgDl, com.nirogbhumi.app.health.domain.GlucoseKind.FASTING) { result ->
                                     if (result is com.nirogbhumi.app.data.CloudResult.Success) savedDocId = result.value
                                     onDone(result)
                                 }
                             } else {
-                                if (state.sugarLogs.isNotEmpty()) {
-                                    state.sugarLogs[0] = state.sugarLogs[0].copy(value = state.quickLogFastingValue, status = status)
-                                }
-                                state.repository.updateHealthLog("glucoseReadings", existingDocId, values, ::onDone)
+                                state.health.correct("glucoseReadings", existingDocId, mapOf("value" to mgDl, "unit" to "mg/dL", "readingType" to "fasting"), ::onDone)
                             }
                         },
                         modifier = Modifier
@@ -728,4 +725,13 @@ fun QuickLogFastingOverlay(state: NirogState) {
             }
         }
     }
+}
+
+/** Sends an old route to the screen that now owns it (runs once, never loops back). */
+@androidx.compose.runtime.Composable
+private fun RedirectTo(state: com.nirogbhumi.app.ui.NirogState, route: String, checkinStep: Int? = null) {
+  androidx.compose.runtime.LaunchedEffect(route) {
+    if (checkinStep != null) state.checkinStartStep = checkinStep
+    state.currentScreen = route
+  }
 }

@@ -30,10 +30,19 @@ jobs:
           distribution: temurin
           java-version: "21"
       - uses: gradle/actions/setup-gradle@v6
+        with:
+          add-job-summary: never
       - name: Make Gradle wrapper executable
         run: chmod +x gradlew
       - name: Compile, test, lint, and package debug APK
-        run: ./gradlew --no-daemon --max-workers=2 testDebugUnitTest lintDebug assembleDebug
+        run: |
+          set -o pipefail
+          ./gradlew --no-daemon --max-workers=2 testDebugUnitTest lintDebug assembleDebug 2>&1 | tee gradle.log
+      # A short digest of what broke, printed last so it is the first thing seen in the log.
+      - name: Summarise compile and test failures
+        if: failure()
+        run: |
+          grep -E "^e: |FAILED|What went wrong|error:|Execution failed" -A2 gradle.log | head -150 || true
       - name: Upload debug APK and reports
         if: always()
         uses: actions/upload-artifact@v7
@@ -43,6 +52,25 @@ jobs:
           path: |
             app/build/outputs/apk/debug/*.apk
             app/build/reports/**
+            gradle.log
+
+  # A separate, short job that prints only what broke in the Android build. Its log is tiny, so the
+  # cause is visible without scrolling through Gradle cache summaries.
+  android-failure-digest:
+    name: Android failure digest
+    needs: [android]
+    if: failure()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          name: android-debug-and-reports
+          path: digest
+      - name: Print compile errors and failed tests
+        run: |
+          log=$(find digest -name gradle.log | head -1)
+          echo "== compile errors =="; grep -E "^e: " "$log" | sed 's#file:///home/runner/work/NirogBhumi-App/NirogBhumi-App/##' | head -80 || true
+          echo "== failed tests / tasks =="; grep -E "FAILED|What went wrong" -A3 "$log" | head -80 || true
 
   android-release:
     name: Android release build (R8/minify)
@@ -55,6 +83,8 @@ jobs:
           distribution: temurin
           java-version: "21"
       - uses: gradle/actions/setup-gradle@v6
+        with:
+          add-job-summary: never
       - name: Make Gradle wrapper executable
         run: chmod +x gradlew
       # The signed AAB that actually ships is only ever built inside
@@ -63,16 +93,34 @@ jobs:
       # RELEASE build (R8 code-shrinking, resource shrinking, ProGuard
       # rules) on a push. A missing keep rule or an R8-stripped class would
       # surface only at upload time, or as a crash on a user's device.
-      # The release signing + google-services plugins are both conditional,
-      # so with no secrets present this produces an UNSIGNED bundle - which
-      # is exactly what's needed to prove the shipping artifact compiles,
-      # minifies, and its release unit tests pass on every push.
+      # The google-services plugin is conditional (no google-services.json in
+      # CI), and signing uses a throwaway key (see the step below), which is
+      # enough to prove the shipping artifact compiles, minifies and signs on
+      # every push.
       # Unit tests live in the shared src/test source set (no release-specific
       # test source set), so the debug job's testDebugUnitTest already covers
       # them - this job's job is purely to exercise the release artifact:
       # R8 code-shrinking, resource shrinking, and ProGuard.
-      - name: Build unsigned release bundle (verify R8 + resource shrinking)
-        run: ./gradlew --no-daemon --max-workers=2 bundleRelease
+      # Signs with a throwaway keystore created on the runner so the exact
+      # signing path used for the real upload (KEYSTORE_PATH/STORE_PASSWORD/
+      # KEY_ALIAS/KEY_PASSWORD env -> signingConfigs.release) is exercised on
+      # every push. The key is discarded with the runner and is NOT the upload
+      # key; the resulting bundle is never published.
+      - name: Build signed release bundle with a throwaway key (verify R8 + resource shrinking + signing)
+        env:
+          STORE_PASSWORD: ci-throwaway-pass
+          KEY_ALIAS: ci-throwaway
+          KEY_PASSWORD: ci-throwaway-pass
+        run: |
+          export KEYSTORE_PATH="$RUNNER_TEMP/ci-throwaway.jks"
+          keytool -genkeypair -keystore "$KEYSTORE_PATH" -storepass "$STORE_PASSWORD" -keypass "$KEY_PASSWORD" \
+            -alias "$KEY_ALIAS" -keyalg RSA -keysize 2048 -validity 2 -dname "CN=CI throwaway"
+          ./gradlew --no-daemon --max-workers=2 bundleRelease -PVERSION_CODE=${{ github.run_number }} -PVERSION_NAME=0.0.${{ github.run_number }}-ci
+          AAB="$(ls app/build/outputs/bundle/release/*.aab | head -n1)"
+          jarsigner -verify "$AAB" | tee /tmp/jarsigner.txt
+          grep -q "jar verified" /tmp/jarsigner.txt
+          # It must be signed by the throwaway key, not left unsigned or debug-signed.
+          jarsigner -verify -verbose -certs "$AAB" | grep -q "CN=CI throwaway"
       # Guard the merged manifest that actually ships: no debuggable flag,
       # cleartext traffic, backups, advertising ID, install-packages or any
       # permission we haven't declared in the Data Safety form.
@@ -82,12 +130,27 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: android-release-unsigned-and-reports
+          name: android-release-ci-signed-and-reports
           if-no-files-found: ignore
           path: |
             app/build/outputs/bundle/release/*.aab
             app/build/outputs/mapping/release/mapping.txt
             app/build/reports/**
+
+  release-gates:
+    name: Release gates (store listing, notes, graphics)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      # Non-strict: legal placeholders are allowed here (they are only blocked
+      # for closed/production uploads in upload-google-play.yml), but a
+      # store description over Play's limit or a missing graphic is not.
+      - name: Check store listing limits, release notes and graphics
+        run: python3 scripts/check_release_gates.py
+      # One official contact address everywhere (support, privacy, deletion, Grievance Officer).
+      - name: Check that only the official contact email is used
+        run: python3 scripts/check_contact_email.py
 
   functions:
     name: Firebase Functions type-check

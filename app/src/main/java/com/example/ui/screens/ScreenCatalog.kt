@@ -60,7 +60,7 @@ private fun s(id: Int, route: String, title: String, section: String, subtitle: 
  *  in-app Store, were removed by product decision - see ComingSoonScreen for the store's
  *  replacement and ScreenCatalogTest for the structural checks that replaced the old fixed count. */
 val NirogScreens = listOf(
-    s(1,"splash","Splash Screen","Onboarding","Your daily rhythm for better metabolic health.","Nirog Bhumi|Secure health companion","Continue"),
+    s(1,"splash","Splash Screen","Onboarding","Your daily rhythm for better health.","Nirog Bhumi|Secure health companion","Continue"),
     s(2,"welcome","Welcome Intro","Onboarding","Track your health in 2 minutes a day.","Daily check-in|Weekly health report|Nirog Bhumi care","Continue"),
     s(3,"value_slides","Value Slides","Onboarding","Know your pattern. One useful action at a time.","Know your pattern|One action, not ten|Share better data with experts","Continue"),
     s(4,"login_mobile","Phone Login","Onboarding","Enter your mobile number to continue securely.","+91 mobile number|Terms and Privacy|Medical Disclaimer","Send OTP"),
@@ -419,8 +419,7 @@ fun CatalogScreen(state: NirogState, route: String) {
                                     is CloudResult.Success -> when (spec.route) {
                                         "pre_consultation" -> { saving = false; state.pendingConsultationId = result.value; state.currentScreen = "payment_confirmation" }
                                         else -> {
-                                            saving = false; message = "Saved and synced securely"
-                                            if (spec.route == "add_sugar" || spec.route == "quick_sugar") state.formValues["${spec.route}.value"]?.toIntOrNull()?.let { state.fastingSugarValue = it }
+                                            saving = false; message = "Saved"
                                             experience.successRoute?.let { state.currentScreen = it }
                                         }
                                     }
@@ -658,7 +657,7 @@ private fun recordTitle(collection: String, values: Map<String, Any?>): String =
 private fun recordSubtitle(values: Map<String, Any?>): String = listOfNotNull(
     values["quality"]?.toString(), values["context"]?.toString(), values["summary"]?.toString(),
     values["note"]?.toString(), values["orderStatus"]?.toString(), values["paymentStatus"]?.toString()
-).joinToString(" · ").ifBlank { "Synced securely" }
+).joinToString(" · ").ifBlank { "Saved" }
 
 @Composable
 private fun StatusBadge(status: String?) {

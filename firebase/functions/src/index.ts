@@ -11,6 +11,9 @@ import { createHash, randomBytes } from 'node:crypto';
 import { processPendingNotifications } from './notificationSender.js';
 import { cancelOwnConsultation, handleConsultationChange } from './consultations.js';
 import { dayKeyIST, isMondayIST, sendWeeklyDigests, updateBatchPulse } from './scheduledJobs.js';
+import { exportDownloadLink, processExportRequest, purgeExpiredExports } from './exportJob.js';
+import { notifySupportRequest } from './supportMail.js';
+import { OFFICIAL_CONTACT_EMAIL } from './email.js';
 import { DELETION_GRACE_DAYS, cancelAccountDeletion as cancelDeletionRequest, processDueDeletions, scheduleAccountDeletion } from './accountDeletion.js';
 
 initializeApp();
@@ -108,8 +111,12 @@ function glucoseStatus(value: number, type: string) {
   // a malformed reading would silently read as 'in_range' and skip the
   // critical-alert path entirely.
   if (!Number.isFinite(value)) return 'invalid';
-  if (value >= 300 || value <= 54) return 'critical';
-  if ((type === 'fasting' && value > 125) || (type !== 'fasting' && value > 180)) return 'needs_attention';
+  // Same table as the app (GlucoseRanges in HealthState.kt): critical below 54 or at/above 300; low below 70;
+  // high above 130 (fasting, random, device) or above 180 after a meal. HbA1c is a percentage and is never classified here.
+  if (type === 'hba1c') return 'in_range';
+  if (value >= 300 || value < 54) return 'critical';
+  if (value < 70) return 'needs_attention';
+  if ((type === 'post_meal' && value > 180) || (type !== 'post_meal' && value > 130)) return 'needs_attention';
   return 'in_range';
 }
 
@@ -135,29 +142,68 @@ async function recordBatchCheckin(uid: string) {
   });
 }
 
+// Passive data (a watch or phone import, a lab value, a migration) is not a check-in: the member did not do anything.
+// Same definition as the app (TodayStatus in HealthState.kt).
+const isPassiveSource = (source: unknown) => source === 'health_connect' || source === 'device' || source === 'migration';
+
 export const onGlucoseReadingCreate = onDocumentCreated({ document: 'glucoseReadings/{readingId}', region }, async event => {
   const snap = event.data; if (!snap) return;
-  const data = snap.data(); const value = Number(data.value); const status = glucoseStatus(value, String(data.readingType));
+  const data = snap.data(); const value = Number(data.value); const type = String(data.readingType);
+  const status = glucoseStatus(value, type);
   await snap.ref.set({ status, categorizedAt: FieldValue.serverTimestamp() }, { merge: true });
-  // Don't overwrite the user's last-known-good reading with a NaN from a
-  // malformed entry - only mirror it forward once it's actually a number.
-  if (Number.isFinite(value)) {
+  // Don't overwrite the user's last-known-good reading with a NaN from a malformed entry, and only a FASTING reading
+  // is the "fasting sugar" (an after-meal or HbA1c value must not be mirrored under that name).
+  if (Number.isFinite(value) && type === 'fasting') {
     await db.doc(`users/${data.userId}`).set({ latestMetrics: { fastingSugar: value, glucoseStatus: status, glucoseUpdatedAt: FieldValue.serverTimestamp() }, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   }
   // Critical alerts use their own notification type so sendPendingNotifications()
   // never defers them for quiet hours or the daily reminder cap - see there.
-  if (status === 'critical') await db.collection('notifications').add({ userId: data.userId, profileId: data.profileId, title: 'Please review this reading', body: 'Repeat the measurement and contact your doctor promptly, especially if you feel unwell.', type: 'critical_alert', status: 'scheduled', scheduledFor: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp() });
-  await recordBatchCheckin(String(data.userId));
+  if (status === 'critical' && !isPassiveSource(data.source)) await db.collection('notifications').add({ userId: data.userId, profileId: data.profileId, title: 'Please review this reading', body: 'Repeat the measurement and contact your doctor promptly, especially if you feel unwell.', type: 'critical_alert', status: 'scheduled', scheduledFor: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp() });
+  if (!isPassiveSource(data.source) && type !== 'hba1c') await recordBatchCheckin(String(data.userId));
 });
 
-export const onBPReadingCreate = onDocumentCreated({ document: 'bpReadings/{readingId}', region }, async event => {
-  const snap = event.data; if (!snap) return; const d = snap.data();
+// A member may correct a reading for 60 minutes (rules). The server's own label must follow the corrected value, or a
+// reading fixed from 310 to 130 would keep raising a critical flag in the coach's view.
+export const onGlucoseReadingUpdate = onDocumentUpdated({ document: 'glucoseReadings/{readingId}', region }, async event => {
+  const before = event.data?.before.data(); const after = event.data?.after.data();
+  if (!before || !after) return;
+  if (before.value === after.value && before.readingType === after.readingType) return; // the server's own status write, or an unrelated change
+  const value = Number(after.value); const type = String(after.readingType);
+  const status = glucoseStatus(value, type);
+  if (status !== after.status) await event.data!.after.ref.set({ status, categorizedAt: FieldValue.serverTimestamp() }, { merge: true });
+  const user = await db.doc(`users/${after.userId}`).get();
+  if (Number.isFinite(value) && type === 'fasting' && user.get('latestMetrics.fastingSugar') === Number(before.value)) {
+    await user.ref.set({ latestMetrics: { fastingSugar: value, glucoseStatus: status, glucoseUpdatedAt: FieldValue.serverTimestamp() }, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  }
+  if (status === 'critical' && before.status !== 'critical' && !isPassiveSource(after.source)) {
+    await db.collection('notifications').add({ userId: after.userId, profileId: after.profileId, title: 'Please review this reading', body: 'Repeat the measurement and contact your doctor promptly, especially if you feel unwell.', type: 'critical_alert', status: 'scheduled', scheduledFor: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp() });
+  }
+});
+
+function bpStatusOf(d: Record<string, unknown>) {
   const systolic = Number(d.systolic); const diastolic = Number(d.diastolic);
   const valid = Number.isFinite(systolic) && Number.isFinite(diastolic);
   const critical = valid && (systolic >= 180 || diastolic >= 120);
-  await snap.ref.set({ status: !valid ? 'invalid' : critical ? 'critical' : 'recorded', categorizedAt: FieldValue.serverTimestamp() }, { merge: true });
-  if (critical) await db.collection('notifications').add({ userId: d.userId, profileId: d.profileId, title: 'Please review your BP reading', body: 'Repeat the measurement and seek urgent medical advice, especially if you feel unwell.', type: 'critical_alert', status: 'scheduled', scheduledFor: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp() });
-  await recordBatchCheckin(String(d.userId));
+  return { status: !valid ? 'invalid' : critical ? 'critical' : 'recorded', critical };
+}
+
+export const onBPReadingCreate = onDocumentCreated({ document: 'bpReadings/{readingId}', region }, async event => {
+  const snap = event.data; if (!snap) return; const d = snap.data();
+  const { status, critical } = bpStatusOf(d);
+  await snap.ref.set({ status, categorizedAt: FieldValue.serverTimestamp() }, { merge: true });
+  if (critical && !isPassiveSource(d.source)) await db.collection('notifications').add({ userId: d.userId, profileId: d.profileId, title: 'Please review your BP reading', body: 'Repeat the measurement and seek urgent medical advice, especially if you feel unwell.', type: 'critical_alert', status: 'scheduled', scheduledFor: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp() });
+  if (!isPassiveSource(d.source)) await recordBatchCheckin(String(d.userId));
+});
+
+export const onBPReadingUpdate = onDocumentUpdated({ document: 'bpReadings/{readingId}', region }, async event => {
+  const before = event.data?.before.data(); const after = event.data?.after.data();
+  if (!before || !after) return;
+  if (before.systolic === after.systolic && before.diastolic === after.diastolic) return;
+  const { status, critical } = bpStatusOf(after);
+  if (status !== after.status) await event.data!.after.ref.set({ status, categorizedAt: FieldValue.serverTimestamp() }, { merge: true });
+  if (critical && before.status !== 'critical' && !isPassiveSource(after.source)) {
+    await db.collection('notifications').add({ userId: after.userId, profileId: after.profileId, title: 'Please review your BP reading', body: 'Repeat the measurement and seek urgent medical advice, especially if you feel unwell.', type: 'critical_alert', status: 'scheduled', scheduledFor: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp() });
+  }
 });
 
 // Announcement creation/fan-out/deletion is handled by the createAnnouncement/
@@ -862,15 +908,25 @@ export const requestDataExport = onCall({ region }, async request => {
   // burn reads/writes/invocations at will. One export per hour is plenty
   // for the legitimate "download my data" use case.
   const cooldown = Timestamp.fromMillis(Date.now() - 60 * 60000);
-  const recent = await db.collection('dataExportRequests').where('userId', '==', auth.uid).where('createdAt', '>=', cooldown).limit(1).get();
-  if (!recent.empty) throw new HttpsError('resource-exhausted', 'You can request one export per hour - please try again later.');
+  const recent = await db.collection('dataExportRequests').where('userId', '==', auth.uid).where('createdAt', '>=', cooldown).get();
+  // A failed attempt must not lock the member out for an hour.
+  if (recent.docs.some(d => d.get('status') !== 'failed')) throw new HttpsError('resource-exhausted', 'You can request one export per hour - please try again later.');
   await db.collection('dataExportRequests').add({ userId: auth.uid, status: 'requested', createdAt: FieldValue.serverTimestamp() }); return { accepted: true };
 });
 // Schedules the caller's own account for deletion after a grace period (see
 // accountDeletion.ts for the full lifecycle and what gets removed). Idempotent:
 // asking again while a request is pending just reports the existing one.
+// Deleting an account is irreversible, so the sign-in behind it must be recent: a borrowed or left-open phone
+// with a days-old session cannot start it. The app answers REAUTH_REQUIRED by asking the member to confirm
+// their password or a fresh SMS code, then tries again.
+const RECENT_AUTH_SECONDS = 5 * 60;
+function requireRecentSignIn(auth: { token: Record<string, unknown> }) {
+  const authTime = Number(auth.token.auth_time ?? 0);
+  if (!authTime || Date.now() / 1000 - authTime > RECENT_AUTH_SECONDS) throw new HttpsError('failed-precondition', 'REAUTH_REQUIRED');
+}
 export const requestAccountDeletion = onCall({ region }, async request => {
   const auth = requireUser(request);
+  requireRecentSignIn(auth);
   const result = await scheduleAccountDeletion(db, auth.uid, 'app');
   if (!result.alreadyPending) {
     await db.collection('auditLogs').add({ actorId: auth.uid, actorRole: String(auth.token.role ?? 'user'), action: 'request_account_deletion', entityType: 'deletionRequest', entityId: result.requestId, metadata: { scheduledFor: result.scheduledFor.toDate().toISOString() }, createdAt: FieldValue.serverTimestamp() });
@@ -940,25 +996,62 @@ export const adminManageDeletion = onCall({ region }, async request => {
   await db.collection('auditLogs').add({ actorId: auth.uid, actorRole: role, action: `${action}_account_deletion`, entityType: 'deletionRequest', entityId: requestId, createdAt: FieldValue.serverTimestamp() });
   return { requestId, status: action === 'approve' ? 'approved' : 'rejected' };
 });
-export const exportUserData = onDocumentCreated({ document: 'dataExportRequests/{requestId}', region }, async event => {
-  const request = event.data; if (!request) return; const uid = request.get('userId'); if (!uid) return;
-  await request.ref.set({ status: 'processing', updatedAt: FieldValue.serverTimestamp() }, { merge: true });
-  const names = ['users','profiles','glucoseReadings','bpReadings','sleepLogs','walkLogs','weightLogs','labReports','dailyCheckins','dailyActions','weeklyReports','sugarStories','consultations','userPrograms','programPlans','checklistLogs','expertNotes','notifications','deviceConnections','medicationLogs','orders','supportRequests','programChatMessages'];
-  const exported: Record<string, unknown> = { exportedAt: new Date().toISOString(), formatVersion: 1 };
-  for (const name of names) {
-    if (name === 'users') { const user = await db.doc(`users/${uid}`).get(); exported.users = user.exists ? [{ id: user.id, ...user.data() }] : []; continue; }
-    const snapshot = await db.collection(name).where('userId', '==', uid).get(); exported[name] = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+// RETIRED. This trigger used to flip every new deletion request to
+// 'awaiting_verification'. Requests are now scheduled by requestAccountDeletion
+// (status 'scheduled', erased automatically when due), so the old behaviour would
+// overwrite that status and the request would never be processed. Firebase skips
+// deleting removed functions whenever another function in the same deploy fails
+// (e.g. while the org policy blocks the public invoker), so the old code stayed
+// live; exporting a no-op replaces it with a plain update. Delete this stub (and run
+// `firebase functions:delete queueDeletionRequest --region asia-south1`) once a
+// deploy has completed cleanly.
+export const queueDeletionRequest = onDocumentCreated({ document: 'deletionRequests/{requestId}', region }, async () => {
+  // intentionally empty
+});
+
+// Builds the member's export (ZIP with data.json, CSVs and a README), stores it privately and tells them.
+// The work lives in exportJob.ts so it can be tested with fakes; this only connects it to Storage.
+async function signStorageUrl(path: string, ttlMs: number, downloadName: string): Promise<string | null> {
+  try {
+    const [url] = await getStorage().bucket().file(path).getSignedUrl({
+      version: 'v4', action: 'read', expires: Date.now() + ttlMs,
+      responseDisposition: `attachment; filename="${downloadName}"`, responseType: 'application/zip',
+    });
+    return url;
+  } catch (error) {
+    // Usually the one-time IAM grant (serviceAccountTokenCreator) has not been made yet; the app falls back to its own authenticated download.
+    console.error('export link signing failed', error);
+    return null;
   }
-  // Not keyed by `userId`, so gathered separately: the member's coach-inbox
-  // threads, program roster entries, and their consent receipts (the record of
-  // what they agreed to and when).
-  exported.coachInboxMessages = (await db.collection('coachInboxMessages').where('memberUid', '==', uid).get()).docs.map(doc => ({ id: doc.id, ...doc.data() }));
-  exported.programMembers = (await db.collection('programMembers').where('uid', '==', uid).get()).docs.map(doc => ({ id: doc.id, ...doc.data() }));
-  exported.consentReceipts = (await db.collection(`users/${uid}/consentReceipts`).get()).docs.map(doc => ({ id: doc.id, ...doc.data() }));
-  const path = `users/${uid}/exports/${request.id}.json`; const file = getStorage().bucket().file(path);
-  await file.save(JSON.stringify(exported, null, 2), { contentType: 'application/json', metadata: { cacheControl: 'private, max-age=0', metadata: { ownerUid: uid } } });
-  await request.ref.set({ status: 'completed', storagePath: path, completedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
-  await db.collection('notifications').add({ userId: uid, profileId: null, title: 'Your data export is ready', body: 'Open Privacy and Data Controls to access your export.', type: 'privacy', status: 'scheduled', scheduledFor: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp() });
+}
+export const exportUserData = onDocumentCreated({ document: 'dataExportRequests/{requestId}', region, timeoutSeconds: 300, memory: '512MiB' }, async event => {
+  await processExportRequest({
+    db,
+    saveFile: (path, data, contentType, ownerUid) => getStorage().bucket().file(path).save(data, { contentType, metadata: { cacheControl: 'private, max-age=0', metadata: { ownerUid } } }),
+    signUrl: signStorageUrl,
+  }, event.params.requestId);
+});
+// Exports hold health information, so they are deleted after 30 days (a fresh one can be requested any time).
+export const purgeOldExports = onSchedule({ schedule: 'every 24 hours', timeZone: 'Asia/Kolkata', region, timeoutSeconds: 300 }, async () => {
+  const result = await purgeExpiredExports({ db, deleteFile: path => getStorage().bucket().file(path).delete({ ignoreNotFound: true }).then(() => undefined) });
+  console.log('purgeOldExports', result);
+});
+// A fresh, short-lived link to the caller's own completed export (15 minutes). When links cannot be signed yet the
+// caller gets { url: null, storagePath } and downloads through its own authenticated Storage access instead.
+export const getExportDownloadLink = onCall({ region }, async request => {
+  const auth = requireUser(request);
+  const requestId = String(request.data?.requestId ?? '');
+  if (!requestId) throw new HttpsError('invalid-argument', 'requestId is required');
+  try {
+    return await exportDownloadLink({ db, signUrl: signStorageUrl }, auth.uid, requestId);
+  } catch (error) {
+    if ((error as { code?: string }).code === 'not-found') throw new HttpsError('not-found', 'That export is not available');
+    throw error;
+  }
+});
+// New support request -> an email to the official contact address (SUPPORT_EMAIL can override it). Idempotent per request.
+export const onSupportRequestCreate = onDocumentCreated({ document: 'supportRequests/{requestId}', region }, async event => {
+  await notifySupportRequest(db, event.params.requestId, process.env.SUPPORT_EMAIL || OFFICIAL_CONTACT_EMAIL);
 });
 // Real, time-limited signed URL for the Health File "share link / QR code"
 // feature - the client previously used the Storage download-token URL

@@ -86,6 +86,43 @@ describe('scheduling and cancelling', () => {
     assert.equal((await call(fns.cancelAccountDeletion, {}, 'u1')).cancelled, true);
     await rejectsWithCode(call(fns.requestAccountDeletion, {}, null), 'unauthenticated');
   });
+
+  it('requires a recent sign-in: a stale session cannot start a deletion', async () => {
+    await seedMember('u1');
+    const stale = Math.floor(Date.now() / 1000) - 6 * 60;
+    const error = await rejectsWithCode(call(fns.requestAccountDeletion, {}, 'u1', undefined, { auth_time: stale }), 'failed-precondition');
+    assert.equal(error.message, 'REAUTH_REQUIRED');
+    await rejectsWithCode(call(fns.requestAccountDeletion, {}, 'u1', undefined, { auth_time: undefined }), 'failed-precondition');
+    assert.equal((await db.collection('deletionRequests').where('userId', '==', 'u1').get()).size, 0, 'nothing was scheduled');
+    const fresh = Math.floor(Date.now() / 1000) - 4 * 60;
+    assert.equal((await call(fns.requestAccountDeletion, {}, 'u1', undefined, { auth_time: fresh })).accepted, true);
+  });
+
+  it('cancelling a pending deletion does not need a recent sign-in', async () => {
+    await seedMember('u1');
+    await call(fns.requestAccountDeletion, {}, 'u1');
+    const stale = Math.floor(Date.now() / 1000) - 3 * 86400;
+    assert.equal((await call(fns.cancelAccountDeletion, {}, 'u1', undefined, { auth_time: stale })).cancelled, true);
+  });
+});
+
+describe('retired queueDeletionRequest trigger', () => {
+  beforeEach(resetFirestore);
+
+  it('never rewrites the status of a freshly scheduled request (the old trigger did, so requests were never processed)', async () => {
+    await db.doc('users/u1').set({ userId: 'u1' });
+    await call(fns.requestAccountDeletion, {}, 'u1');
+    const snap = (await db.collection('deletionRequests').where('userId', '==', 'u1').get()).docs[0];
+    const before = snap.get('status');
+    assert.equal(before, 'scheduled');
+    const writes = [];
+    await fns.queueDeletionRequest.run({
+      data: { id: snap.id, data: () => snap.data(), ref: { set: async (...args) => { writes.push(args); }, update: async (...args) => { writes.push(args); } } },
+      params: { requestId: snap.id },
+    });
+    assert.deepEqual(writes, []);
+    assert.equal((await db.doc(`deletionRequests/${snap.id}`).get()).get('status'), before);
+  });
 });
 
 describe('processDueDeletions', () => {

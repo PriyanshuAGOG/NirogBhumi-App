@@ -29,7 +29,8 @@
     { "collectionGroup": "medicationLogs", "queryScope": "COLLECTION", "fields": [{"fieldPath":"userId","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}] },
     { "collectionGroup": "medicationLogs", "queryScope": "COLLECTION", "fields": [{"fieldPath":"userId","order":"ASCENDING"},{"fieldPath":"measuredAt","order":"DESCENDING"}] },
     { "collectionGroup": "coachInboxMessages", "queryScope": "COLLECTION", "fields": [{"fieldPath":"programId","order":"ASCENDING"},{"fieldPath":"memberUid","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}] },
-    { "collectionGroup": "coachInboxMessages", "queryScope": "COLLECTION", "fields": [{"fieldPath":"programId","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}] }
+    { "collectionGroup": "coachInboxMessages", "queryScope": "COLLECTION", "fields": [{"fieldPath":"programId","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}] },
+    { "collectionGroup": "dataExportRequests", "queryScope": "COLLECTION", "fields": [{"fieldPath":"status","order":"ASCENDING"},{"fieldPath":"completedAt","order":"ASCENDING"}] }
   ],
   "fieldOverrides": []
 }

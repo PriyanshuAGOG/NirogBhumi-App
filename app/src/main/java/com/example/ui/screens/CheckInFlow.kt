@@ -24,12 +24,11 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.google.firebase.firestore.FieldValue
 import com.nirogbhumi.app.data.CloudResult
 import com.nirogbhumi.app.health.HealthConnectManager
 import com.nirogbhumi.app.health.TodaySyncSummary
 import com.nirogbhumi.app.ui.NirogState
-import com.nirogbhumi.app.ui.SugarLog
+import com.nirogbhumi.app.health.domain.GlucoseKind
 import kotlinx.coroutines.launch
 
 private val Green = Color(0xFF314936)
@@ -63,10 +62,7 @@ fun DailyCheckInScreen(state: NirogState) {
     LaunchedEffect(Unit) {
         val manager = HealthConnectManager(context, state.repository)
         val summary = runCatching { manager.syncToday() }.getOrNull()
-        if (summary != null) {
-            syncSummary = summary
-            state.stepsLogged = summary.totalSteps
-        }
+        if (summary != null) syncSummary = summary
     }
 
     // Collected results, for the closing summary. Null = skipped.
@@ -223,7 +219,7 @@ fun DailyCheckInScreen(state: NirogState) {
                     icon = Icons.Filled.Favorite,
                     tint = Color(0xFF426820),
                     title = "Blood pressure",
-                    helper = "Enter both numbers, or skip."
+                    helper = "Enter the upper and lower number, or skip. For example 120 over 80."
                 ) {
                     val bpVoice = com.nirogbhumi.app.ui.components.rememberVoiceInputLauncher(
                         prompt = "Say both numbers, e.g. \"120 over 80\"",
@@ -235,8 +231,8 @@ fun DailyCheckInScreen(state: NirogState) {
                         onUnavailable = { error = "Voice entry isn't available on this device." },
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Box(Modifier.weight(1f)) { BigInput(systolic, { systolic = it.filter(Char::isDigit) }, "SYS", KeyboardType.Number) }
-                        Box(Modifier.weight(1f)) { BigInput(diastolic, { diastolic = it.filter(Char::isDigit) }, "DIA", KeyboardType.Number, onVoiceInput = bpVoice) }
+                        Box(Modifier.weight(1f)) { BigInput(systolic, { systolic = it.filter(Char::isDigit) }, "Upper", KeyboardType.Number) }
+                        Box(Modifier.weight(1f)) { BigInput(diastolic, { diastolic = it.filter(Char::isDigit) }, "Lower", KeyboardType.Number, onVoiceInput = bpVoice) }
                     }
                 }
                 2 -> CheckInStep(
@@ -291,23 +287,24 @@ fun DailyCheckInScreen(state: NirogState) {
             Column(modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
                     onClick = {
-                        // Save the current step (only if a value was entered), then advance.
+                        // Save the current step (only if a value was entered), then advance. New readings go
+                        // through the shared health store; an "Edit" from the summary corrects the same
+                        // document (the server allows that for 60 minutes after it was logged).
                         when (step) {
                             0 -> {
                                 if (sugarInput.isBlank()) { advance(); return@Button }
+                                val existing = sugarDocId
                                 if (sugarType == "HbA1c") {
                                     val v = sugarInput.toDoubleOrNull() ?: run { error = "Enter a valid value"; return@Button }
                                     if (v < 3.0 || v > 20.0) { error = "Enter a value between 3 and 20%"; return@Button }
                                     saving = true
-                                    val values = mapOf("value" to v, "unit" to "%", "readingType" to "hba1c", "measuredAt" to FieldValue.serverTimestamp(), "source" to "manual")
-                                    val existing = sugarDocId
                                     if (existing == null) {
-                                        state.repository.addHealthLog("glucoseReadings", values) { r ->
+                                        state.health.logHba1c(v) { r ->
                                             saving = false
                                             if (r is CloudResult.Success) { sugarDocId = r.value; sugarResult = "HbA1c $v%"; advance() } else error = (r as CloudResult.Failure).message
                                         }
                                     } else {
-                                        state.repository.updateHealthLog("glucoseReadings", existing, values) { r ->
+                                        state.health.correct("glucoseReadings", existing, mapOf("value" to v, "unit" to "%", "readingType" to "hba1c")) { r ->
                                             saving = false
                                             if (r is CloudResult.Success) { sugarResult = "HbA1c $v%"; advance() } else error = (r as CloudResult.Failure).message
                                         }
@@ -316,29 +313,19 @@ fun DailyCheckInScreen(state: NirogState) {
                                     val v = sugarInput.toIntOrNull() ?: run { error = "Enter a valid number"; return@Button }
                                     if (v < 20 || v > 800) { error = "Enter a value between 20 and 800 mg/dL"; return@Button }
                                     saving = true
-                                    val status = if (v > 130) "High" else if (v < 80) "Low" else "Normal"
-                                    val values = mapOf("value" to v, "unit" to "mg/dL", "readingType" to if (sugarType == "Fasting") "fasting" else "post_meal", "measuredAt" to FieldValue.serverTimestamp(), "source" to "manual")
-                                    val existing = sugarDocId
+                                    val kind = if (sugarType == "Fasting") GlucoseKind.FASTING else GlucoseKind.POST_MEAL
+                                    val status = com.nirogbhumi.app.health.domain.HealthLabels.glucoseStatus(com.nirogbhumi.app.health.domain.GlucoseRanges.status(v.toDouble(), kind))
+                                    fun onDone(r: CloudResult<*>) {
+                                        saving = false
+                                        if (r is CloudResult.Success) {
+                                            sugarResult = "$sugarType $v mg/dL"; advance()
+                                            widgetScope.launch { com.nirogbhumi.app.widget.updateHealthQuickLogWidget(context, v, status) }
+                                        } else error = (r as CloudResult.Failure).message
+                                    }
                                     if (existing == null) {
-                                        state.fastingSugarValue = v
-                                        state.sugarLogs.add(0, SugarLog(state.sugarLogs.size + 1, v, sugarType, "Today, Just Now", status))
-                                        state.repository.addHealthLog("glucoseReadings", values) { r ->
-                                            saving = false
-                                            if (r is CloudResult.Success) {
-                                                sugarDocId = r.value; sugarResult = "$sugarType $v mg/dL"; advance()
-                                                widgetScope.launch { com.nirogbhumi.app.widget.updateHealthQuickLogWidget(context, v, status) }
-                                            } else error = (r as CloudResult.Failure).message
-                                        }
+                                        state.health.logGlucose(v, kind) { r -> if (r is CloudResult.Success) sugarDocId = r.value; onDone(r) }
                                     } else {
-                                        state.fastingSugarValue = v
-                                        if (state.sugarLogs.isNotEmpty()) state.sugarLogs[0] = state.sugarLogs[0].copy(value = v, type = sugarType, status = status)
-                                        state.repository.updateHealthLog("glucoseReadings", existing, values) { r ->
-                                            saving = false
-                                            if (r is CloudResult.Success) {
-                                                sugarResult = "$sugarType $v mg/dL"; advance()
-                                                widgetScope.launch { com.nirogbhumi.app.widget.updateHealthQuickLogWidget(context, v, status) }
-                                            } else error = (r as CloudResult.Failure).message
-                                        }
+                                        state.health.correct("glucoseReadings", existing, mapOf("value" to v, "unit" to "mg/dL", "readingType" to if (kind == GlucoseKind.FASTING) "fasting" else "post_meal"), ::onDone)
                                     }
                                 }
                             }
@@ -346,19 +333,19 @@ fun DailyCheckInScreen(state: NirogState) {
                                 if (systolic.isBlank() && diastolic.isBlank()) { advance(); return@Button }
                                 val sys = systolic.toIntOrNull(); val dia = diastolic.toIntOrNull()
                                 if (sys == null || dia == null) { error = "Enter both numbers, or skip"; return@Button }
-                                if (sys < 60 || sys > 260 || dia < 30 || dia > 180) { error = "Enter a plausible BP (systolic 60-260, diastolic 30-180)"; return@Button }
+                                if (sys < 60 || sys > 260 || dia < 30 || dia > 180) { error = "Check the numbers: the upper number is usually 60-260 and the lower 30-180"; return@Button }
+                                if (dia >= sys) { error = "The upper number should be higher than the lower one"; return@Button }
                                 saving = true
-                                val values = mapOf("systolic" to sys, "diastolic" to dia, "measuredAt" to FieldValue.serverTimestamp(), "source" to "manual")
                                 val existing = bpDocId
                                 if (existing == null) {
-                                    state.repository.addHealthLog("bpReadings", values) { r ->
+                                    state.health.logBp(sys, dia) { r ->
                                         saving = false
-                                        if (r is CloudResult.Success) { bpDocId = r.value; state.latestBpReading = "$sys/$dia"; bpResult = "$sys/$dia mmHg"; advance() } else error = (r as CloudResult.Failure).message
+                                        if (r is CloudResult.Success) { bpDocId = r.value; bpResult = "$sys/$dia mmHg"; advance() } else error = (r as CloudResult.Failure).message
                                     }
                                 } else {
-                                    state.repository.updateHealthLog("bpReadings", existing, values) { r ->
+                                    state.health.correct("bpReadings", existing, mapOf("systolic" to sys, "diastolic" to dia)) { r ->
                                         saving = false
-                                        if (r is CloudResult.Success) { state.latestBpReading = "$sys/$dia"; bpResult = "$sys/$dia mmHg"; advance() } else error = (r as CloudResult.Failure).message
+                                        if (r is CloudResult.Success) { bpResult = "$sys/$dia mmHg"; advance() } else error = (r as CloudResult.Failure).message
                                     }
                                 }
                             }
@@ -367,17 +354,16 @@ fun DailyCheckInScreen(state: NirogState) {
                                 val w = weightInput.toDoubleOrNull() ?: run { error = "Enter a valid weight"; return@Button }
                                 if (w < 20.0 || w > 300.0) { error = "Enter a weight between 20 and 300 kg"; return@Button }
                                 saving = true
-                                val values = mapOf("valueKg" to w, "measuredAt" to FieldValue.serverTimestamp(), "source" to "manual")
                                 val existing = weightDocId
                                 if (existing == null) {
-                                    state.repository.addHealthLog("weightLogs", values) { r ->
+                                    state.health.logWeight(w) { r ->
                                         saving = false
-                                        if (r is CloudResult.Success) { weightDocId = r.value; state.profileWeight = weightInput; weightResult = "$w kg"; advance() } else error = (r as CloudResult.Failure).message
+                                        if (r is CloudResult.Success) { weightDocId = r.value; weightResult = "$w kg"; advance() } else error = (r as CloudResult.Failure).message
                                     }
                                 } else {
-                                    state.repository.updateHealthLog("weightLogs", existing, values) { r ->
+                                    state.health.correct("weightLogs", existing, mapOf("valueKg" to w)) { r ->
                                         saving = false
-                                        if (r is CloudResult.Success) { state.profileWeight = weightInput; weightResult = "$w kg"; advance() } else error = (r as CloudResult.Failure).message
+                                        if (r is CloudResult.Success) { weightResult = "$w kg"; advance() } else error = (r as CloudResult.Failure).message
                                     }
                                 }
                             }
@@ -385,24 +371,17 @@ fun DailyCheckInScreen(state: NirogState) {
                                 val taken = medicationTaken ?: run { advance(); return@Button }
                                 saving = true
                                 val name = medicationName.trim().take(80)
-                                val values = mapOf("taken" to taken, "name" to name.ifBlank { null }, "measuredAt" to FieldValue.serverTimestamp(), "source" to "manual")
+                                val summary = (if (taken) "Taken" else "Missed") + if (name.isNotBlank()) " · $name" else ""
                                 val existing = medicationDocId
                                 if (existing == null) {
-                                    state.repository.addHealthLog("medicationLogs", values) { r ->
+                                    state.health.logMedication(taken, name) { r ->
                                         saving = false
-                                        if (r is CloudResult.Success) {
-                                            medicationDocId = r.value
-                                            medicationResult = (if (taken) "Taken" else "Missed") + if (name.isNotBlank()) " · $name" else ""
-                                            advance()
-                                        } else error = (r as CloudResult.Failure).message
+                                        if (r is CloudResult.Success) { medicationDocId = r.value; medicationResult = summary; advance() } else error = (r as CloudResult.Failure).message
                                     }
                                 } else {
-                                    state.repository.updateHealthLog("medicationLogs", existing, values) { r ->
+                                    state.health.correct("medicationLogs", existing, mapOf("taken" to taken, "name" to name.ifBlank { null })) { r ->
                                         saving = false
-                                        if (r is CloudResult.Success) {
-                                            medicationResult = (if (taken) "Taken" else "Missed") + if (name.isNotBlank()) " · $name" else ""
-                                            advance()
-                                        } else error = (r as CloudResult.Failure).message
+                                        if (r is CloudResult.Success) { medicationResult = summary; advance() } else error = (r as CloudResult.Failure).message
                                     }
                                 }
                             }

@@ -44,6 +44,25 @@ export interface LogEntry {
   data: Record<string, unknown>
 }
 
+const fromDevice = (d: Record<string, unknown>) => (d.source === 'health_connect' || d.source === 'device' ? ' · from device' : '')
+
+/** Sleep length in minutes from the canonical field, or from what older entries stored (hours, or a start and wake time). */
+export function sleepMinutes(d: Record<string, unknown>): number | null {
+  if (typeof d.durationMinutes === 'number') return Math.round(d.durationMinutes)
+  const start = toDate(d.sleepStartAt ?? d.sleepTime)
+  const end = toDate(d.sleepEndAt ?? d.wakeTime)
+  if (start && end && end > start) return Math.round((end.getTime() - start.getTime()) / 60000)
+  if (typeof d.duration === 'number') return Math.round(d.duration * 60)
+  if (typeof d.hours === 'number') return Math.round(d.hours * 60)
+  return null
+}
+
+export function formatDuration(minutes: number): string {
+  const h = Math.floor(minutes / 60)
+  const m = minutes % 60
+  return h > 0 ? `${h}h ${m}m` : `${m}m`
+}
+
 /** One-line human summary for a log entry, tuned per collection's known fields. */
 export function summarizeLog(entry: LogEntry): string {
   const d = entry.data
@@ -58,11 +77,17 @@ export function summarizeLog(entry: LogEntry): string {
       const bp = d.systolic != null && d.diastolic != null ? `${d.systolic}/${d.diastolic} mmHg` : '—'
       return `${bp}${d.status === 'critical' ? ' · critical' : ''}`
     }
-    case 'weightLogs':
-      return d.weightKg != null ? `${d.weightKg} kg` : d.valueKg != null ? `${d.valueKg} kg` : '—'
-    case 'sleepLogs':
-      return d.duration != null ? `${d.duration} h` : '—'
+    case 'weightLogs': {
+      // valueKg is the canonical field; weightKg is what older Health Connect imports stored.
+      const kg = d.valueKg ?? d.weightKg
+      return typeof kg === 'number' ? `${kg} kg${fromDevice(d)}` : '—'
+    }
+    case 'sleepLogs': {
+      const minutes = sleepMinutes(d)
+      return minutes != null ? `${formatDuration(minutes)}${fromDevice(d)}` : '—'
+    }
     case 'walkLogs': {
+      if (typeof d.steps === 'number' && d.steps > 0) return `${d.steps.toLocaleString('en-IN')} steps${fromDevice(d)}`
       const minutes = d.minutes != null ? `${d.minutes} min` : '—'
       const type = typeof d.activityType === 'string' ? ` · ${d.activityType}` : ''
       return `${minutes}${type}`

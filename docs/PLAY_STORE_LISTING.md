@@ -12,7 +12,7 @@ This file provides review-ready store copy for the Play Console listing. The own
 
 ## Short description
 
-Track diabetes care, health habits, reports, and guided wellness programs with your coach.
+Track sugar, BP and daily habits with diet and yoga plans from your coach.
 
 ## Full description
 
@@ -28,7 +28,7 @@ Important medical disclaimer: Nirog Bhumi is not a medical device and does not p
 
 ## Hindi short description
 
-अपने coach के साथ डायबिटीज़ care, habits, reports और wellness programs track करें।
+शुगर, BP और रोज़ की आदतें track करें, अपने coach की diet और yoga plans के साथ।
 
 ## Hindi full description
 

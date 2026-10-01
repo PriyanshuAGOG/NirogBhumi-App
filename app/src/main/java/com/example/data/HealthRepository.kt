@@ -8,6 +8,8 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
 import com.google.firebase.storage.FirebaseStorage
 import com.google.firebase.functions.FirebaseFunctions
+import com.nirogbhumi.app.health.domain.Corrections
+import com.nirogbhumi.app.health.domain.ServerTime
 import java.util.UUID
 
 private fun checkinDayKey(millis: Long): String {
@@ -16,25 +18,17 @@ private fun checkinDayKey(millis: Long): String {
     return fmt.format(java.util.Date(millis))
 }
 
-data class CloudDocument(val id: String, val values: Map<String, Any?>)
-fun interface CloudSubscription { fun cancel() }
-
-sealed interface CloudResult<out T> {
-    data class Success<T>(val value: T) : CloudResult<T>
-    data class Failure(val message: String, val cause: Throwable? = null) : CloudResult<Nothing>
-}
-
 /** The single cloud boundary used by UI/view-models. It is safe to construct without Firebase credentials. */
-interface HealthRepository {
+interface HealthRepository : HealthLogBackend {
     val isCloudConfigured: Boolean
-    val userId: String?
+    override val userId: String?
     fun saveProfile(values: Map<String, Any?>, done: (CloudResult<Unit>) -> Unit)
     // Writes an immutable, timestamped, versioned record of exactly what the
     // user consented to - the "consent record" the DPDP Act 2023 expects a
     // Data Fiduciary to keep. Append-only (users/{uid}/consentReceipts); the
     // rules forbid updating or deleting a receipt once written.
     fun recordConsentReceipt(purposes: Map<String, Boolean>, version: String, done: (CloudResult<Unit>) -> Unit)
-    fun addHealthLog(collection: String, values: Map<String, Any?>, done: (CloudResult<String>) -> Unit)
+    override fun addHealthLog(collection: String, values: Map<String, Any?>, done: (CloudResult<String>) -> Unit)
     // Corrects a reading logged moments ago (a typo'd value, the wrong meal
     // context) without needing a full history screen - narrower than
     // upsertUserRecord (that one's for device-sync records keyed by a stable
@@ -42,7 +36,7 @@ interface HealthRepository {
     // wrongly reset when this reading was actually taken). This targets the
     // real Firestore-assigned doc id addHealthLog already returned, and never
     // touches createdAt/measuredAt unless the caller explicitly includes it.
-    fun updateHealthLog(collection: String, documentId: String, values: Map<String, Any?>, done: (CloudResult<Unit>) -> Unit)
+    override fun updateHealthLog(collection: String, documentId: String, values: Map<String, Any?>, done: (CloudResult<Unit>) -> Unit)
     fun uploadPrivateFile(folder: String, uri: Uri, done: (CloudResult<String>) -> Unit)
     // orderByField/descending default to unset (Firestore's own implementation-
     // defined order) to preserve every existing call site's behavior - only
@@ -52,7 +46,19 @@ interface HealthRepository {
     // the collection passes the limit).
     fun listenUserCollection(collection: String, limit: Long = 30, orderByField: String? = null, descending: Boolean = true, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription
     fun listenPublicCollection(collection: String, limit: Long = 30, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription
+    // Newest-first (by createdAt, which every log has) window of the member's own records, with
+    // freshness metadata. This is what HealthDataStore listens to - screens never call it directly.
+    override fun listenHealthSnapshot(collection: String, limit: Long, update: (CloudResult<HealthSnapshot>) -> Unit): CloudSubscription =
+        listenUserCollection(collection, limit, "createdAt", true) { r ->
+            update(when (r) {
+                is CloudResult.Success -> CloudResult.Success(HealthSnapshot(r.value, fromCache = false, hasPendingWrites = false))
+                is CloudResult.Failure -> r
+            })
+        }
     fun requestDataExport(done: (CloudResult<Unit>) -> Unit)
+    // A fresh short-lived download link (15 minutes) for one of the caller's completed exports. `url` is null when
+    // the server cannot sign links yet; the caller then downloads through its own authenticated Storage access.
+    fun getExportDownloadLink(requestId: String, done: (CloudResult<ExportLink>) -> Unit)
     // Schedules the account (and its data) for permanent deletion after a
     // grace period; succeeds with the scheduled time in epoch millis. What is
     // erased versus kept (health readings are only kept, de-identified, if the
@@ -260,7 +266,7 @@ class FirebaseHealthRepository : HealthRepository {
         val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
         val ref = db?.collection(collection)?.document()
             ?: return done(CloudResult.Failure("Firebase is not configured"))
-        ref.set(values + mapOf("userId" to uid, "profileId" to (values["profileId"] ?: uid), "createdAt" to FieldValue.serverTimestamp()))
+        ref.set(materialize(values) + mapOf("userId" to uid, "profileId" to (values["profileId"] ?: uid), "createdAt" to FieldValue.serverTimestamp()))
             .addOnSuccessListener {
                 AnalyticsLogger.log("log_added", mapOf("log_type" to collection))
                 done(CloudResult.Success(ref.id))
@@ -270,19 +276,41 @@ class FirebaseHealthRepository : HealthRepository {
 
     override fun updateHealthLog(collection: String, documentId: String, values: Map<String, Any?>, done: (CloudResult<Unit>) -> Unit) {
         val done = reporting("updateHealthLog:$collection", done)
-        // Deliberately narrower than addHealthLog's allow-list - only the
-        // readings a member could plausibly want to quick-correct right
-        // after logging; labReports/consultations/orders/etc go through
-        // their own dedicated edit flows, not this one.
-        val allowed = setOf("glucoseReadings", "bpReadings", "sleepLogs", "walkLogs", "weightLogs", "medicationLogs")
-        if (collection !in allowed) return done(CloudResult.Failure("Unsupported health log"))
+        // Only readings a member can type in, and only the fields a correction may touch
+        // (Corrections.editableKeys). userId/profileId/source/createdAt can never be sent from here;
+        // the Firestore rules refuse them and any edit after 60 minutes too, using the server clock.
+        if (!Corrections.isCorrectable(collection)) return done(CloudResult.Failure("Unsupported health log"))
         if (userId == null) return done(CloudResult.Failure("Sign in is required"))
+        val patch = Corrections.patch(collection, values)
+        if (patch.isEmpty()) return done(CloudResult.Failure("Nothing to change"))
         val ref = db?.collection(collection)?.document(documentId)
             ?: return done(CloudResult.Failure("Firebase is not configured"))
-        ref.set(values, SetOptions.merge())
-            .addOnSuccessListener { done(CloudResult.Success(Unit)) }
-            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Could not update", it)) }
+        // set(merge) rather than update(): patch values may be null (e.g. a cleared medication name),
+        // which update()'s non-null map type rejects. The rules treat a merge onto an existing doc as an update.
+        ref.set(
+            materialize(patch) + mapOf(
+                "updatedAt" to FieldValue.serverTimestamp(),
+                "lastCorrectedAt" to FieldValue.serverTimestamp(),
+                "correctionCount" to FieldValue.increment(1),
+            ),
+            SetOptions.merge(),
+        )
+            .addOnSuccessListener {
+                // Event names and the collection only - never the value that was entered.
+                AnalyticsLogger.log("health_log_corrected", mapOf("log_type" to collection))
+                done(CloudResult.Success(Unit))
+            }
+            .addOnFailureListener { error ->
+                val denied = (error as? com.google.firebase.firestore.FirebaseFirestoreException)?.code ==
+                    com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED
+                if (denied) AnalyticsLogger.log("health_log_edit_expired", mapOf("log_type" to collection))
+                done(CloudResult.Failure(if (denied) CORRECTION_REFUSED else (error.message ?: "Could not update"), error))
+            }
     }
+
+    // Domain payloads say ServerTime; Firestore needs its sentinel. (Dates/numbers/strings pass straight through.)
+    private fun materialize(values: Map<String, Any?>): Map<String, Any?> =
+        values.mapValues { (_, v) -> if (v == ServerTime) FieldValue.serverTimestamp() else v }
 
     override fun uploadPrivateFile(folder: String, uri: Uri, done: (CloudResult<String>) -> Unit) {
         val done = reporting("uploadPrivateFile:$folder", done)
@@ -315,6 +343,27 @@ class FirebaseHealthRepository : HealthRepository {
         return CloudSubscription { registration.remove() }
     }
 
+    override fun listenHealthSnapshot(collection: String, limit: Long, update: (CloudResult<HealthSnapshot>) -> Unit): CloudSubscription {
+        val update = reporting("listenHealthSnapshot:$collection", update)
+        val uid = userId ?: run { update(CloudResult.Failure("Sign in is required")); return CloudSubscription {} }
+        val healthCollections = setOf("glucoseReadings", "bpReadings", "weightLogs", "sleepLogs", "walkLogs", "labReports", "medicationLogs")
+        if (collection !in healthCollections) { update(CloudResult.Failure("Unsupported collection")); return CloudSubscription {} }
+        val query = db?.collection(collection)?.whereEqualTo("userId", uid)
+            ?.orderBy("createdAt", com.google.firebase.firestore.Query.Direction.DESCENDING)?.limit(limit)
+            ?: run { update(CloudResult.Failure("Firebase is not configured")); return CloudSubscription {} }
+        // INCLUDE metadata changes so the UI learns when a cache snapshot is confirmed by the server.
+        val registration = query.addSnapshotListener(com.google.firebase.firestore.MetadataChanges.INCLUDE) { snapshot, error ->
+            if (error != null) { update(CloudResult.Failure(error.message ?: "Could not load data", error)); return@addSnapshotListener }
+            val docs = snapshot?.documents.orEmpty().map { doc ->
+                // ESTIMATE: a write still waiting for the server already carries a local time, so it shows up immediately.
+                val data = doc.getData(com.google.firebase.firestore.DocumentSnapshot.ServerTimestampBehavior.ESTIMATE).orEmpty()
+                CloudDocument(doc.id, data.mapValues { (_, v) -> if (v is com.google.firebase.Timestamp) v.toDate() else v })
+            }
+            update(CloudResult.Success(HealthSnapshot(docs, snapshot?.metadata?.isFromCache == true, snapshot?.metadata?.hasPendingWrites() == true)))
+        }
+        return CloudSubscription { registration.remove() }
+    }
+
     override fun listenPublicCollection(collection: String, limit: Long, update: (CloudResult<List<CloudDocument>>) -> Unit): CloudSubscription {
         val update = reporting("listenPublicCollection:$collection", update)
         if (collection !in setOf("contentItems", "products", "programs", "consultationSlots")) { update(CloudResult.Failure("Unsupported public collection")); return CloudSubscription {} }
@@ -342,6 +391,19 @@ class FirebaseHealthRepository : HealthRepository {
         callable.call()
             .addOnSuccessListener { AnalyticsLogger.log("data_export_requested"); done(CloudResult.Success(Unit)) }
             .addOnFailureListener { done(CloudResult.Failure(it.message ?: "Export could not be requested", it)) }
+    }
+
+    override fun getExportDownloadLink(requestId: String, done: (CloudResult<ExportLink>) -> Unit) {
+        val done = reporting("getExportDownloadLink", done)
+        val callable = functions?.getHttpsCallable("getExportDownloadLink") ?: return done(CloudResult.Failure("Firebase is not configured"))
+        callable.call(mapOf("requestId" to requestId))
+            .addOnSuccessListener { result ->
+                val data = result.data as? Map<*, *>
+                val path = data?.get("storagePath") as? String
+                if (path == null) done(CloudResult.Failure("The download link could not be created"))
+                else done(CloudResult.Success(ExportLink(url = (data["url"] as? String)?.takeIf { it.startsWith("https://") }, storagePath = path)))
+            }
+            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "The download link could not be created", it)) }
     }
 
     override fun requestAccountDeletion(done: (CloudResult<Long>) -> Unit) {
@@ -978,7 +1040,10 @@ class FirebaseHealthRepository : HealthRepository {
         // in the same document, since Firestore document ids aren't implicitly
         // scoped per user the way the userId field is.
         val safeId = "${uid}_$normalizedId"
-        db?.collection(collection)?.document(safeId)?.set(values + mapOf("userId" to uid, "profileId" to (values["profileId"] ?: uid), "createdAt" to FieldValue.serverTimestamp(), "updatedAt" to FieldValue.serverTimestamp()), SetOptions.merge())
+        // An importer that supplies its own createdAt (the provider's time) keeps it identical on every
+        // re-sync; anything else is stamped now, as before (checklist days, device connections).
+        val createdAt = if (values.containsKey("createdAt")) values["createdAt"] else FieldValue.serverTimestamp()
+        db?.collection(collection)?.document(safeId)?.set(materialize(values) + mapOf("userId" to uid, "profileId" to (values["profileId"] ?: uid), "createdAt" to createdAt, "updatedAt" to FieldValue.serverTimestamp()), SetOptions.merge())
             ?.addOnSuccessListener { done(CloudResult.Success(Unit)) }
             ?.addOnFailureListener { done(CloudResult.Failure(it.message ?: "Synced record could not be saved", it)) }
             ?: done(CloudResult.Failure("Firebase is not configured"))

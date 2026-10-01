@@ -7,10 +7,10 @@
 // dependencies (the unit tests use fakes). Never touches production.
 import { initializeApp } from 'firebase/app';
 import { connectAuthEmulator, createUserWithEmailAndPassword, getAuth, signInWithEmailAndPassword } from 'firebase/auth';
-import { addDoc, collection, connectFirestoreEmulator, deleteDoc, doc, getDoc, getDocs, getFirestore, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
+import { addDoc, collection, connectFirestoreEmulator, deleteDoc, doc, getDoc, getDocs, getFirestore, increment, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
 import { connectFunctionsEmulator, getFunctions, httpsCallable } from 'firebase/functions';
 import { connectStorageEmulator, getBytes, getStorage, ref, uploadBytes } from 'firebase/storage';
-import { require, step, expect, eventually, errorCode, summarize } from './lib.mjs';
+import { require, step, expect, eventually, errorCode, summarize, readZip } from './lib.mjs';
 
 const { initializeApp: initAdmin } = require('firebase-admin/app');
 const { getFirestore: adminFirestore, Timestamp } = require('firebase-admin/firestore');
@@ -81,6 +81,45 @@ await step('health logging: readings save, the server categorises them and mirro
   expect(list.size === 1, 'member can list their own readings');
 });
 
+await step('health corrections: 60-minute window, audit trail, protected fields and read-only imports, enforced by the real rules', async () => {
+  const correction = (fields) => ({ ...fields, updatedAt: serverTimestamp(), lastCorrectedAt: serverTimestamp(), correctionCount: increment(1) });
+  const denied = async (fn, what) => expect((await errorCode(fn)) === 'permission-denied', `${what} should be refused`);
+  // a fresh entry can be corrected, once or twice, and keeps an audit trail
+  const fresh = await addDoc(collection(db, 'weightLogs'), { userId: uid, profileId: uid, valueKg: 70, measuredAt: serverTimestamp(), source: 'manual', createdAt: serverTimestamp() });
+  await setDoc(fresh, correction({ valueKg: 69.5 }), { merge: true });
+  await setDoc(fresh, correction({ valueKg: 69.2 }), { merge: true });
+  const afterFix = (await getDoc(fresh)).data();
+  expect(afterFix.valueKg === 69.2 && afterFix.correctionCount === 2 && afterFix.source === 'manual', `correction recorded: ${JSON.stringify({ v: afterFix.valueKg, n: afterFix.correctionCount })}`);
+  // protected fields cannot be changed, and unknown fields cannot be added
+  await denied(() => setDoc(fresh, correction({ valueKg: 69, createdAt: serverTimestamp() }), { merge: true }), 'changing createdAt');
+  await denied(() => setDoc(fresh, correction({ valueKg: 69, source: 'health_connect' }), { merge: true }), 'changing source');
+  await denied(() => setDoc(fresh, correction({ valueKg: 69, userId: 'someone-else' }), { merge: true }), 'changing userId');
+  await denied(() => setDoc(fresh, { valueKg: 68, updatedAt: serverTimestamp() }, { merge: true }), 'a correction without the audit trail');
+  await denied(() => setDoc(fresh, correction({ valueKg: 900 }), { merge: true }), 'an impossible weight');
+  // an entry older than 60 minutes is part of the record
+  await adb.doc('weightLogs/j-old').set({ userId: uid, profileId: uid, valueKg: 71, source: 'manual', measuredAt: Timestamp.fromMillis(Date.now() - 2 * 3600_000), createdAt: Timestamp.fromMillis(Date.now() - 2 * 3600_000) });
+  await denied(() => setDoc(doc(db, 'weightLogs/j-old'), correction({ valueKg: 70 }), { merge: true }), 'editing an entry older than 60 minutes');
+  // Health Connect import: created with the provider time, re-synced in place, never hand-edited
+  const imported = (value) => ({ userId: uid, profileId: uid, value, unit: 'mg/dL', readingType: 'device', measuredAt: new Date(Date.now() - 10 * 3600_000), source: 'health_connect', providerRecordId: 'rec-1', createdAt: new Date(Date.now() - 10 * 3600_000), importedAt: serverTimestamp() });
+  const hc = doc(db, 'glucoseReadings/j-hc1');
+  await setDoc(hc, imported(98), { merge: true });
+  await setDoc(hc, imported(99), { merge: true });
+  await denied(() => setDoc(hc, correction({ value: 140 }), { merge: true }), 'hand-editing an imported reading');
+  // an imported reading is not a check-in and never pages anyone
+  const hcBp = await addDoc(collection(db, 'bpReadings'), { userId: uid, profileId: uid, systolic: 195, diastolic: 125, source: 'health_connect', providerRecordId: 'bp-1', createdAt: new Date(Date.now() - 3600_000), importedAt: serverTimestamp(), measuredAt: new Date(Date.now() - 3600_000) });
+  await eventually(async () => (await getDoc(hcBp)).get('status') ? true : null, 'the imported reading is still categorised');
+  expect((await adb.collection('notifications').where('userId', '==', uid).where('type', '==', 'critical_alert').get()).docs.every((d) => d.get('title') !== 'Please review your BP reading'), 'an imported critical BP must not raise a critical push');
+});
+
+await step('support: a request is saved, length-capped, and emailed to the inbox once', async () => {
+  const req = await addDoc(collection(db, 'supportRequests'), { userId: uid, status: 'open', subject: 'Cannot see my readings', message: 'Hello <b>team</b>, please help.', appVersion: '1.0.3', createdAt: serverTimestamp() });
+  expect((await errorCode(() => addDoc(collection(db, 'supportRequests'), { userId: uid, status: 'open', subject: 'x'.repeat(151), message: 'hi', createdAt: serverTimestamp() }))) === 'permission-denied', 'over-long subject refused');
+  const sent = await eventually(async () => { const s = await adb.doc(`mail/support_${req.id}`).get(); return s.exists ? s.data() : null; }, 'support email should be queued');
+  expect(sent.to[0] === 'support@example.org' && /\[Support\] Cannot see my readings/.test(sent.message.subject), `support email wrong: ${JSON.stringify(sent.message.subject)}`);
+  expect(!sent.message.html.includes('<b>team</b>') && sent.message.html.includes('&lt;b&gt;'), 'the member\'s text is escaped in the html copy');
+  expect((await errorCode(() => getDoc(doc(db, 'mail', `support_${req.id}`)))) === 'permission-denied', 'the member cannot read the outbound mail queue');
+});
+
 await step('batch chat: send a message and read it back; a member cannot pin', async () => {
   const m = await addDoc(collection(db, 'programChatMessages'), { programId: 'progJ', userId: uid, senderName: 'Journey Member', text: 'Hello batch!', photoUrl: null, audioUrl: null, audioDurationSec: null, replyTo: null, createdAt: serverTimestamp() });
   const list = await getDocs(query(collection(db, 'programChatMessages'), where('programId', '==', 'progJ')));
@@ -138,9 +177,25 @@ await step('data export: request -> file generated -> member downloads their own
   expect((await errorCode(() => call('requestDataExport', {}))) === 'functions/resource-exhausted', 'second export within an hour is rate limited');
   const request = await eventually(async () => { const s = await getDocs(query(collection(db, 'dataExportRequests'), where('userId', '==', uid))); const d = s.docs[0]?.data(); return d?.status === 'completed' ? d : null; }, 'exportUserData should complete the request');
   exportPath = request.storagePath;
-  const json = JSON.parse(new TextDecoder().decode(await getBytes(ref(storage, exportPath))));
+  expect(exportPath.endsWith('.zip') && request.format === 'zip', `export should be a zip, got ${exportPath}`);
+  const files = readZip(Buffer.from(await getBytes(ref(storage, exportPath))));
+  expect(['data.json', 'README.txt', 'blood_sugar.csv', 'blood_pressure.csv', 'weight.csv', 'sleep.csv', 'activity.csv', 'medication.csv'].every((n) => n in files), `zip is missing files: ${Object.keys(files).join(', ')}`);
+  const json = JSON.parse(files['data.json'].toString('utf8'));
   expect(json.users.length === 1 && json.users[0].fullName === 'Journey Member', 'export has the profile');
-  expect(json.glucoseReadings.length === 1 && json.programChatMessages.length === 1 && json.consentReceipts.length === 1 && json.coachInboxMessages.length === 1, `export is missing sections: ${Object.entries(json).filter(([, v]) => Array.isArray(v)).map(([k, v]) => `${k}:${v.length}`).join(' ')}`);
+  expect(json.glucoseReadings.length === 2 && json.programChatMessages.length === 1 && json.consentReceipts.length === 1 && json.coachInboxMessages.length === 1, `export is missing sections: ${Object.entries(json).filter(([, v]) => Array.isArray(v)).map(([k, v]) => `${k}:${v.length}`).join(' ')}`);
+  expect(/^\d{4}-\d\d-\d\dT/.test(String(json.glucoseReadings[0].createdAt)), 'timestamps are written as ISO text, not raw objects');
+  const sugarCsv = files['blood_sugar.csv'].toString('utf8').trim().split(/\r?\n/);
+  expect(sugarCsv.length === 3 && sugarCsv[0].startsWith('measuredAt,value') && sugarCsv.some((l) => l.includes(',142,')) && sugarCsv.some((l) => l.includes('health_connect')), `blood sugar csv wrong: ${sugarCsv.join(' | ')}`);
+  // The email carries a link (or app instructions) but never any readings.
+  const mail = await eventually(async () => { const m = await adb.collection('mail').get(); const list = m.docs.filter((d) => d.id.startsWith('export_')).map((d) => ({ id: d.id, ...d.data() })); return list.length ? list : null; }, 'an export email should be queued for a member with an email address');
+  expect(mail.length === 1 && mail[0].id.startsWith('export_'), `one email, keyed by the export request (idempotent); found ${mail.length}: ${mail.map((m) => m.id).join(', ')}`);
+  expect(!/142|Journey Member/.test(JSON.stringify(mail[0].message)), 'email must not contain health values or the name');
+  expect(['queued', 'duplicate'].includes(request.emailStatus), `emailStatus ${request.emailStatus}`);
+  // A fresh short-lived link for the owner only (null in the emulator if signing is unavailable there).
+  const requestDocId = (await getDocs(query(collection(db, 'dataExportRequests'), where('userId', '==', uid)))).docs[0].id;
+  const link = await call('getExportDownloadLink', { requestId: requestDocId });
+  expect(link.storagePath === exportPath && link.expiresInMinutes === 15 && (link.url === null || typeof link.url === 'string'), `link response wrong: ${JSON.stringify(link)}`);
+  expect((await errorCode(() => call('getExportDownloadLink', { requestId: 'nope' }))) === 'functions/not-found', 'unknown export id');
 });
 
 await step('deletion: schedule (7 days), idempotent, visible to the member, cancel, re-schedule', async () => {
