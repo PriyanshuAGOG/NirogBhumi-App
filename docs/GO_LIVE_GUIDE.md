@@ -59,7 +59,8 @@ you give me the input. **Both** = joint.
 
 ## Phase 2. Legal and policy (blocks the Play upload)
 
-9. **Send me the legal details** (You, then Claude): operating entity name, registered office / postal address,
+9. **Send me the legal details** (You, then Claude): the entity is filled in as Nirog Bhumi Private Limited (tell me if
+    the registered name differs, e.g. spelling or "Pvt. Ltd."). Still needed: registered office / postal address,
    Grievance Officer's full legal name (if wanted), and the publication date. I fill them in and push; the strict
    release gate (`scripts/check_release_gates.py --strict`) refuses closed/production uploads until no `[placeholder]`
    is left.
@@ -112,10 +113,12 @@ you give me the input. **Both** = joint.
 24. **Internal track** (You trigger): Actions > *Upload Android App Bundle to Google Play*: track `internal`,
     status `draft`, version name `1.0.0`. Add the team in Play Console and run the acceptance list in
     `docs/CLOSED_TEST_AND_ROLLOUT.md` section 1, plus the Play pre-launch report.
-25. **Closed test**: a personal developer account needs at least 12 testers opted in for 14 continuous days before
-    production access (organization accounts are exempt; check which you have). Recruit 15 to 20, keep a single
+25. **Closed test**: the developer account is an organization account (Nirog Bhumi Private Limited), which Play
+    exempts from the "12 testers for 14 days" rule. Confirm in Play Console (Dashboard) that no such requirement is
+    shown. A closed test is still strongly advised: recruit 10 to 20 real people for at least a week, keep a single
     feedback channel, watch Crashlytics (crash-free users at least 99.5%) and Play vitals.
-26. **Apply for production** after day 14, with an honest test summary.
+26. **Production access**: if Play Console asks you to apply, answer with an honest test summary; otherwise create the
+    production release directly.
 27. **Staged rollout**: production, `inProgress`, 5%; watch 24 to 48 hours (Crashlytics, vitals, Cloud Functions
     errors, support inbox); then 20%, 50%, 100% while numbers stay healthy. Halt on a crash-free drop below 99%, any
     privacy or data-integrity defect, or login failing for a group.
@@ -142,4 +145,4 @@ scan, journey e2e has 16 checks rather than 32, some debug-only admin and expert
 ## Suggested order (shortest path)
 
 1-8 (production works) → 9 and 12 (legal details, clinician) → 13-14 (phones) → 16-23 (signing, Play forms) →
-24 (internal) → 25-26 (14-day closed test; run 15 and 10 in parallel) → 27 (staged rollout).
+24 (internal) → 25-26 (closed test, about a week; run 15 and 10 in parallel) → 27 (staged rollout).
