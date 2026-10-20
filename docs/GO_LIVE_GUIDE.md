@@ -42,9 +42,19 @@ you give me the input. **Both** = joint.
    document and checking `delivery.state = SUCCESS`, then delete it.
 4. **Mailbox hygiene** (You + Gautam). SPF, DKIM and DMARC for nirogbhumi.com so exports and alerts do not land in
    spam.
-5. **Signed-link grant** (You, 2 min, Cloud Shell):
+5. **Runtime permissions for the functions** (You, 2 min; found in production on 2026-10-20: without these every data
+   function fails with PERMISSION_DENIED / HTTP 500). Functions run as the Compute default account, which new
+   organizations create with no data roles:
    ```bash
-   RUNTIME_SA="nirog-bhumi-app@appspot.gserviceaccount.com"
+   SA="126409331898-compute@developer.gserviceaccount.com"
+   for r in roles/datastore.user roles/firebaseauth.admin roles/storage.objectAdmin roles/firebasecloudmessaging.admin; do
+     gcloud projects add-iam-policy-binding nirog-bhumi-app --member="serviceAccount:$SA" --role="$r" --condition=None --quiet
+   done
+   ```
+   Then the signed-link grant below.
+   **Signed-link grant** (You, 2 min, Cloud Shell):
+   ```bash
+   RUNTIME_SA="126409331898-compute@developer.gserviceaccount.com"  # the account the functions run as
    gcloud iam service-accounts add-iam-policy-binding "$RUNTIME_SA" --project=nirog-bhumi-app \
      --member="serviceAccount:${RUNTIME_SA}" --role="roles/iam.serviceAccountTokenCreator"
    ```

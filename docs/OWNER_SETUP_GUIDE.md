@@ -90,7 +90,7 @@ Cloud Shell, once:
 
 ```bash
 PROJECT_ID="nirog-bhumi-app"
-RUNTIME_SA="${PROJECT_ID}@appspot.gserviceaccount.com"
+RUNTIME_SA="126409331898-compute@developer.gserviceaccount.com"  # the account the functions run as
 gcloud iam service-accounts add-iam-policy-binding "$RUNTIME_SA" \
   --project="$PROJECT_ID" \
   --member="serviceAccount:${RUNTIME_SA}" \
