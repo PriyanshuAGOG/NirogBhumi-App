@@ -524,6 +524,7 @@ export const previewAnnouncementAudience = onCall({ region }, async request => {
 export const deleteAnnouncement = onCall({ region }, async request => {
   const auth = requireUser(request);
   const role = auth.token.role;
+  if (role !== 'admin' && role !== 'super_admin' && role !== 'coach') throw new HttpsError('permission-denied', 'Staff only');
   const id = String(request.data?.id ?? '');
   if (!id) throw new HttpsError('invalid-argument', 'id is required');
   const ref = db.doc(`announcements/${id}`);
@@ -710,6 +711,8 @@ export const ensureProgramMembership = onCall({ region }, async request => {
 export const adminEnrollUser = onCall({ region }, async request => {
   const auth = requireUser(request);
   const role = auth.token.role;
+  // Staff only, decided before anything is looked up (a member must not learn whether a program or user exists).
+  if (role !== 'admin' && role !== 'super_admin' && role !== 'coach') throw new HttpsError('permission-denied', 'Staff only');
   const uid = String(request.data?.uid ?? '');
   const programId = String(request.data?.programId ?? '');
   if (!uid || !programId) throw new HttpsError('invalid-argument', 'A uid and programId are required');
@@ -764,6 +767,7 @@ function normalizeContact(raw: string): { type: 'email' | 'phone'; key: string }
 export const inviteToProgram = onCall({ region }, async request => {
   const auth = requireUser(request);
   const role = auth.token.role;
+  if (role !== 'admin' && role !== 'super_admin' && role !== 'coach') throw new HttpsError('permission-denied', 'Staff only');
   const programId = String(request.data?.programId ?? '');
   const contactRaw = String(request.data?.contact ?? '');
   if (!programId || !contactRaw) throw new HttpsError('invalid-argument', 'A contact (email or phone) and programId are required');
@@ -791,6 +795,7 @@ export const inviteToProgram = onCall({ region }, async request => {
 export const revokeInvite = onCall({ region }, async request => {
   const auth = requireUser(request);
   const role = auth.token.role;
+  if (role !== 'admin' && role !== 'super_admin' && role !== 'coach') throw new HttpsError('permission-denied', 'Staff only');
   const id = String(request.data?.id ?? '');
   if (!id) throw new HttpsError('invalid-argument', 'An invite id is required');
   const ref = db.doc(`programInvites/${id}`);
@@ -820,6 +825,8 @@ export const revokeInvite = onCall({ region }, async request => {
 export const bulkOnboard = onCall({ region }, async request => {
   const auth = requireUser(request);
   const role = auth.token.role;
+  // Staff only, before anything else: a member must not be able to probe programs or add audit-log entries.
+  if (role !== 'admin' && role !== 'super_admin' && role !== 'coach') throw new HttpsError('permission-denied', 'Staff only');
   const rows = Array.isArray(request.data?.rows) ? request.data.rows : [];
   if (!rows.length) throw new HttpsError('invalid-argument', 'At least one row is required');
   if (rows.length > 300) throw new HttpsError('invalid-argument', 'Too many rows in one import (max 300)');
@@ -1225,6 +1232,7 @@ export const bootstrapSuperAdmin = onCall({ region }, async request => {
 export const sendBulkNotification = onCall({ region }, async request => {
   const auth = requireUser(request);
   const role = auth.token.role;
+  if (role !== 'admin' && role !== 'super_admin' && role !== 'coach') throw new HttpsError('permission-denied', 'Staff only');
   const programId = String(request.data?.programId ?? '');
   const title = String(request.data?.title ?? '').trim().slice(0, 120);
   const body = String(request.data?.body ?? '').trim().slice(0, 200);

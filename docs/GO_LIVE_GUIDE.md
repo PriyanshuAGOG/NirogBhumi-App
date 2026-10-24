@@ -31,6 +31,14 @@ you give me the input. **Both** = joint.
 
 ## Phase 1. Make production actually work (do this week)
 
+0. **Run the smoke test after every deploy** (You, 1 min, Cloud Shell). It is read-only and signed-out, and it checks
+   the headers, the legal pages, that every function refuses a signed-out caller with 401, and that the database and
+   storage refuse signed-out reads:
+   ```bash
+   git clone --depth 1 -b claude/firebase-setup-apk-build-s8b1ol https://github.com/PriyanshuAGOG/NirogBhumi-App.git && node NirogBhumi-App/scripts/prod_smoke.mjs
+   ```
+   (once merged to `main`, use `-b main`). Every line should say PASS; paste me any FAIL. It has not yet been run
+   against production.
 1. **Check the callables from the real console and a phone** (You, 30 min). Open `https://nirog-bhumi-app.web.app`,
    sign in, post an announcement. On a phone with the tester APK, sign up and redeem an access code. If anything
    fails, send me the error text.

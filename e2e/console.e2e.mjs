@@ -28,11 +28,20 @@ fs.mkdirSync(ARTIFACTS, { recursive: true });
 
 // ---- tiny static server with SPA fallback ---------------------------------
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.json': 'application/json', '.png': 'image/png', '.woff2': 'font/woff2' };
+// Serve the same security headers production hosting sends (firebase.json is the single source), so a policy
+// that would break the console shows up here. Only the emulator addresses are added to connect-src.
+const HOSTING_HEADERS = Object.fromEntries(
+  JSON.parse(fs.readFileSync(new URL('../firebase.json', import.meta.url), 'utf8')).hosting.headers
+    .flatMap((h) => h.headers).map((h) => [h.key.toLowerCase(), h.value]),
+);
+for (const key of ['content-security-policy', 'content-security-policy-report-only']) {
+  if (HOSTING_HEADERS[key]?.includes('connect-src')) HOSTING_HEADERS[key] = HOSTING_HEADERS[key].replace('connect-src', 'connect-src http://127.0.0.1:* ws://127.0.0.1:*');
+}
 const server = http.createServer((req, res) => {
   const urlPath = decodeURIComponent((req.url ?? '/').split('?')[0]);
   let file = path.join(DIST, urlPath);
   if (!file.startsWith(DIST) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(DIST, 'index.html');
-  res.writeHead(200, { 'content-type': MIME[path.extname(file)] ?? 'application/octet-stream' });
+  res.writeHead(200, { ...HOSTING_HEADERS, 'content-type': MIME[path.extname(file)] ?? 'application/octet-stream' });
   fs.createReadStream(file).pipe(res);
 });
 await new Promise((resolve) => server.listen(PORT, '127.0.0.1', resolve));
@@ -346,6 +355,11 @@ await step('member detail and moderation load for admin', async () => {
   await noBanner(admin.page, 'Member detail');
   await admin.page.goto(`${BASE}/moderation`);
   await eventually(async () => (await admin.page.getByText(/spammy text in A/).count()) > 0 && (await admin.page.getByText(/spammy text in B/).count()) > 0, 'admin should see reports from both batches');
+});
+
+await step('the hosting security policy blocks nothing the console needs (no CSP violations)', async () => {
+  const bad = admin.problems.filter((p) => /Content Security Policy|\[Report Only\]/i.test(p));
+  expect(bad.length === 0, `policy violations: ${bad.slice(0, 3).join(' || ')}`);
 });
 
 await step('no permission errors leaked into the admin browser console', async () => {
