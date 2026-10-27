@@ -43,6 +43,9 @@ import com.nirogbhumi.app.ui.theme.NirogType
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainHub(state: NirogState) {
+    // The dot on the chat icon: refreshed whenever the member lands here (for example, coming back from the chat).
+    LaunchedEffect(state.activeProgramId, state.isProgramActive) { refreshChatUnread(state) }
+
     // "Checked in today" is part of the shared health state (HealthUiState.today.checkedIn), so Today,
     // Track and the prompts all read the same answer; nothing is computed per tab any more.
 
@@ -57,6 +60,7 @@ fun MainHub(state: NirogState) {
                     state.currentScreen = "notifications"
                 },
                 activeTab = state.activeTab,
+                chatUnread = state.chatUnread,
                 onChatClick = {
                     state.currentScreen = "chat_hub"
                 }
@@ -256,6 +260,7 @@ fun NirogTopAppBar(
     onProfileClick: () -> Unit,
     onNotificationClick: () -> Unit,
     activeTab: String = "Today",
+    chatUnread: Boolean = false,
     onChatClick: () -> Unit = {},
 ) {
     Surface(
@@ -303,24 +308,22 @@ fun NirogTopAppBar(
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
-                // On the Care+ tab the top-right control is the batch chat hub
-                // (Announcements + General), not the notification bell.
-                if (activeTab == "Care") {
-                    IconButton(onClick = onChatClick) {
+                // Messages and notifications are both always one tap away, on every tab.
+                IconButton(onClick = onChatClick) {
+                    BadgedBox(badge = { if (chatUnread) Badge(containerColor = NirogColor.terracotta) }) {
                         Icon(
                             imageVector = Icons.Filled.Forum,
-                            contentDescription = "Batch messages",
+                            contentDescription = if (chatUnread) "Messages, something new" else "Messages",
                             tint = NirogColor.forest
                         )
                     }
-                } else {
-                    IconButton(onClick = onNotificationClick) {
-                        Icon(
-                            imageVector = Icons.Filled.Notifications,
-                            contentDescription = "Notifications",
-                            tint = NirogColor.forest
-                        )
-                    }
+                }
+                IconButton(onClick = onNotificationClick) {
+                    Icon(
+                        imageVector = Icons.Filled.Notifications,
+                        contentDescription = "Notifications",
+                        tint = NirogColor.forest
+                    )
                 }
             }
         }
@@ -1901,6 +1904,9 @@ fun CareTab(state: NirogState) {
             )
         }
 
+        // Messages are the first thing in Care for members of a program: not an icon to hunt for.
+        if (state.isProgramActive) MessagesShortcutCard(state)
+
         if (!state.isProgramActive) {
             // Booking currently lives on the website, not in-app - the in-app
             // stepper was pulled with the Razorpay removal and isn't being
@@ -2324,6 +2330,43 @@ fun LearnCategoryCard(title: String, icon: androidx.compose.ui.graphics.vector.I
                 Icon(imageVector = icon, contentDescription = title, tint = NirogColor.forest, modifier = Modifier.size(18.dp))
             }
             Text(text = title, fontWeight = FontWeight.SemiBold, color = NirogColor.forest, fontSize = 14.sp)
+        }
+    }
+}
+
+/** Batch chat and the private line to the coach, side by side at the top of Care. */
+@Composable
+private fun MessagesShortcutCard(state: NirogState) {
+    Card(
+        modifier = Modifier.fillMaxWidth().border(width = 0.5.dp, color = NirogColor.outlineVariant.copy(alpha = 0.35f), shape = RoundedCornerShape(24.dp)),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        shape = RoundedCornerShape(24.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.Forum, contentDescription = null, tint = NirogColor.forest, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Messages", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = NirogColor.forest)
+            }
+            Text("Chat with your batch, or ask your coach something privately.", fontSize = 13.sp, color = NirogColor.inkTertiary)
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                Button(
+                    onClick = { state.currentScreen = "program_chat" },
+                    modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = NirogColor.forestSoft),
+                    shape = RoundedCornerShape(24.dp)
+                ) {
+                    BadgedBox(badge = { if (state.chatUnread) Badge(containerColor = NirogColor.terracotta) }) {
+                        Text("Batch chat", color = Color.White, fontWeight = FontWeight.Bold)
+                    }
+                }
+                OutlinedButton(
+                    onClick = { state.currentScreen = "coach_inbox" },
+                    modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                    shape = RoundedCornerShape(24.dp),
+                    border = BorderStroke(1.dp, NirogColor.outlineVariant),
+                ) { Text("Ask your coach", color = NirogColor.forest, fontWeight = FontWeight.Bold) }
+            }
         }
     }
 }

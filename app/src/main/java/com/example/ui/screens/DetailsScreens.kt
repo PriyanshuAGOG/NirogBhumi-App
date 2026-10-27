@@ -1,5 +1,9 @@
 package com.nirogbhumi.app.ui.screens
 
+import com.nirogbhumi.app.health.domain.ChatPosition
+import com.nirogbhumi.app.health.domain.ChatKey
+import com.nirogbhumi.app.health.domain.ChatGrouping
+import androidx.compose.foundation.lazy.itemsIndexed
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -3750,13 +3754,21 @@ fun ProgramChatScreen(state: NirogState) {
             records!!.isEmpty() -> Box(modifier = Modifier.fillMaxWidth().weight(1f).padding(horizontal = NirogSpace.lg), contentAlignment = Alignment.Center) {
                 EmptyStateCard(Icons.Filled.Forum, "No messages yet. Say hello to your program community!")
             }
-            else -> LazyColumn(
+            else -> {
+            // Messages from the same person a few minutes apart read as one group: name once, time once, a label when the day changes.
+            val positions = remember(records) {
+                ChatGrouping.positions(
+                    records!!.map { r -> ChatKey(r.values["userId"]?.toString().orEmpty(), (r.values["createdAt"] as? Timestamp)?.toDate()?.time) },
+                    java.time.ZoneId.systemDefault(), System.currentTimeMillis(),
+                )
+            }
+            LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxWidth().weight(1f).padding(horizontal = NirogSpace.lg),
                 reverseLayout = true,
-                verticalArrangement = Arrangement.spacedBy(NirogSpace.sm)
             ) {
-                items(records!!, key = { it.id }) { record ->
+                itemsIndexed(records!!, key = { _, r -> r.id }) { index, record ->
+                    val pos = positions.getOrNull(index) ?: ChatPosition(startsGroup = true, endsGroup = true, dayLabel = null)
                     val isMine = record.values["userId"] == myUid
                     val senderName = record.values["senderName"]?.toString() ?: "Member"
                     val text = record.values["text"]?.toString().orEmpty()
@@ -3770,14 +3782,24 @@ fun ProgramChatScreen(state: NirogState) {
                     val reactions = (record.values["reactions"] as? Map<String, Any?>).orEmpty()
 
                     Column(
-                        modifier = Modifier.fillMaxWidth().animateItem(),
+                        modifier = Modifier.fillMaxWidth().animateItem().padding(top = if (pos.startsGroup) 10.dp else 2.dp),
                         horizontalAlignment = if (isMine) Alignment.End else Alignment.Start,
                     ) {
+                        pos.dayLabel?.let { label ->
+                            Box(Modifier.fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
+                                Text(
+                                    label, style = NirogType.caption, color = NirogColor.inkMuted,
+                                    modifier = Modifier.clip(RoundedCornerShape(50)).background(NirogColor.surfaceSunken).padding(horizontal = 12.dp, vertical = 3.dp),
+                                )
+                            }
+                        }
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                             verticalAlignment = Alignment.Bottom,
                         ) {
-                            if (!isMine) {
+                            // The avatar sits beside the last message of a group; earlier ones keep the same left edge.
+                            if (!isMine && !pos.endsGroup) Spacer(Modifier.size(28.dp))
+                            if (!isMine && pos.endsGroup) {
                                 Box(
                                     modifier = Modifier.size(28.dp).clip(CircleShape).background(NirogColor.forestSoft),
                                     contentAlignment = Alignment.Center,
@@ -3790,14 +3812,14 @@ fun ProgramChatScreen(state: NirogState) {
                             }
                             Column(
                                 modifier = Modifier
-                                    .widthIn(max = 260.dp)
+                                    .widthIn(max = 300.dp)
                                     .clip(RoundedCornerShape(16.dp))
                                     .background(if (isMine) NirogColor.forest else NirogColor.surfaceCard)
                                     .then(if (isMine) Modifier else Modifier.border(0.5.dp, NirogColor.surfaceSunken, RoundedCornerShape(16.dp)))
                                     .combinedClickable(onClick = {}, onLongClick = { actionTarget = record })
                                     .padding(horizontal = 14.dp, vertical = 10.dp)
                             ) {
-                                if (!isMine) Text(senderName, style = NirogType.overline, color = NirogColor.forestSoft)
+                                if (!isMine && pos.startsGroup) Text(senderName, style = NirogType.overline, color = NirogColor.forestSoft)
                                 if (replyTo != null) {
                                     Column(
                                         modifier = Modifier
@@ -3850,15 +3872,15 @@ fun ProgramChatScreen(state: NirogState) {
                                         style = NirogType.body.copy(color = if (isMine) NirogColor.onAccent else NirogColor.inkPrimary),
                                     )
                                 }
+                                if (pos.endsGroup && sentAt != null) {
+                                    Text(
+                                        java.text.SimpleDateFormat("h:mm a", java.util.Locale.getDefault()).format(sentAt),
+                                        style = NirogType.overline,
+                                        color = if (isMine) NirogColor.onAccent.copy(alpha = 0.65f) else NirogColor.inkMuted,
+                                        modifier = Modifier.align(Alignment.End).padding(top = 2.dp),
+                                    )
+                                }
                             }
-                        }
-
-                        if (sentAt != null) {
-                            Text(
-                                java.text.SimpleDateFormat("h:mm a", java.util.Locale.getDefault()).format(sentAt),
-                                style = NirogType.caption, color = NirogColor.inkMuted,
-                                modifier = Modifier.padding(top = 2.dp, start = if (isMine) 0.dp else 34.dp, end = if (isMine) 4.dp else 0.dp),
-                            )
                         }
 
                         if (reactions.isNotEmpty()) {
@@ -3889,6 +3911,7 @@ fun ProgramChatScreen(state: NirogState) {
                         }
                     }
                 }
+            }
             }
         }
 

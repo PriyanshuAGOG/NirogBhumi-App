@@ -1,5 +1,9 @@
 package com.nirogbhumi.app.ui.screens
 
+import com.nirogbhumi.app.health.domain.ChatPosition
+import com.nirogbhumi.app.health.domain.ChatKey
+import com.nirogbhumi.app.health.domain.ChatGrouping
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -224,18 +228,35 @@ private fun CoachInboxThread(state: NirogState, programId: String, memberUid: St
             // Repo returns newest-first, which is exactly what reverseLayout
             // wants: item 0 renders at the bottom, so the newest message sits
             // just above the input with history scrolling up.
-            else -> LazyColumn(
+            else -> {
+            // Same-sender messages a few minutes apart read as one group: name once, time once, a label when the day changes.
+            val positions = remember(records) {
+                ChatGrouping.positions(
+                    records!!.map { r -> ChatKey(r.values["fromUid"]?.toString().orEmpty(), (r.values["createdAt"] as? Timestamp)?.toDate()?.time) },
+                    java.time.ZoneId.systemDefault(), System.currentTimeMillis(),
+                )
+            }
+            LazyColumn(
                 modifier = Modifier.fillMaxWidth().weight(1f).padding(horizontal = NirogSpace.lg),
                 reverseLayout = true,
             ) {
-                items(records!!, key = { it.id }) { message ->
+                itemsIndexed(records!!, key = { _, r -> r.id }) { index, message ->
+                    val pos = positions.getOrNull(index) ?: ChatPosition(startsGroup = true, endsGroup = true, dayLabel = null)
                     val mine = message.values["fromUid"] == myUid
                     val fromCoach = message.values["senderRole"] == "coach"
                     val at = (message.values["createdAt"] as? Timestamp)?.toDate()
                     Column(
-                        Modifier.fillMaxWidth().padding(vertical = NirogSpace.xs),
+                        Modifier.fillMaxWidth().padding(top = if (pos.startsGroup) 10.dp else 2.dp),
                         horizontalAlignment = if (mine) Alignment.End else Alignment.Start,
                     ) {
+                        pos.dayLabel?.let { label ->
+                            Box(Modifier.fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
+                                Text(
+                                    label, style = NirogType.caption, color = NirogColor.inkMuted,
+                                    modifier = Modifier.clip(RoundedCornerShape(50)).background(NirogColor.surfaceSunken).padding(horizontal = 12.dp, vertical = 3.dp),
+                                )
+                            }
+                        }
                         Column(
                             Modifier
                                 .widthIn(max = 300.dp)
@@ -243,7 +264,7 @@ private fun CoachInboxThread(state: NirogState, programId: String, memberUid: St
                                 .background(if (mine) NirogColor.forest else NirogColor.surfaceSunken)
                                 .padding(horizontal = NirogSpace.md, vertical = NirogSpace.sm),
                         ) {
-                            if (!mine) {
+                            if (!mine && pos.startsGroup) {
                                 Text(
                                     if (fromCoach) "Coach · ${message.values["senderName"]?.toString().orEmpty()}"
                                     else message.values["senderName"]?.toString() ?: "Member",
@@ -255,16 +276,18 @@ private fun CoachInboxThread(state: NirogState, programId: String, memberUid: St
                                 style = NirogType.body,
                                 color = if (mine) Color.White else NirogColor.inkPrimary,
                             )
-                            if (at != null) {
+                            if (pos.endsGroup && at != null) {
                                 Text(
-                                    relativeTimeLabel(at),
+                                    java.text.SimpleDateFormat("h:mm a", java.util.Locale.getDefault()).format(at),
                                     style = NirogType.overline,
                                     color = if (mine) Color.White.copy(alpha = 0.7f) else NirogColor.inkMuted,
+                                    modifier = Modifier.align(Alignment.End).padding(top = 2.dp),
                                 )
                             }
                         }
                     }
                 }
+            }
             }
         }
 

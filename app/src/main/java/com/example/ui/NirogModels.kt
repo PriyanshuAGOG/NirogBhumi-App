@@ -135,6 +135,8 @@ class NirogState {
 
     // Epoch millis a scheduled account deletion will run at, or null when none is pending. Drives the banner shown everywhere.
     var pendingDeletionMillis by mutableStateOf<Long?>(null)
+    /** True when the batch chat or announcements have something the member has not read. Drives the dot on the chat icon. */
+    var chatUnread by mutableStateOf(false)
 
     // Active Tab under Dashboard
     var activeTab by mutableStateOf("Today") // "Today", "Track", "Insights", "Care", "Learn"
