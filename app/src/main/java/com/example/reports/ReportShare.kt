@@ -24,7 +24,7 @@ object ReportShare {
             summaries = listOf(HealthSummaryBuilder.build(health, 7, now)),
             labTitles = health.labReports.take(10).map { it.title },
             fileName = "nirog-bhumi-weekly-report.pdf",
-            heading = "Nirog Bhumi — Weekly health report",
+            documentTitle = "Nirog Bhumi — Weekly health report",
         ).getOrThrow()
         val intent = Intent(Intent.ACTION_SEND).apply {
             type = "application/pdf"

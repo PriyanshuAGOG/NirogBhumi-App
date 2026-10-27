@@ -366,8 +366,10 @@ async function emulatorDocs(collection) {
 
 await step('messages: the admin sees every member waiting for an answer, opens one and replies', async () => {
   await go(admin.page, '/messages');
-  await admin.page.getByRole('button', { name: /Needs a reply \(2\)/ }).waitFor();
-  await admin.page.getByText('Can I take my tablet before breakfast?').first().waitFor();
+  // Ravi's question is still unanswered; Asha already has the batch message from the step above as the newest line, so she shows under All.
+  await admin.page.getByRole('button', { name: /Needs a reply \(1\)/ }).waitFor();
+  await admin.page.getByText('My evening walk keeps getting skipped.').first().waitFor();
+  await admin.page.getByRole('button', { name: /^All \(2\)/ }).click();
   await admin.page.getByRole('button', { name: /Asha Member/ }).click();
   await admin.page.getByRole('log').getByText('Can I take my tablet before breakfast?').waitFor();
   await admin.page.getByLabel('Your reply').fill('Yes - take it after breakfast, with food.');
@@ -376,7 +378,7 @@ await step('messages: the admin sees every member waiting for an answer, opens o
   const stored = await eventually(async () => (await emulatorDocs('coachInboxMessages')).find((m) => m.text === 'Yes - take it after breakfast, with food.'), 'the reply should be stored for the member');
   expect(stored.memberUid === 'memA' && stored.programId === 'progA' && stored.fromUid === 'admin1', `reply stored with the wrong thread: ${JSON.stringify(stored)}`);
   expect(stored.senderRole === 'coach', 'staff replies carry the coach role the app understands');
-  await admin.page.getByRole('button', { name: /Needs a reply \(1\)/ }).waitFor();
+  await admin.page.getByRole('button', { name: /Needs a reply \(1\)/ }).waitFor();   // Ravi still waits
   await noBanner(admin.page, 'Messages');
 });
 
@@ -386,7 +388,7 @@ await step('the member page shows everything about the member: profile, records,
   await admin.page.getByRole('button', { name: 'Profile' }).click();
   await admin.page.getByText('Contact', { exact: true }).waitFor();
   await admin.page.getByText('asha@test.dev').first().waitFor();
-  await admin.page.getByText('Account', { exact: true }).waitFor();
+  await admin.page.getByRole('main').getByText('Account', { exact: true }).waitFor();
   await admin.page.getByRole('button', { name: 'Health records' }).click();
   await admin.page.getByText('118 mg/dL').first().waitFor();
   await admin.page.getByRole('button', { name: /^Messages/ }).click();

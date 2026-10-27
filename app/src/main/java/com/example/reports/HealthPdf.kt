@@ -43,12 +43,12 @@ object HealthPdf {
     private val body = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 11f; color = ink }
     private val small = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 9.5f; color = muted }
 
-    fun write(context: Context, profile: PdfProfile, summaries: List<HealthSummary>, labTitles: List<String>, fileName: String, heading: String = "Nirog Bhumi — Health File"): Result<Uri> = runCatching {
+    fun write(context: Context, profile: PdfProfile, summaries: List<HealthSummary>, labTitles: List<String>, fileName: String, documentTitle: String = "Nirog Bhumi — Health File"): Result<Uri> = runCatching {
         val document = PdfDocument()
         val flow = Flow(document)
         flow.newPage()
 
-        flow.text(heading, title, lineHeight = 26f)
+        flow.text(documentTitle, title, lineHeight = 26f)
         flow.text("Prepared ${SimpleDateFormat("d MMM yyyy, h:mm a", Locale.getDefault()).format(Date())}", small, lineHeight = 18f)
         flow.gap(8f)
         flow.text(profile.name.ifBlank { "Member" }, heading, lineHeight = 18f)
