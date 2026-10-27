@@ -2,8 +2,6 @@ package com.nirogbhumi.app.ui.screens
 
 import android.content.Intent
 import android.graphics.Bitmap
-import android.graphics.Paint
-import android.graphics.pdf.PdfDocument
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -41,12 +39,26 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
-import androidx.core.content.FileProvider
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.sp
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
 import com.nirogbhumi.app.data.CloudResult
-import com.nirogbhumi.app.health.domain.DoctorReport
-import com.nirogbhumi.app.health.domain.HealthLabels
+import com.nirogbhumi.app.health.domain.ChangeTone
+import com.nirogbhumi.app.health.domain.HealthSummary
+import com.nirogbhumi.app.health.domain.HealthSummaryBuilder
+import com.nirogbhumi.app.health.domain.SummaryMetric
+import com.nirogbhumi.app.reports.HealthPdf
+import com.nirogbhumi.app.reports.PdfProfile
 import com.nirogbhumi.app.ui.collectHealth
 import com.nirogbhumi.app.ui.diabetesAnswer
 import com.nirogbhumi.app.ui.NirogState
@@ -56,8 +68,6 @@ import com.nirogbhumi.app.ui.components.SectionLabel
 import com.nirogbhumi.app.ui.theme.NirogColor
 import com.nirogbhumi.app.ui.theme.NirogSpace
 import com.nirogbhumi.app.ui.theme.NirogType
-import java.io.File
-import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -81,22 +91,10 @@ fun HealthFileScreen(state: NirogState) {
   var shareLink by remember { mutableStateOf<String?>(null) }
   var linkExpiresInDays by remember { mutableStateOf<Int?>(null) }
   var linkError by remember { mutableStateOf<String?>(null) }
-  // Doctor-visit-ready weekly/monthly report - distinct from the raw JSON
-  // data export (Privacy & Consent's "export my data" request) in that this
-  // is a short, human-readable period summary meant to be printed or handed
-  // over, not a machine-readable data dump.
+  // One summary for the screen, the PDF and the weekly report. Weekly and monthly are two views of the same thing.
   var reportPeriodDays by remember { mutableStateOf(7) }
-
-  // Everything below comes from the shared health state, so this page, the PDF and the Today/Track
-  // screens always show the same numbers.
-  val month = health.month
-  val none = if (health.isLoading) "Loading…" else "Not logged yet"
-  val latestBp = health.latestBp
-  val latestWeight = health.latestWeight
   val labReports = health.labReports.take(10)
-  val periodReport = remember(health, reportPeriodDays) { DoctorReport.build(health, reportPeriodDays) }
-  val sugarLine30d = month.glucoseAverage?.let { "${it.toInt()} mg/dL over ${month.glucoseCount} ${if (month.glucoseCount == 1) "reading" else "readings"}" }
-  val fastingLine30d = month.fastingAverage?.let { "${it.toInt()} mg/dL over ${month.fastingCount} ${if (month.fastingCount == 1) "reading" else "readings"}" }
+  val summary = remember(health, reportPeriodDays) { HealthSummaryBuilder.build(health, reportPeriodDays, System.currentTimeMillis()) }
 
   Column(Modifier.fillMaxSize().background(NirogColor.surface)) {
     Row(
@@ -140,15 +138,7 @@ fun HealthFileScreen(state: NirogState) {
       }
 
       Spacer(Modifier.size(NirogSpace.lg))
-      NirogCard {
-        SectionLabel("Vitals summary (last 30 days)")
-        Spacer(Modifier.size(NirogSpace.sm))
-        VitalRow("Blood sugar (average)", sugarLine30d ?: none)
-        if (fastingLine30d != null) VitalRow("Fasting sugar (average)", fastingLine30d)
-        health.latestHbA1c?.let { VitalRow("Latest HbA1c", "${"%.1f".format(Locale.US, it.value)}%") }
-        VitalRow("Latest blood pressure", latestBp?.let { "${it.systolic}/${it.diastolic} mmHg" } ?: none)
-        VitalRow("Latest weight", latestWeight?.let { HealthLabels.weight(it.valueKg) } ?: none)
-      }
+      HealthSummaryCard(summary, health.isLoading, reportPeriodDays) { reportPeriodDays = it }
 
       Spacer(Modifier.size(NirogSpace.lg))
       NirogCard {
@@ -161,31 +151,6 @@ fun HealthFileScreen(state: NirogState) {
             val date = SimpleDateFormat("d MMM yyyy", Locale.getDefault()).format(Date(report.measuredAtMillis))
             VitalRow(report.title, date)
           }
-        }
-      }
-
-      Spacer(Modifier.size(NirogSpace.lg))
-      NirogCard {
-        SectionLabel("Doctor-visit report")
-        Spacer(Modifier.size(NirogSpace.sm))
-        Text(
-          "A short, printable summary for your ${if (reportPeriodDays == 7) "week" else "month"} - separate from the raw data export in Privacy settings.",
-          style = NirogType.caption, color = NirogColor.inkMuted,
-        )
-        Spacer(Modifier.size(NirogSpace.sm))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-          ReportPeriodChip("Weekly", reportPeriodDays == 7) { reportPeriodDays = 7 }
-          ReportPeriodChip("Monthly", reportPeriodDays == 30) { reportPeriodDays = 30 }
-        }
-        Spacer(Modifier.size(NirogSpace.sm))
-        if (periodReport.loggedDays == 0) {
-          Text("Nothing logged in this period yet.", style = NirogType.body, color = NirogColor.inkMuted)
-        } else {
-          VitalRow("Days logged", "${periodReport.loggedDays} of $reportPeriodDays")
-          periodReport.sugarSummary?.let { VitalRow("Sugar", it) }
-          periodReport.bpSummary?.let { VitalRow("Blood pressure", it) }
-          periodReport.weightSummary?.let { VitalRow("Weight change", it) }
-          periodReport.sleepSummary?.let { VitalRow("Sleep", it) }
         }
       }
 
@@ -215,28 +180,24 @@ fun HealthFileScreen(state: NirogState) {
         Spacer(Modifier.size(NirogSpace.md))
       }
 
-      fun generatePdf() = buildAndSaveHealthFilePdf(
-        context = context,
-        name = state.profileName.ifBlank { "Member" },
-        details = listOfNotNull(
-          state.profileAge.takeIf { it.isNotBlank() }?.let { "Age: $it" },
-          state.profileGender.takeIf { it.isNotBlank() },
-          state.profileCity.takeIf { it.isNotBlank() },
-        ).joinToString(" | "),
-        conditions = profileSummary(state, " | "),
-        sugarLine = sugarLine30d?.let { "Blood sugar average (30 days): $it" } ?: "Blood sugar: not logged yet",
-        bpLine = latestBp?.let { "Latest blood pressure: ${it.systolic}/${it.diastolic} mmHg" } ?: "Blood pressure: not logged yet",
-        weightLine = latestWeight?.let { "Latest weight: ${HealthLabels.weight(it.valueKg)}" } ?: "Weight: not logged yet",
-        labLines = labReports.map { it.title },
-        periodLabel = if (reportPeriodDays == 7) "Weekly report (last 7 days)" else "Monthly report (last 30 days)",
-        periodLines = listOfNotNull(
-          "Days logged: ${periodReport.loggedDays} of $reportPeriodDays",
-          periodReport.sugarSummary?.let { "Sugar: $it" },
-          periodReport.bpSummary?.let { "Blood pressure: $it" },
-          periodReport.weightSummary?.let { "Weight change: $it" },
-          periodReport.sleepSummary?.let { "Sleep: $it" },
-        ).ifEmpty { listOf("Nothing logged in this period yet.") },
-      )
+      fun generatePdf(): Result<android.net.Uri> {
+        val now = System.currentTimeMillis()
+        return HealthPdf.write(
+          context = context,
+          profile = PdfProfile(
+            name = state.profileName,
+            details = listOfNotNull(
+              state.profileAge.takeIf { it.isNotBlank() }?.let { "Age: $it" },
+              state.profileGender.takeIf { it.isNotBlank() },
+              state.profileCity.takeIf { it.isNotBlank() },
+            ).joinToString(" | "),
+            conditions = profileSummary(state, " | "),
+          ),
+          summaries = listOf(7, 30).map { HealthSummaryBuilder.build(health, it, now) },
+          labTitles = labReports.map { it.title },
+          fileName = "HealthFile_$now.pdf",
+        )
+      }
 
       if (generating) {
         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
@@ -387,6 +348,98 @@ private fun generateQrBitmap(text: String, sizePx: Int = 512): Bitmap {
 }
 
 @Composable
+private fun HealthSummaryCard(summary: HealthSummary, loading: Boolean, periodDays: Int, onPeriod: (Int) -> Unit) {
+  NirogCard {
+    SectionLabel("Health summary")
+    Spacer(Modifier.size(NirogSpace.sm))
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+      ReportPeriodChip("Weekly", periodDays == 7) { onPeriod(7) }
+      ReportPeriodChip("Monthly", periodDays == 30) { onPeriod(30) }
+    }
+    Spacer(Modifier.size(NirogSpace.sm))
+    Text(
+      when {
+        loading -> "Loading your readings…"
+        summary.loggedDays == 0 -> "Nothing logged in the last $periodDays days yet."
+        else -> "${summary.loggedDays} of $periodDays days logged. Arrows compare with the ${periodDays} days before."
+      },
+      style = NirogType.caption, color = NirogColor.inkMuted,
+    )
+    summary.metrics.forEach { metric ->
+      Spacer(Modifier.size(NirogSpace.md))
+      Box(Modifier.fillMaxWidth().height(1.dp).background(NirogColor.surfaceSunken))
+      Spacer(Modifier.size(NirogSpace.md))
+      SummaryMetricBlock(metric, periodDays)
+    }
+  }
+}
+
+@Composable
+private fun SummaryMetricBlock(metric: SummaryMetric, periodDays: Int) {
+  Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
+    Column(Modifier.weight(1f)) {
+      Text(metric.title, style = NirogType.caption, color = NirogColor.inkMuted)
+      Text(metric.headline, style = NirogType.bodyStrong, color = if (metric.hasData) NirogColor.inkPrimary else NirogColor.inkMuted)
+      if (metric.change.text.isNotBlank()) {
+        Spacer(Modifier.size(4.dp))
+        ChangeLine(metric)
+      }
+    }
+    if (metric.spark.size >= 2) {
+      Spacer(Modifier.width(12.dp))
+      MiniTrend(metric.spark, toneColor(metric.change.tone), "Trend over the last $periodDays days for ${metric.title}")
+    }
+  }
+  if (metric.lines.isNotEmpty()) {
+    Spacer(Modifier.size(4.dp))
+    metric.lines.forEach { VitalRow(it.label, it.value) }
+  }
+}
+
+private val ToneBetter = Color(0xFF2E7D32)
+
+private fun toneColor(tone: ChangeTone): Color = when (tone) {
+  ChangeTone.BETTER -> ToneBetter
+  ChangeTone.WORSE -> NirogColor.statusCritical
+  ChangeTone.NEUTRAL, ChangeTone.NONE -> NirogColor.forest
+}
+
+@Composable
+private fun ChangeLine(metric: SummaryMetric) {
+  val color = when (metric.change.tone) { ChangeTone.BETTER -> ToneBetter; ChangeTone.WORSE -> NirogColor.statusCritical; else -> NirogColor.inkSecondary }
+  Row(verticalAlignment = Alignment.CenterVertically) {
+    // Direction arrow drawn directly so it never depends on a font having the glyph.
+    Canvas(Modifier.size(12.dp)) {
+      val w = size.width; val h = size.height
+      val stroke = Stroke(width = 2.2f, cap = StrokeCap.Round)
+      when (metric.change.direction) {
+        1 -> drawPath(Path().apply { moveTo(w / 2, 1f); lineTo(w - 1f, h - 2f); lineTo(1f, h - 2f); close() }, color)
+        -1 -> drawPath(Path().apply { moveTo(w / 2, h - 1f); lineTo(w - 1f, 2f); lineTo(1f, 2f); close() }, color)
+        else -> drawLine(color, Offset(1f, h / 2), Offset(w - 1f, h / 2), stroke.width, StrokeCap.Round)
+      }
+    }
+    Spacer(Modifier.width(6.dp))
+    Text(metric.change.text, style = NirogType.caption, color = color)
+  }
+}
+
+/** A small line chart of the daily values, with a dot on the latest one. */
+@Composable
+private fun MiniTrend(values: List<Double>, color: Color, description: String) {
+  Canvas(Modifier.width(96.dp).height(36.dp).semantics { contentDescription = description }) {
+    val min = values.min(); val max = values.max()
+    val span = (max - min).takeIf { it > 1e-9 } ?: 1.0
+    fun x(i: Int) = size.width * i / (values.size - 1)
+    fun y(v: Double) = size.height - (size.height * ((v - min) / span)).toFloat()
+    drawLine(color.copy(alpha = 0.18f), Offset(0f, size.height), Offset(size.width, size.height), 1.5f)
+    val path = Path()
+    values.forEachIndexed { i, v -> if (i == 0) path.moveTo(x(i), y(v)) else path.lineTo(x(i), y(v)) }
+    drawPath(path, color, style = Stroke(width = 3f, cap = StrokeCap.Round))
+    drawCircle(color, 4.5f, Offset(x(values.size - 1), y(values.last())))
+  }
+}
+
+@Composable
 private fun VitalRow(label: String, value: String) {
   Row(
     Modifier.fillMaxWidth().padding(vertical = 6.dp),
@@ -407,66 +460,6 @@ private fun ReportPeriodChip(label: String, selected: Boolean, onClick: () -> Un
       .padding(horizontal = 16.dp, vertical = 8.dp),
   ) {
     Text(label, style = NirogType.caption, color = if (selected) NirogColor.onAccent else NirogColor.inkSecondary)
-  }
-}
-
-/** Builds a simple, real PDF (no external libs) from the member's own data and returns a shareable content Uri. */
-private fun buildAndSaveHealthFilePdf(
-  context: android.content.Context,
-  name: String,
-  details: String,
-  conditions: String,
-  sugarLine: String,
-  bpLine: String,
-  weightLine: String,
-  labLines: List<String>,
-  periodLabel: String,
-  periodLines: List<String>,
-): Result<android.net.Uri> {
-  return runCatching {
-    val document = PdfDocument()
-    val pageInfo = PdfDocument.PageInfo.Builder(595, 842, 1).create() // A4 at 72dpi
-    val page = document.startPage(pageInfo)
-    val canvas = page.canvas
-    val titlePaint = Paint().apply { textSize = 22f; isFakeBoldText = true; color = 0xFF1B3221.toInt() }
-    val headingPaint = Paint().apply { textSize = 13f; isFakeBoldText = true; color = 0xFF1B3221.toInt() }
-    val bodyPaint = Paint().apply { textSize = 12f; color = 0xFF1B2219.toInt() }
-    val mutedPaint = Paint().apply { textSize = 10f; color = 0xFF8B9285.toInt() }
-
-    var y = 50f
-    canvas.drawText("Nirog Bhumi — Health File", 40f, y, titlePaint); y += 20f
-    canvas.drawText("Generated ${SimpleDateFormat("d MMM yyyy, h:mm a", Locale.getDefault()).format(Date())}", 40f, y, mutedPaint); y += 30f
-
-    canvas.drawText(name, 40f, y, headingPaint); y += 16f
-    canvas.drawText(details, 40f, y, bodyPaint); y += 16f
-    canvas.drawText(conditions, 40f, y, bodyPaint); y += 30f
-
-    canvas.drawText("Vitals summary", 40f, y, headingPaint); y += 18f
-    canvas.drawText(sugarLine, 40f, y, bodyPaint); y += 16f
-    canvas.drawText(bpLine, 40f, y, bodyPaint); y += 16f
-    canvas.drawText(weightLine, 40f, y, bodyPaint); y += 30f
-
-    canvas.drawText(periodLabel, 40f, y, headingPaint); y += 18f
-    periodLines.forEach { canvas.drawText(it, 40f, y, bodyPaint); y += 16f }
-    y += 14f
-
-    canvas.drawText("Lab reports", 40f, y, headingPaint); y += 18f
-    if (labLines.isEmpty()) {
-      canvas.drawText("No lab reports uploaded yet.", 40f, y, bodyPaint); y += 16f
-    } else {
-      labLines.forEach { canvas.drawText("- $it", 40f, y, bodyPaint); y += 16f }
-    }
-    y += 20f
-    canvas.drawText("Prepared with Nirog Bhumi — data logged by the patient.", 40f, y, mutedPaint)
-
-    document.finishPage(page)
-
-    val reportsDir = File(context.cacheDir, "reports").apply { mkdirs() }
-    val file = File(reportsDir, "HealthFile_${System.currentTimeMillis()}.pdf")
-    FileOutputStream(file).use { document.writeTo(it) }
-    document.close()
-
-    FileProvider.getUriForFile(context, "${context.packageName}.files", file)
   }
 }
 
