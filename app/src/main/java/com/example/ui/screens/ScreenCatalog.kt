@@ -150,6 +150,8 @@ fun CatalogScreen(state: NirogState, route: String) {
     val activity = context as? Activity
     val coroutineScope = rememberCoroutineScope()
     val healthConnect = remember { HealthConnectManager(context.applicationContext, state.repository) }
+    var showSyncReview by remember { mutableStateOf(false) }
+    if (showSyncReview) HealthConnectSyncDialog(state, healthConnect) { showSyncReview = false }
     val healthPermissionLauncher = rememberLauncherForActivityResult(PermissionController.createRequestPermissionResultContract()) { granted ->
         if (granted.isNotEmpty()) state.currentScreen = "device_sync"
         else message = "No category was approved. You can change access later."
@@ -441,13 +443,7 @@ fun CatalogScreen(state: NirogState, route: String) {
                             } else if (spec.route == "health_connect_permissions") {
                                 if (!healthConnect.isAvailable) message = "Health Connect is unavailable or needs an update" else healthPermissionLauncher.launch(HealthConnectManager.permissions)
                             } else if (spec.route == "device_sync") {
-                                saving = true
-                                coroutineScope.launch {
-                                    runCatching { healthConnect.syncLastThirtyDays() }
-                                        .onSuccess { summary -> message = "Synced ${summary.steps} step, ${summary.sleep} sleep, ${summary.glucose} glucose and ${summary.bloodPressure} BP records" }
-                                        .onFailure { message = it.message ?: "Device sync failed" }
-                                    saving = false
-                                }
+                                if (!healthConnect.isAvailable) message = "Health Connect is unavailable or needs an update" else showSyncReview = true
                             } else if (spec.route == "family_dashboard") {
                                 if (state.selectedDocumentId.isBlank()) { message = "Choose a family profile first"; return@Button }
                                 state.activeProfileId = state.selectedDocumentId

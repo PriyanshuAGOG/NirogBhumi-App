@@ -1,5 +1,6 @@
 package com.nirogbhumi.app.data
 
+import com.nirogbhumi.app.health.domain.UploadTypes
 import android.net.Uri
 import com.google.firebase.FirebaseApp
 import com.google.firebase.firestore.FieldValue
@@ -70,6 +71,8 @@ interface HealthRepository : HealthLogBackend {
     // Epoch millis a pending deletion will run at, or null if none is pending.
     fun getPendingAccountDeletion(done: (CloudResult<Long?>) -> Unit)
     fun upsertUserRecord(collection: String, documentId: String, values: Map<String, Any?>, done: (CloudResult<Unit>) -> Unit = {})
+    /** Deletes every record this member's phone imported from Health Connect (steps, sleep, glucose, blood pressure, weight). Entries they typed themselves are untouched. Gives back how many were removed. */
+    fun deleteImportedHealthData(done: (CloudResult<Int>) -> Unit)
     fun deleteUserRecord(collection: String, documentId: String, done: (CloudResult<Unit>) -> Unit)
     fun getPrivateDownloadUrl(storagePath: String, done: (CloudResult<String>) -> Unit)
     fun redeemProgramCode(code: String, done: (CloudResult<Map<String, Any?>>) -> Unit)
@@ -312,13 +315,23 @@ class FirebaseHealthRepository : HealthRepository {
     private fun materialize(values: Map<String, Any?>): Map<String, Any?> =
         values.mapValues { (_, v) -> if (v == ServerTime) FieldValue.serverTimestamp() else v }
 
+    /** The type to declare for an upload: what Android reports, else the file name, else a default for the folder. */
+    private fun declaredUploadType(uri: Uri, folder: String): String {
+        val reported = runCatching { app?.applicationContext?.contentResolver?.getType(uri) }.getOrNull()
+        return UploadTypes.resolve(reported, uri.lastPathSegment, folder)
+    }
+
     override fun uploadPrivateFile(folder: String, uri: Uri, done: (CloudResult<String>) -> Unit) {
         val done = reporting("uploadPrivateFile:$folder", done)
         val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
         val path = "users/$uid/$folder/${UUID.randomUUID()}"
         val ref = storage?.reference?.child(path) ?: return done(CloudResult.Failure("Firebase is not configured"))
+        // Always declare the file type: the storage rules judge it, and an undeclared type used to be refused as "no permission".
+        val type = declaredUploadType(uri, folder)
+        if (!UploadTypes.isAllowed(type)) return done(CloudResult.Failure(UploadTypes.NOT_SUPPORTED_MESSAGE))
+        val metadata = com.google.firebase.storage.StorageMetadata.Builder().setContentType(type).build()
         runCatching {
-            ref.putFile(uri).continueWithTask { task ->
+            ref.putFile(uri, metadata).continueWithTask { task ->
                 if (!task.isSuccessful) throw task.exception ?: IllegalStateException("Upload failed")
                 ref.downloadUrl
             }.addOnSuccessListener { done(CloudResult.Success(it.toString())) }
@@ -663,6 +676,9 @@ class FirebaseHealthRepository : HealthRepository {
         val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
         val path = "program-chat-photos/$programId/$uid/${UUID.randomUUID()}"
         val ref = storage?.reference?.child(path) ?: return done(CloudResult.Failure("Firebase is not configured"))
+        val photoType = declaredUploadType(uri, "chat-photo")
+        if (!UploadTypes.isAllowed(photoType)) return done(CloudResult.Failure(UploadTypes.NOT_SUPPORTED_MESSAGE))
+        val photoMetadata = com.google.firebase.storage.StorageMetadata.Builder().setContentType(photoType).build()
         // A synchronous exception here (e.g. a SecurityException if the picked
         // Uri's read grant has somehow already lapsed) previously had no
         // handler at all - it would propagate out of this function entirely,
@@ -671,7 +687,7 @@ class FirebaseHealthRepository : HealthRepository {
         // so every failure mode - sync or async - ends up as a reported
         // CloudResult.Failure instead of a permanently stuck "uploading" spinner.
         runCatching {
-            ref.putFile(uri).continueWithTask { task ->
+            ref.putFile(uri, photoMetadata).continueWithTask { task ->
                 if (!task.isSuccessful) throw task.exception ?: IllegalStateException("Upload failed")
                 ref.downloadUrl
             }.addOnSuccessListener { done(CloudResult.Success(it.toString())) }
@@ -1026,6 +1042,23 @@ class FirebaseHealthRepository : HealthRepository {
         }.onFailure {
             android.util.Log.e("HealthRepository", "errorReports write threw for screen=$screen: ${it.message}", it)
         }
+    }
+
+    override fun deleteImportedHealthData(done: (CloudResult<Int>) -> Unit) {
+        val done = reporting("deleteImportedHealthData", done)
+        val uid = userId ?: return done(CloudResult.Failure("Sign in is required"))
+        val database = db ?: return done(CloudResult.Failure("Firebase is not configured"))
+        val queries = listOf("walkLogs", "sleepLogs", "glucoseReadings", "bpReadings", "weightLogs").map { collection ->
+            database.collection(collection).whereEqualTo("userId", uid).whereEqualTo("source", "health_connect").get()
+        }
+        com.google.android.gms.tasks.Tasks.whenAllSuccess<com.google.firebase.firestore.QuerySnapshot>(queries)
+            .continueWithTask { task ->
+                val refs = task.result.flatMap { snapshot -> snapshot.documents.map { it.reference } }
+                val commits = refs.chunked(400).map { chunk -> database.batch().apply { chunk.forEach { delete(it) } }.commit() }
+                com.google.android.gms.tasks.Tasks.whenAll(commits).continueWith { refs.size }
+            }
+            .addOnSuccessListener { count -> done(CloudResult.Success(count)) }
+            .addOnFailureListener { done(CloudResult.Failure(it.message ?: "The imported data could not be removed", it)) }
     }
 
     override fun upsertUserRecord(collection: String, documentId: String, values: Map<String, Any?>, done: (CloudResult<Unit>) -> Unit) {

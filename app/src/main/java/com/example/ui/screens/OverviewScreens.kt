@@ -250,7 +250,7 @@ fun WalkingActivityScreen(state: NirogState) {
                 "Steps today",
                 if (stepsToday > 0) String.format(java.util.Locale.US, "%,d", stepsToday) else "—",
                 if (stepsToday > 0) "steps" else "",
-                if (stepsToday > 0) "Synced from your connected device." else "Connect a band or watch under Settings › Devices to sync steps automatically."
+                if (stepsToday > 0) "Copied from Health Connect after you reviewed it." else "To bring in steps from your phone or watch, open Settings › Devices and choose Review and sync. Nothing is added without your approval."
             )
             if (health.today.activityMinutesToday > 0) {
                 MetricSummaryCard("Active today", "${health.today.activityMinutesToday}", "min", "From the walks and workouts you logged.")

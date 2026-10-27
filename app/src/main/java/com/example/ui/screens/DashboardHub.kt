@@ -1,5 +1,6 @@
 package com.nirogbhumi.app.ui.screens
 
+import com.nirogbhumi.app.health.domain.ActivityCard
 import androidx.compose.animation.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
@@ -398,7 +399,7 @@ fun TodayTab(state: NirogState) {
     // A deliberate walk (timed or typed in). Steps counted passively by a phone do not tick "walk done".
     val walkLoggedToday = health.today.activityMinutesToday > 0
     val sleepText = health.lastSleep?.let { ClockText.duration(it.durationMinutes) }
-    val stepsText = health.today.stepsToday.takeIf { it > 0 }?.let { String.format(java.util.Locale.US, "%,d", it) }
+    val activityCard = ActivityCard.forToday(health.today.stepsToday, health.today.activityMinutesToday)
     val bpText = health.latestBp?.let { HealthLabels.bp(it) }
 
     DisposableEffect(Unit) {
@@ -746,10 +747,10 @@ fun TodayTab(state: NirogState) {
                 VitalBentoCard(
                     icon = Icons.Filled.DirectionsWalk,
                     iconColor = NirogColor.secondaryGreen,
-                    title = "Steps Done",
-                    value = stepsText ?: "—",
-                    unit = if (stepsText != null) "steps" else "",
-                    annotation = if (stepsText != null) "Today" else "No data yet",
+                    title = "Walking & activity",
+                    value = activityCard.value,
+                    unit = activityCard.unit,
+                    annotation = activityCard.note,
                     onClick = { state.currentScreen = "walking_overview" }
                 )
             }
@@ -1309,7 +1310,7 @@ fun TrackTab(state: NirogState) {
     var showActivityLog by remember { mutableStateOf(false) }
     val health = state.collectHealth()
     val sleepText = health.lastSleep?.let { ClockText.duration(it.durationMinutes) }
-    val stepsText = health.today.stepsToday.takeIf { it > 0 }?.let { String.format(java.util.Locale.US, "%,d", it) }
+    val activityCard = ActivityCard.forToday(health.today.stepsToday, health.today.activityMinutesToday)
     val bpText = health.latestBp?.let { HealthLabels.bp(it) }
 
     Column(
@@ -1446,7 +1447,7 @@ fun TrackTab(state: NirogState) {
                     iconBg = NirogColor.secondaryContainer.copy(alpha = 0.5f),
                     iconTint = NirogColor.secondaryGreen,
                     title = "Walking & Activity",
-                    measuredValue = stepsText ?: "No data",
+                    measuredValue = if (activityCard.hasData) activityCard.oneLine else "No data",
                     labelSuffix = "",
                     onClick = { state.currentScreen = "walking_overview" }
                 )
@@ -1603,7 +1604,7 @@ fun InsightsTab(state: NirogState) {
         }
     }
     val sleepText = health.lastSleep?.let { ClockText.duration(it.durationMinutes) }
-    val stepsText = health.today.stepsToday.takeIf { it > 0 }?.let { String.format(java.util.Locale.US, "%,d", it) }
+    val activityCard = ActivityCard.forToday(health.today.stepsToday, health.today.activityMinutesToday)
     val bpText = health.latestBp?.let { HealthLabels.bp(it) }
 
     Column(
@@ -1792,7 +1793,7 @@ fun InsightsTab(state: NirogState) {
                             }
                             Spacer(modifier = Modifier.height(12.dp))
                             Text(
-                                stepsText ?: "—",
+                                if (activityCard.hasData) activityCard.oneLine else "—",
                                 fontSize = 18.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = NirogColor.forest
                             )
                         }

@@ -942,11 +942,11 @@ fun InsightDetailScreen(state: NirogState) {
 fun DeviceSyncScreen(state: NirogState) {
     val context = LocalContext.current
     val healthConnect = remember { HealthConnectManager(context.applicationContext, state.repository) }
+    var showSyncReview by remember { mutableStateOf(false) }
+    if (showSyncReview) HealthConnectSyncDialog(state, healthConnect) { showSyncReview = false }
     val coroutineScope = rememberCoroutineScope()
 
     var isConnected by remember { mutableStateOf(false) }
-    var isSyncing by remember { mutableStateOf(false) }
-    var lastSyncMessage by remember { mutableStateOf<String?>(null) }
     var lastError by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
@@ -1045,44 +1045,28 @@ fun DeviceSyncScreen(state: NirogState) {
                             ) { Text("Connect", color = Color.White, fontWeight = FontWeight.Bold) }
                         } else {
                             Button(
-                                enabled = !isSyncing,
-                                onClick = {
-                                    isSyncing = true
-                                    lastError = null
-                                    coroutineScope.launch {
-                                        runCatching { healthConnect.syncLastThirtyDays() }
-                                            .onSuccess { summary ->
-                                                lastSyncMessage = "Synced ${summary.steps} steps, ${summary.sleep} sleep, ${summary.glucose} glucose, ${summary.bloodPressure} BP, ${summary.weight} weight records"
-                                            }
-                                            .onFailure { lastError = it.message ?: "Sync failed" }
-                                        isSyncing = false
-                                    }
-                                },
+                                onClick = { showSyncReview = true },
                                 modifier = Modifier.fillMaxWidth().height(48.dp),
                                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF314936)),
                                 shape = RoundedCornerShape(24.dp)
                             ) {
-                                if (isSyncing) CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
-                                else Text("Sync Now", color = Color.White, fontWeight = FontWeight.Bold)
+                                Text("Review and sync", color = Color.White, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
                 }
 
-                lastSyncMessage?.let {
-                    Text(it, fontSize = 12.sp, color = Color(0xFF426820), fontWeight = FontWeight.Medium)
-                }
                 lastError?.let {
                     Text(it, fontSize = 12.sp, color = Color(0xFF8B2E2E), fontWeight = FontWeight.Medium)
                 }
             }
         }
 
-        Text("What syncs automatically", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+        Text("What can be copied from Health Connect", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+        Text("Only when you tap \"Review and sync\" and agree. Nothing is added in the background.", fontSize = 12.sp, color = Color(0xFF737972))
         listOf(
             "Steps" to Icons.Filled.DirectionsWalk,
             "Sleep" to Icons.Filled.Bedtime,
-            "Heart rate" to Icons.Filled.Favorite,
             "Weight" to Icons.Filled.MonitorWeight,
             "Blood glucose (supported CGMs)" to Icons.Filled.Bloodtype,
             "Blood pressure (supported cuffs)" to Icons.Filled.Favorite
