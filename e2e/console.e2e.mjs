@@ -259,7 +259,7 @@ await step('batches: message a member -> lands in the coach inbox and a push rec
   await admin.page.getByPlaceholder('How are things going this week?').fill('Great consistency this week, Asha!');
   await admin.page.getByRole('button', { name: 'Send message' }).click();
   await admin.page.getByText(/Your message to Asha Member was sent/).waitFor();
-  const msg = (await adb.collection('coachInboxMessages').where('memberUid', '==', 'memA').get()).docs[0];
+  const msg = (await adb.collection('coachInboxMessages').where('memberUid', '==', 'memA').where('fromUid', '==', 'admin1').get()).docs[0];
   expect(msg && msg.get('fromUid') === 'admin1' && msg.get('programId') === 'progA' && msg.get('senderRole') === 'coach', 'inbox message missing or malformed');
   const note = await eventually(async () => (await adb.collection('notifications').where('userId', '==', 'memA').where('type', '==', 'coach_message').get()).docs[0], 'push trigger should record a notification');
   expect(note.get('failureReason') === 'missing_token', 'no device token in the emulator, so it must be recorded as missing_token');
