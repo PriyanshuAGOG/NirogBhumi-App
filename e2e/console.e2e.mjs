@@ -430,7 +430,7 @@ await step('messages: a coach sees only their own batch\'s conversations', async
 });
 
 await step('coach dashboard works and counts only their batch', async () => {
-  await go(coach.page, '/');
+  await go(coach.page, '/dashboard');
   await coach.page.waitForLoadState('networkidle').catch(() => {});
   expect((await tileValue(coach.page, 'Open reports')) === 1, 'coach should see only their batch\'s report');
   expect((await tileValue(coach.page, 'Active Care+ members')) === 4 || (await tileValue(coach.page, 'Active Care+ members')) === 3, 'coach roster count should be their batch only (3 after redeems)');
