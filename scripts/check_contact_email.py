@@ -10,7 +10,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OFFICIAL = "priyanshu@nirogbhumi.com"
 EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}")
 SKIP_PATH = re.compile(r"(^|/)(e2e|test|tests|rules-tests|node_modules|dist|build|lib)/|package-lock\.json$|\.(png|jpg|webp|jar|ttf|otf|ico|keystore|jks)$")
-SKIP_MATCH = re.compile(r"\.iam\.gserviceaccount\.com$|\.example$|@example\.(com|org)$|^nirogbhumi\.com@evil")
+SKIP_MATCH = re.compile(r"\.gserviceaccount\.com$|\.example$|@example\.(com|org)$|^nirogbhumi\.com@evil")
 
 files = subprocess.check_output(["git", "ls-files"], cwd=ROOT, text=True).splitlines()
 problems = []

@@ -45,20 +45,33 @@ worth commissioning before a public launch).
 - All callables require sign-in; callables that act on another member require the right role; export links are owner-only.
 - Email content is treated as untrusted: header-injection characters removed, HTML escaped, recipients validated (functions tests).
 - Spreadsheet formula injection is defused in CSV exports (functions tests).
+- **Access matrix (2026-10-24).** `firebase/functions/test/authz-matrix.test.cjs` lists every callable with its allowed audience and fails when a new callable is added without one. It proves signed-out callers are refused everywhere, an ordinary member (with or without a role claim), a coach, and forged or unknown roles (`expert`, empty, `Admin`, `root`) get no staff or admin power, and the one-time super-admin bootstrap refuses look-alike emails.
+  - It found two real weaknesses, both fixed: `bulkOnboard` let any signed-in member run it (each row was still refused, so nothing was enrolled, but a member could write junk entries into the audit log and probe which programs exist), and `adminEnrollUser`, `deleteAnnouncement`, `inviteToProgram`, `revokeInvite`, `sendBulkNotification` decided access only after looking things up. All staff functions now refuse non-staff first.
+- **Rules matrix.** `firebase/rules-tests/rules-matrix.test.mjs` is generated from the rules file: every collection is probed signed out and as a stranger (create, read, update, delete, forged ownership), and the outgoing-mail queue, system flags and audit log are checked closed to every client including admins. A mutation check (temporarily opening `mail`) made it fail, so it is not vacuous.
+- **Hosting headers** (`firebase.json`): `X-Frame-Options: DENY`, `nosniff`, `Referrer-Policy`, `Permissions-Policy` (camera, microphone, geolocation, payment, usb off), COOP, and an enforced CSP of `frame-ancestors 'none'; base-uri 'self'; object-src 'none'; form-action 'self'`. The full script and connection policy is shipped as **Report-Only** because it cannot be exercised against production from CI; the e2e run serves the same headers and fails on any violation. Switch `Content-Security-Policy-Report-Only` to enforcing after one clean look at the real console's browser console.
 
 ## Dependencies
 
 | Area | Result of `npm audit --omit=dev` | Judgement |
 |---|---|---|
 | firebase/rules-tests, e2e | 0 | clean |
-| firebase/functions | 9 moderate/high advisories, all transitive through `firebase-admin` -> Google Cloud clients (`uuid`, `@grpc/grpc-js`) | The `grpc-js` advisories concern gRPC **servers**; `uuid` needs a caller-supplied buffer. Not reachable from our code. Fix arrives with the next `firebase-admin` major; re-check on each upgrade |
-| console | `react-router` (open-redirect advisory, moderate) and the Firebase web SDK's transitive `grpc-js` | The suggested fix for the SDK is a **downgrade** to firebase 9 and is not acceptable; `react-router-dom` needs a major upgrade, tracked. The console is staff-only behind login |
+| firebase/functions | After `npm audit fix` (2026-10-24): 9 moderate, 0 high, 0 critical. Removed: `proxy-addr` (critical, IP spoofing), `body-parser`, `@fastify/busboy`, `@grpc/grpc-js` (high). Remaining: `uuid` through `firebase-admin` -> Google Cloud clients | `uuid` needs a caller-supplied buffer to be affected; not reachable from our code. Fix arrives with the next `firebase-admin` major; re-check on each upgrade |
+| console | 6 (4 high, 2 moderate): `react-router` and the Firebase web SDK's transitive `@grpc/grpc-js` | `grpc-js` has **0 references in the built browser bundle**, so it is not shipped; the suggested fix is a downgrade to firebase 9 and is rejected. The `react-router` advisories need attacker-controlled redirect targets or server-side rendering; the console has neither (no dynamic navigation from URL input). `react-router-dom` needs a major upgrade, tracked. The console is staff-only behind login |
 | Android (Gradle) | Not scanned in this environment (no network access to the Android repositories) | Run `./gradlew dependencyUpdates` / Play's pre-launch report and Dependabot before release |
+
+## Findings from the 2026-10-24 pass (stated plainly)
+
+- **The repository is public.** Everything committed is world-readable. No private keys or tokens were found (pattern scan over all tracked files). Two things to know:
+  - The Firebase **web API key** is in the deploy workflow. Web keys are public by design, but the key should be restricted in Google Cloud (HTTP referrers = the console domains, API restrictions = only the Firebase APIs used). Owner action.
+  - `app/ci-debug.keystore` (password `android`) signs **debug/tester builds only**; the release uses the private upload key and Play App Signing. Anyone can therefore build an APK that Android treats as an upgrade of a tester's debug install. The in-app updater only installs APKs from our own storage after a SHA-256 check, so the risk is a tester being talked into installing a look-alike by hand. Google Sign-In is deliberately not registered for this key. Decision for the owner: keep (testers only), or move the debug key into a GitHub secret (testers reinstall once).
+- **Production permissions gap (found live).** The functions' service account had no data roles, so every function that touched Firestore or Auth returned HTTP 500. Fixed by granting `datastore.user`, `firebaseauth.admin`, `storage.objectAdmin`, `firebasecloudmessaging.admin` and token-creator on itself (`docs/GO_LIVE_GUIDE.md` step 5).
+- **Callable functions are public by design**, with identity and role checked inside each function (verified by the access matrix). A flood of rejected calls costs a little compute and is not a data risk; set a billing alert, and enable App Check enforcement after the closed test.
+- **Not testable from CI or this environment:** production behaviour, real devices, and anything needing a signed-in production session. `scripts/prod_smoke.mjs` covers what can be seen from outside (headers, legal pages, every callable refusing a signed-out caller with 401, database and storage refusing signed-out reads) and is run by the owner after each deploy.
 
 ## Open items
 
 1. Independent penetration test of the release build (not done).
 2. Android dependency vulnerability scan (Dependabot or OWASP dependency-check) - enable on the repository.
 3. Clinical sign-off for the glucose/BP status thresholds (not a security issue, but a patient-safety one).
-4. The organisation policy that blocks the public invoker means **no callable works in production today** (owner action in `docs/RELEASE_CHECKLIST.md`). Until fixed, export, deletion and every function-backed feature are down in production; the rules and app can be reviewed but not exercised end to end there.
+4. The organisation policy blocking the public invoker was lifted (project-scoped) and the invoker step is green. First production use found the runtime-permission gap above; re-verify with `scripts/prod_smoke.mjs` and a signed-in walkthrough.
 5. Email delivery depends on the owner installing the Trigger Email extension.

@@ -16,8 +16,8 @@ Run once, from Cloud Shell:
 
 ```sh
 PROJECT_ID="nirog-bhumi-app"
-# Default Cloud Functions v2 runtime service account for this project.
-RUNTIME_SA="${PROJECT_ID}@appspot.gserviceaccount.com"
+# Cloud Functions v2 runtime service account for this project (the Compute default account).
+RUNTIME_SA="126409331898-compute@developer.gserviceaccount.com"
 
 gcloud iam service-accounts add-iam-policy-binding "$RUNTIME_SA" \
   --project="$PROJECT_ID" \
