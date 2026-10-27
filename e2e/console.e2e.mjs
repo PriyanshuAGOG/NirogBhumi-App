@@ -357,6 +357,47 @@ await step('member detail and moderation load for admin', async () => {
   await eventually(async () => (await admin.page.getByText(/spammy text in A/).count()) > 0 && (await admin.page.getByText(/spammy text in B/).count()) > 0, 'admin should see reports from both batches');
 });
 
+// Reads documents straight from the Firestore emulator (admin bypass), to prove what a console action really stored.
+async function emulatorDocs(collection) {
+  const res = await fetch(`http://127.0.0.1:8080/v1/projects/demo-nirog-bhumi/databases/(default)/documents/${collection}?pageSize=100`, { headers: { authorization: 'Bearer owner' } });
+  const json = await res.json();
+  return (json.documents ?? []).map((d) => Object.fromEntries(Object.entries(d.fields ?? {}).map(([k, v]) => [k, v.stringValue ?? v.integerValue ?? v.booleanValue ?? v.timestampValue ?? null])));
+}
+
+await step('messages: the admin sees every member waiting for an answer, opens one and replies', async () => {
+  await go(admin.page, '/messages');
+  await admin.page.getByRole('button', { name: /Needs a reply \(2\)/ }).waitFor();
+  await admin.page.getByText('Can I take my tablet before breakfast?').first().waitFor();
+  await admin.page.getByRole('button', { name: /Asha Member/ }).click();
+  await admin.page.getByRole('log').getByText('Can I take my tablet before breakfast?').waitFor();
+  await admin.page.getByLabel('Your reply').fill('Yes - take it after breakfast, with food.');
+  await admin.page.getByRole('button', { name: 'Send' }).click();
+  await admin.page.getByRole('log').getByText('Yes - take it after breakfast, with food.').waitFor();
+  const stored = await eventually(async () => (await emulatorDocs('coachInboxMessages')).find((m) => m.text === 'Yes - take it after breakfast, with food.'), 'the reply should be stored for the member');
+  expect(stored.memberUid === 'memA' && stored.programId === 'progA' && stored.fromUid === 'admin1', `reply stored with the wrong thread: ${JSON.stringify(stored)}`);
+  expect(stored.senderRole === 'coach', 'staff replies carry the coach role the app understands');
+  await admin.page.getByRole('button', { name: /Needs a reply \(1\)/ }).waitFor();
+  await noBanner(admin.page, 'Messages');
+});
+
+await step('the member page shows everything about the member: profile, records, messages, care and support', async () => {
+  await admin.page.goto(`${BASE}/members/memA`);
+  await admin.page.getByText('Asha Member').first().waitFor();
+  await admin.page.getByRole('button', { name: 'Profile' }).click();
+  await admin.page.getByText('Contact', { exact: true }).waitFor();
+  await admin.page.getByText('asha@test.dev').first().waitFor();
+  await admin.page.getByText('Account', { exact: true }).waitFor();
+  await admin.page.getByRole('button', { name: 'Health records' }).click();
+  await admin.page.getByText('118 mg/dL').first().waitFor();
+  await admin.page.getByRole('button', { name: /^Messages/ }).click();
+  await admin.page.getByRole('log').getByText('Can I take my tablet before breakfast?').waitFor();
+  await admin.page.getByRole('log').getByText('Yes - take it after breakfast, with food.').waitFor();
+  await admin.page.getByRole('button', { name: 'Care & support' }).click();
+  await admin.page.getByText('Diet review').first().waitFor();
+  await admin.page.getByText('Cannot see my plan').first().waitFor();
+  await noBanner(admin.page, 'Member record');
+});
+
 await step('the hosting security policy blocks nothing the console needs (no CSP violations)', async () => {
   const bad = admin.problems.filter((p) => /Content Security Policy|\[Report Only\]/i.test(p));
   expect(bad.length === 0, `policy violations: ${bad.slice(0, 3).join(' || ')}`);
@@ -376,6 +417,13 @@ await step('coach navigation hides admin-only areas', async () => {
   const labels = (await navLabels(coach.page)).join('|');
   for (const item of ['Users', 'Consultations', 'Data Requests', 'Error Reports', 'Content']) expect(!labels.includes(item), `coach should not see ${item}`);
   for (const item of ['Members', 'Batches', 'Announcements', 'Programs', 'Moderation']) expect(labels.includes(item), `coach should see ${item}`);
+});
+
+await step('messages: a coach sees only their own batch\'s conversations', async () => {
+  await go(coach.page, '/messages');
+  await coach.page.getByText('Asha Member').first().waitFor();
+  expect((await coach.page.getByText('Ravi Member').count()) === 0, 'a coach must not see another batch\'s member in Messages');
+  await noBanner(coach.page, 'Coach messages');
 });
 
 await step('coach dashboard works and counts only their batch', async () => {

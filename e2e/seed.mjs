@@ -50,4 +50,8 @@ await db.collection('consultations').doc('consB').set({ userId: 'memB', consulta
 await db.collection('deletionRequests').add({ userId: 'memDel', status: 'scheduled', source: 'app', scheduledFor: Timestamp.fromMillis(Date.now() + 5 * 86_400_000), attempts: 0, createdAt: daysAgo(2) });
 await db.collection('programInvites').doc('email_invitee@test.dev').set({ contact: 'invitee@test.dev', contactType: 'email', programId: 'progA', programName: 'July Batch', createdAt: FieldValue.serverTimestamp(), consumedAt: null, consumedByUid: null });
 
+// Two members asked their coach a question and are waiting for an answer (one per batch).
+await db.collection('coachInboxMessages').add({ programId: 'progA', memberUid: 'memA', fromUid: 'memA', senderName: 'Asha Member', senderRole: 'member', text: 'Can I take my tablet before breakfast?', createdAt: daysAgo(0) });
+await db.collection('coachInboxMessages').add({ programId: 'progB', memberUid: 'memB', fromUid: 'memB', senderName: 'Ravi Member', senderRole: 'member', text: 'My evening walk keeps getting skipped.', createdAt: daysAgo(0) });
+
 console.log('seeded');

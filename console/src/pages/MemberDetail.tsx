@@ -17,7 +17,10 @@ import { chunk } from '../lib/usePrograms'
 import { useScope } from '../lib/scope'
 import { errText } from '../lib/errors'
 import { relativeTime, formatDateTime } from '../lib/time'
-import { consistencyTag, isAlertLog, LOG_COLLECTIONS, summarizeLog, type LogEntry, type LogKind } from '../lib/health'
+import { consistencyTag, isAlertLog, isImported, LOG_COLLECTIONS, summarizeLog, type LogEntry, type LogKind } from '../lib/health'
+import { buildProfileSections } from '../lib/memberProfile'
+import type { InboxMessage } from '../lib/inbox'
+import ThreadPanel from './ThreadPanel'
 import './MemberDetail.css'
 
 interface MemberProfile {
@@ -30,6 +33,7 @@ interface MemberProfile {
   activeProgramId?: string
   activeProgramName?: string
   latestMetrics?: { fastingSugar?: number; glucoseStatus?: string; glucoseUpdatedAt?: unknown }
+  [key: string]: unknown
 }
 
 interface RosterEntry {
@@ -47,14 +51,14 @@ interface CoachNote {
 }
 
 /** One member's logs from one collection, newest first, capped for a console read. */
-function useLogFeed(kind: LogKind, uid: string | undefined): { entries: LogEntry[]; error: boolean } {
+function useLogFeed(kind: LogKind, uid: string | undefined, max = 20): { entries: LogEntry[]; error: boolean } {
   const [entries, setEntries] = useState<LogEntry[]>([])
   const [error, setError] = useState(false)
 
   useEffect(() => {
     if (!uid) return
     const unsub = onSnapshot(
-      query(collection(db, kind), where('userId', '==', uid), orderBy('createdAt', 'desc'), limit(20)),
+      query(collection(db, kind), where('userId', '==', uid), orderBy('createdAt', 'desc'), limit(max)),
       (snap) => {
         setEntries(snap.docs.map((d) => ({ id: d.id, kind, at: d.data().createdAt, data: d.data() })))
         setError(false)
@@ -62,11 +66,55 @@ function useLogFeed(kind: LogKind, uid: string | undefined): { entries: LogEntry
       () => setError(true),
     )
     return unsub
-    // kind is a stable literal per call site; only uid changes across renders.
+    // kind is a stable literal per call site; only uid and the limit change across renders.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [uid])
+  }, [uid, max])
 
   return { entries, error }
+}
+
+/** A member's documents from a collection that has no ordered index: equality filter only, newest first on the page. */
+function useUserFeed(name: 'consultations' | 'supportRequests', uid: string | undefined): { rows: Record<string, unknown>[]; error: boolean } {
+  const [rows, setRows] = useState<Record<string, unknown>[]>([])
+  const [error, setError] = useState(false)
+  useEffect(() => {
+    if (!uid) return
+    const unsub = onSnapshot(
+      query(collection(db, name), where('userId', '==', uid), limit(100)),
+      (snap) => {
+        const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Record<string, unknown>)
+        list.sort((a, b) => ((b.createdAt as { seconds?: number })?.seconds ?? 0) - ((a.createdAt as { seconds?: number })?.seconds ?? 0))
+        setRows(list)
+        setError(false)
+      },
+      () => setError(true),
+    )
+    return unsub
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uid])
+  return { rows, error }
+}
+
+/** This member's private thread with their coach (the app's "Ask your coach"), oldest first. */
+function useThread(programId: string | undefined, uid: string | undefined): { messages: InboxMessage[]; error: boolean } {
+  const [messages, setMessages] = useState<InboxMessage[]>([])
+  const [error, setError] = useState(false)
+  useEffect(() => {
+    if (!uid || !programId) {
+      setMessages([])
+      return
+    }
+    const unsub = onSnapshot(
+      query(collection(db, 'coachInboxMessages'), where('programId', '==', programId), where('memberUid', '==', uid), orderBy('createdAt', 'desc'), limit(100)),
+      (snap) => {
+        setMessages(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<InboxMessage, 'id'>) })).reverse())
+        setError(false)
+      },
+      () => setError(true),
+    )
+    return unsub
+  }, [uid, programId])
+  return { messages, error }
 }
 
 export default function MemberDetail() {
@@ -81,9 +129,9 @@ export default function MemberDetail() {
   const [noteText, setNoteText] = useState('')
   const [noteBusy, setNoteBusy] = useState(false)
   const [noteError, setNoteError] = useState<string | null>(null)
-  const [tab, setTab] = useState<'overview' | 'logs' | 'notes'>('overview')
-  const [logFilter, setLogFilter] = useState<LogKind | 'all'>('all')
-
+  const [tab, setTab] = useState<'overview' | 'profile' | 'records' | 'messages' | 'care' | 'notes'>('overview')
+  const [limits, setLimits] = useState<Partial<Record<LogKind, number>>>({})
+  
   useEffect(() => {
     if (!uid) return
     const unsub = onSnapshot(
@@ -136,15 +184,15 @@ export default function MemberDetail() {
     return unsub
   }, [uid])
 
-  const glucose = useLogFeed('glucoseReadings', uid)
-  const bp = useLogFeed('bpReadings', uid)
-  const weight = useLogFeed('weightLogs', uid)
-  const medication = useLogFeed('medicationLogs', uid)
-  const sleep = useLogFeed('sleepLogs', uid)
-  const walk = useLogFeed('walkLogs', uid)
-  const labs = useLogFeed('labReports', uid)
-  const checklist = useLogFeed('checklistLogs', uid)
-  const checkins = useLogFeed('dailyCheckins', uid)
+  const glucose = useLogFeed('glucoseReadings', uid, limits.glucoseReadings ?? 20)
+  const bp = useLogFeed('bpReadings', uid, limits.bpReadings ?? 20)
+  const weight = useLogFeed('weightLogs', uid, limits.weightLogs ?? 20)
+  const medication = useLogFeed('medicationLogs', uid, limits.medicationLogs ?? 20)
+  const sleep = useLogFeed('sleepLogs', uid, limits.sleepLogs ?? 20)
+  const walk = useLogFeed('walkLogs', uid, limits.walkLogs ?? 20)
+  const labs = useLogFeed('labReports', uid, limits.labReports ?? 20)
+  const checklist = useLogFeed('checklistLogs', uid, limits.checklistLogs ?? 20)
+  const checkins = useLogFeed('dailyCheckins', uid, limits.dailyCheckins ?? 20)
   const feeds = useMemo(
     () => ({ glucoseReadings: glucose, bpReadings: bp, weightLogs: weight, medicationLogs: medication, sleepLogs: sleep, walkLogs: walk, labReports: labs, checklistLogs: checklist, dailyCheckins: checkins }),
     [glucose, bp, weight, medication, sleep, walk, labs, checklist, checkins],
@@ -157,14 +205,18 @@ export default function MemberDetail() {
       const tb = (b.at as { seconds?: number })?.seconds ?? 0
       return tb - ta
     })
-    return logFilter === 'all' ? all : all.filter((e) => e.kind === logFilter)
-  }, [feeds, logFilter])
+    return all
+  }, [feeds])
 
   const lastActivity = timeline[0]?.at
   const alerts = useMemo(() => timeline.filter(isAlertLog).slice(0, 5), [timeline])
 
   const primaryProgramId = roster[0]?.programId ?? profile?.activeProgramId
   const programName = programs.find((p) => p.id === primaryProgramId)?.name ?? profile?.activeProgramName
+  const thread = useThread(primaryProgramId, uid)
+  const consults = useUserFeed('consultations', uid)
+  const support = useUserFeed('supportRequests', uid)
+  const awaitingReply = thread.messages.length > 0 && thread.messages[thread.messages.length - 1].fromUid === uid
 
   async function sendNote() {
     if (!uid || !noteText.trim()) return
@@ -247,83 +299,210 @@ export default function MemberDetail() {
         </div>
       )}
 
-      <div className="seg" role="tablist">
-        {(['overview', 'logs', 'notes'] as const).map((t) => (
-          <button
-            key={t}
-            className={'seg-btn' + (tab === t ? ' seg-btn-active' : '')}
-            onClick={() => setTab(t)}
-          >
-            {t === 'overview' ? 'Overview' : t === 'logs' ? 'Day-to-day logs' : `Notes (${notes.length})`}
+      <div className="seg md-tabs" role="tablist">
+        {(
+          [
+            ['overview', 'Overview'],
+            ['profile', 'Profile'],
+            ['records', 'Health records'],
+            ['messages', awaitingReply ? 'Messages • needs a reply' : 'Messages'],
+            ['care', 'Care & support'],
+            ['notes', `Notes (${notes.length})`],
+          ] as const
+        ).map(([t, label]) => (
+          <button key={t} className={'seg-btn' + (tab === t ? ' seg-btn-active' : '')} onClick={() => setTab(t)}>
+            {label}
           </button>
         ))}
       </div>
 
       {tab === 'overview' && (
-        <div className="md-overview-grid">
-          <div className="card md-stat-card">
-            <span className="tile-label">Fasting sugar</span>
-            <span className="md-stat-value">
-              {profile.latestMetrics?.fastingSugar != null ? `${profile.latestMetrics.fastingSugar} mg/dL` : '—'}
-            </span>
-            <span className="tile-hint">
-              {profile.latestMetrics?.glucoseUpdatedAt ? relativeTime(profile.latestMetrics.glucoseUpdatedAt) : 'No readings yet'}
-            </span>
+        <>
+          <div className="md-overview-grid">
+            <div className="card md-stat-card">
+              <span className="tile-label">Fasting blood sugar (latest)</span>
+              <span className="md-stat-value">
+                {profile.latestMetrics?.fastingSugar != null ? `${profile.latestMetrics.fastingSugar} mg/dL` : '—'}
+              </span>
+              <span className="tile-hint">
+                {profile.latestMetrics?.glucoseUpdatedAt ? relativeTime(profile.latestMetrics.glucoseUpdatedAt) : 'No fasting reading yet'}
+              </span>
+            </div>
+            <div className="card md-stat-card">
+              <span className="tile-label">Last activity</span>
+              <span className="md-stat-value">{lastActivity ? relativeTime(lastActivity) : '—'}</span>
+              <span className="tile-hint">{lastActivity ? formatDateTime(lastActivity) : 'No logs yet'}</span>
+            </div>
+            <div className="card md-stat-card">
+              <span className="tile-label">Program</span>
+              <span className="md-stat-value md-stat-text">{programName ?? 'Not enrolled'}</span>
+              <span className="tile-hint">
+                {roster[0]?.joinedAt ? `Joined ${formatDateTime(roster[0].joinedAt)}` : profile.programActive ? 'Active' : 'No active program'}
+              </span>
+            </div>
+            <div className="card md-stat-card">
+              <span className="tile-label">Entries loaded</span>
+              <span className="md-stat-value">{timeline.length}</span>
+              <span className="tile-hint">Open Health records for the full history</span>
+            </div>
           </div>
-          <div className="card md-stat-card">
-            <span className="tile-label">Last activity</span>
-            <span className="md-stat-value">{lastActivity ? relativeTime(lastActivity) : '—'}</span>
-            <span className="tile-hint">{lastActivity ? formatDateTime(lastActivity) : 'No logs yet'}</span>
+          <div className="card md-latest">
+            <span className="overline">Latest readings</span>
+            {(['glucoseReadings', 'bpReadings', 'weightLogs', 'sleepLogs', 'walkLogs'] as LogKind[]).map((kind) => {
+              const meta = LOG_COLLECTIONS.find((l) => l.kind === kind)
+              const latest = feeds[kind].entries[0]
+              return (
+                <div key={kind} className="md-latest-row">
+                  <span aria-hidden>{meta?.icon}</span>
+                  <span className="md-latest-label">{meta?.label}</span>
+                  <span className="md-latest-value">{latest ? summarizeLog(latest) : 'Nothing logged'}</span>
+                  <span className="md-latest-time">{latest ? relativeTime(latest.at) : ''}</span>
+                </div>
+              )
+            })}
           </div>
-          <div className="card md-stat-card">
-            <span className="tile-label">Program</span>
-            <span className="md-stat-value md-stat-text">{programName ?? 'Not enrolled'}</span>
-            <span className="tile-hint">
-              {roster[0]?.joinedAt ? `Joined ${formatDateTime(roster[0].joinedAt)}` : profile.programActive ? 'Active' : 'No active program'}
-            </span>
-          </div>
-          <div className="card md-stat-card">
-            <span className="tile-label">Entries logged</span>
-            <span className="md-stat-value">{timeline.length}</span>
-            <span className="tile-hint">Across the last 20 per category</span>
-          </div>
+        </>
+      )}
+
+      {tab === 'profile' && (
+        <div className="md-profile">
+          {buildProfileSections(profile).map((section) => (
+            <div key={section.title} className="card md-profile-card">
+              <span className="overline">{section.title}</span>
+              <dl className="md-kv">
+                {section.rows.map((row) => (
+                  <div key={row.label} className="md-kv-row">
+                    <dt>{row.label}</dt>
+                    <dd>{row.value}</dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          ))}
         </div>
       )}
 
-      {tab === 'logs' && (
-        <div className="md-logs">
-          <div className="toolbar">
-            <select className="select" value={logFilter} onChange={(e) => setLogFilter(e.target.value as LogKind | 'all')}>
-              <option value="all">All categories</option>
-              {LOG_COLLECTIONS.map((l) => (
-                <option key={l.kind} value={l.kind}>
-                  {l.icon} {l.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          {timeline.length === 0 ? (
-            <div className="card empty">
-              <div className="empty-mark" aria-hidden>📋</div>
-              <p className="empty-title">No logs yet</p>
-              <p className="empty-sub">Entries this member records will show up here in real time.</p>
-            </div>
-          ) : (
-            <div className="md-timeline">
-              {timeline.map((entry) => (
-                <div key={`${entry.kind}-${entry.id}`} className="card md-log-row">
-                  <span className="md-log-icon" aria-hidden>
-                    {LOG_COLLECTIONS.find((l) => l.kind === entry.kind)?.icon}
+      {tab === 'records' && (
+        <div className="md-records">
+          {LOG_COLLECTIONS.map((l) => {
+            const feed = feeds[l.kind]
+            const max = limits[l.kind] ?? 20
+            return (
+              <div key={l.kind} className="card md-records-card">
+                <div className="md-records-head">
+                  <span className="overline">
+                    {l.icon} {l.label}
                   </span>
-                  <div className="md-log-main">
-                    <span className="md-log-label">{LOG_COLLECTIONS.find((l) => l.kind === entry.kind)?.label}</span>
-                    <span className="md-log-summary">{summarizeLog(entry)}</span>
-                  </div>
-                  <span className="md-log-time">{relativeTime(entry.at)}</span>
+                  <span className="md-muted">{feed.error ? 'Not available' : feed.entries.length >= max ? `Latest ${feed.entries.length}` : `${feed.entries.length} on record`}</span>
                 </div>
-              ))}
-            </div>
+                {feed.error ? (
+                  <p className="md-muted">You don’t have access to this category.</p>
+                ) : feed.entries.length === 0 ? (
+                  <p className="md-muted">Nothing logged yet.</p>
+                ) : (
+                  <table className="md-table">
+                    <tbody>
+                      {feed.entries.map((e) => (
+                        <tr key={e.id}>
+                          <td className="md-td-time">{formatDateTime(e.at)}</td>
+                          <td>{summarizeLog(e)}</td>
+                          <td className="md-td-tags">
+                            {isImported(e.data) && <span className="tag tag-neutral">From a device</span>}
+                            {Boolean(e.data.lastCorrectedAt) && <span className="tag tag-neutral">Corrected</span>}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+                {!feed.error && feed.entries.length >= max && max < 300 && (
+                  <button className="btn btn-ghost btn-sm" onClick={() => setLimits((prev) => ({ ...prev, [l.kind]: Math.min(300, max + 40) }))}>
+                    Show 40 more
+                  </button>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {tab === 'messages' && (
+        <div className="card md-messages">
+          {!primaryProgramId ? (
+            <p className="md-muted">This member isn’t in a program yet, so they have no coach to message.</p>
+          ) : (
+            <>
+              {thread.error && (
+                <div className="banner banner-error" role="alert">
+                  The conversation could not be loaded.
+                </div>
+              )}
+              <ThreadPanel
+                programId={primaryProgramId}
+                memberUid={uid ?? ''}
+                memberName={name}
+                messages={thread.messages}
+                myUid={user?.uid ?? ''}
+                myName={user?.displayName ?? 'Your coach'}
+                emptyHint={`${name} hasn’t written yet. You can start the conversation below.`}
+              />
+            </>
           )}
+        </div>
+      )}
+
+      {tab === 'care' && (
+        <div className="md-care">
+          <div className="card md-records-card">
+            <span className="overline">🩺 Consultations</span>
+            {consults.error ? (
+              <p className="md-muted">You don’t have access to consultations.</p>
+            ) : consults.rows.length === 0 ? (
+              <p className="md-muted">No consultation requests.</p>
+            ) : (
+              <table className="md-table">
+                <tbody>
+                  {consults.rows.map((c) => (
+                    <tr key={String(c.id)}>
+                      <td className="md-td-time">{formatDateTime(c.scheduledAt ?? c.createdAt)}</td>
+                      <td>
+                        {String(c.consultationType ?? 'Consultation')}
+                        {c.concern ? ` — ${String(c.concern)}` : ''}
+                      </td>
+                      <td className="md-td-tags">
+                        <span className="tag tag-neutral">{String(c.status ?? 'pending').replace('_', ' ')}</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+          <div className="card md-records-card">
+            <span className="overline">💬 Support requests</span>
+            {support.error ? (
+              <p className="md-muted">You don’t have access to support requests.</p>
+            ) : support.rows.length === 0 ? (
+              <p className="md-muted">No support requests.</p>
+            ) : (
+              <table className="md-table">
+                <tbody>
+                  {support.rows.map((r) => (
+                    <tr key={String(r.id)}>
+                      <td className="md-td-time">{formatDateTime(r.createdAt)}</td>
+                      <td>
+                        <strong>{String(r.subject ?? 'Support request')}</strong>
+                        {r.message ? ` — ${String(r.message)}` : ''}
+                      </td>
+                      <td className="md-td-tags">
+                        <span className="tag tag-neutral">{String(r.status ?? 'open')}</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
         </div>
       )}
 
