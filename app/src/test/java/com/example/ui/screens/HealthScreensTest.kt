@@ -148,7 +148,9 @@ class HealthScreensTest {
         composeTestRule.setContent { MyApplicationTheme { HealthFileScreen(NirogState()) } }
         composeTestRule.onNodeWithText("Monthly").performClick()
         assertTrue(composeTestRule.onAllNodesWithText("Health summary", ignoreCase = true).fetchSemanticsNodes().isNotEmpty())
+        // Signed out there are no readings to load, so the card says it is loading or that nothing is logged for the 30 days.
         assertTrue(composeTestRule.onAllNodesWithText("30 days", substring = true).fetchSemanticsNodes().isNotEmpty() ||
-            composeTestRule.onAllNodesWithText("Nothing logged", substring = true).fetchSemanticsNodes().isNotEmpty())
+            composeTestRule.onAllNodesWithText("Loading your readings", substring = true).fetchSemanticsNodes().isNotEmpty())
+        composeTestRule.onNodeWithText("Weekly").assertExists()
     }
 }

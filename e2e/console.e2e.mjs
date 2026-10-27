@@ -423,12 +423,14 @@ await step('coach navigation hides admin-only areas', async () => {
 
 await step('messages: a coach sees only their own batch\'s conversations', async () => {
   await go(coach.page, '/messages');
+  await coach.page.getByRole('button', { name: /^All \(1\)/ }).click();   // Asha was already answered, so she is under All, and only she is there
   await coach.page.getByText('Asha Member').first().waitFor();
   expect((await coach.page.getByText('Ravi Member').count()) === 0, 'a coach must not see another batch\'s member in Messages');
   await noBanner(coach.page, 'Coach messages');
 });
 
 await step('coach dashboard works and counts only their batch', async () => {
+  await go(coach.page, '/');
   await coach.page.waitForLoadState('networkidle').catch(() => {});
   expect((await tileValue(coach.page, 'Open reports')) === 1, 'coach should see only their batch\'s report');
   expect((await tileValue(coach.page, 'Active Care+ members')) === 4 || (await tileValue(coach.page, 'Active Care+ members')) === 3, 'coach roster count should be their batch only (3 after redeems)');
