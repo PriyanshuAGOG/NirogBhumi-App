@@ -54,4 +54,20 @@ class NirogBhumiContentApiTest {
     }
 
     @Test fun emptyFeedParsesToEmptyList() { assertTrue(NirogBhumiContentApi.parseArticles("[]").isEmpty()) }
+
+    @Test fun categoriesKeepRealTopicsAndDropUncategorizedAndEmptyOnes() {
+        val json = """[
+            {"id":4,"name":"Diabetes &amp; Sugar","slug":"diabetes","count":12},
+            {"id":1,"name":"Uncategorized","slug":"uncategorized","count":30},
+            {"id":7,"name":"Yoga","slug":"yoga","count":0},
+            {"id":9,"name":"Blog","slug":"blog","count":5},
+            {"id":-1,"name":"Broken","slug":"broken","count":3},
+            {"id":11,"name":"","slug":"blank","count":3}
+        ]"""
+        val list = NirogBhumiContentApi.parseCategories(json)
+        assertEquals(listOf(4, 9), list.map { it.id })
+        assertEquals("Diabetes & Sugar", list[0].name)
+        assertEquals(12, list[0].count)
+    }
 }
+

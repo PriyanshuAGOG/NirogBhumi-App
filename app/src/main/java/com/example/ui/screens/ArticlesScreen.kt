@@ -69,9 +69,9 @@ import kotlinx.coroutines.launch
 import java.text.DateFormat
 import java.util.Date
 
-private val ArticleInk = Color(0xFF1B3221)
-private val ArticleMuted = Color(0xFF697169)
-private val ArticleGreen = Color(0xFF314936)
+internal val ArticleInk = Color(0xFF1B3221)
+internal val ArticleMuted = Color(0xFF697169)
+internal val ArticleGreen = Color(0xFF314936)
 
 /** Opens a link in the user's browser, only if it is a plain https address. */
 internal fun openWebUrl(context: Context, url: String) {
@@ -199,7 +199,7 @@ fun ArticlesScreen(state: NirogState) {
     }
 }
 
-private fun openReader(state: NirogState, article: NirogBhumiArticle) {
+internal fun openReader(state: NirogState, article: NirogBhumiArticle) {
     state.selectedDocumentValues = mapOf(
         "id" to article.id, "title" to article.title, "excerpt" to article.excerpt,
         "link" to article.link, "dateLabel" to article.dateLabel, "imageUrl" to article.imageUrl,
@@ -241,7 +241,7 @@ fun ArticleReaderScreen(state: NirogState) {
 }
 
 @Composable
-private fun ArticleCard(article: NirogBhumiArticle, onClick: () -> Unit) {
+internal fun ArticleCard(article: NirogBhumiArticle, onClick: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onClick),
         colors = CardDefaults.cardColors(containerColor = Color.White),

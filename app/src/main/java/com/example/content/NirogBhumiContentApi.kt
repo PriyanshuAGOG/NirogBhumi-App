@@ -22,6 +22,9 @@ data class NirogBhumiArticle(
 
 data class ArticlePage(val articles: List<NirogBhumiArticle>, val page: Int, val totalPages: Int, val total: Int)
 
+/** One of the site's own categories (a topic on nirogbhumi.com), with how many posts it holds. */
+data class ArticleCategory(val id: Int, val name: String, val count: Int)
+
 /** The last successful first page, kept on the phone so Learn still opens without a connection. */
 data class SavedArticles(val articles: List<NirogBhumiArticle>, val savedAtMillis: Long)
 
@@ -35,14 +38,16 @@ data class SavedArticles(val articles: List<NirogBhumiArticle>, val savedAtMilli
  */
 object NirogBhumiContentApi {
     private const val BASE_URL = "https://nirogbhumi.com/wp-json/wp/v2/posts"
+    private const val CATEGORIES_URL = "https://nirogbhumi.com/wp-json/wp/v2/categories"
     const val PAGE_SIZE = 12
     private const val CACHE_FILE = "learn-articles-v1.json"
     private const val MAX_CACHED = 24
 
-    suspend fun fetchPage(page: Int, search: String? = null, perPage: Int = PAGE_SIZE): Result<ArticlePage> = withContext(Dispatchers.IO) {
+    suspend fun fetchPage(page: Int, search: String? = null, perPage: Int = PAGE_SIZE, categoryId: Int? = null): Result<ArticlePage> = withContext(Dispatchers.IO) {
         runCatching {
             val q = ArticleSearch.effective(search)?.let { "&search=" + URLEncoder.encode(it, "UTF-8") }.orEmpty()
-            val url = URL("$BASE_URL?_embed&per_page=$perPage&page=${page.coerceAtLeast(1)}&orderby=date&order=desc$q")
+            val c = categoryId?.takeIf { it > 0 }?.let { "&categories=$it" }.orEmpty()
+            val url = URL("$BASE_URL?_embed&per_page=$perPage&page=${page.coerceAtLeast(1)}&orderby=date&order=desc$q$c")
             val connection = (url.openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
                 connectTimeout = 10_000
@@ -65,6 +70,41 @@ object NirogBhumiContentApi {
             } finally {
                 connection.disconnect()
             }
+        }
+    }
+
+    /** The site's topics that have at least one post, biggest first. */
+    suspend fun fetchCategories(): Result<List<ArticleCategory>> = withContext(Dispatchers.IO) {
+        runCatching {
+            val url = URL("$CATEGORIES_URL?per_page=30&hide_empty=true&orderby=count&order=desc&_fields=id,name,slug,count")
+            val connection = (url.openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 10_000
+                readTimeout = 10_000
+                instanceFollowRedirects = false
+                setRequestProperty("Accept", "application/json")
+            }
+            try {
+                val code = connection.responseCode
+                if (code !in 200..299) throw IllegalStateException("nirogbhumi.com returned HTTP $code")
+                parseCategories(connection.inputStream.bufferedReader().use { it.readText() })
+            } finally {
+                connection.disconnect()
+            }
+        }
+    }
+
+    /** Categories as the site lists them. WordPress' catch-all "Uncategorized" and empty topics are left out. */
+    fun parseCategories(json: String): List<ArticleCategory> {
+        val array = JSONArray(json)
+        return (0 until array.length()).mapNotNull { index ->
+            val c = array.optJSONObject(index) ?: return@mapNotNull null
+            val id = c.optInt("id", -1)
+            val count = c.optInt("count", 0)
+            val slug = c.optString("slug")
+            val name = HtmlText.plain(c.optString("name"))
+            if (id <= 0 || count <= 0 || name.isBlank() || slug == "uncategorized") return@mapNotNull null
+            ArticleCategory(id, name, count)
         }
     }
 

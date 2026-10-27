@@ -2238,8 +2238,6 @@ private fun CareRow(icon: androidx.compose.ui.graphics.vector.ImageVector, title
 @Composable
 fun LearnTab(state: NirogState) {
     val context = LocalContext.current
-    var featuredArticle by remember { mutableStateOf<Result<List<com.nirogbhumi.app.content.NirogBhumiArticle>>?>(null) }
-    LaunchedEffect(Unit) { featuredArticle = com.nirogbhumi.app.content.NirogBhumiContentApi.fetchArticles(perPage = 1) }
 
     Column(
         modifier = Modifier
@@ -2257,139 +2255,15 @@ fun LearnTab(state: NirogState) {
                 color = NirogColor.forest
             )
             Text(
-                text = "Simple reads on Ayurveda and everyday health.",
+                text = "Articles and blogs from nirogbhumi.com.",
                 fontSize = 15.sp,
                 color = NirogColor.inkTertiary,
                 modifier = Modifier.padding(top = 4.dp)
             )
         }
 
-        // Search bar
-        OutlinedTextField(
-            value = state.searchQuery,
-            onValueChange = { state.searchQuery = it },
-            modifier = Modifier.fillMaxWidth(),
-            leadingIcon = { Icon(Icons.Filled.Search, "Search", tint = NirogColor.outline) },
-            label = { Text("Search articles, guides, or products") },
-            placeholder = { Text("Search articles, guides, or products...", color = NirogColor.outlineVariant) },
-            shape = RoundedCornerShape(12.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = NirogColor.forest,
-                unfocusedBorderColor = Color.Transparent,
-                focusedContainerColor = Color(0xFFEEE8DC).copy(alpha = 0.7f),
-                unfocusedContainerColor = Color(0xFFEEE8DC).copy(alpha = 0.7f)
-            )
-        )
-
-        // Categories Bento Grid
-        Text(
-            text = "Categories",
-            fontSize = 20.sp,
-            fontFamily = FontFamily.Serif,
-            fontWeight = FontWeight.Bold,
-            color = NirogColor.forest
-        )
-
-        Row(modifier = Modifier.fillMaxWidth()) {
-            Box(modifier = Modifier.weight(1f).padding(end = 6.dp)) {
-                LearnCategoryCard("Diabetes", Icons.Filled.Spa, NirogColor.secondaryContainer) { state.searchQuery = "diabetes"; state.currentScreen = "articles" }
-            }
-            Box(modifier = Modifier.weight(1f).padding(start = 6.dp)) {
-                LearnCategoryCard("Food", Icons.Filled.Restaurant, Color(0xFFFFD9DE)) { state.searchQuery = "food"; state.currentScreen = "articles" }
-            }
-        }
-
-        Row(modifier = Modifier.fillMaxWidth()) {
-            Box(modifier = Modifier.weight(1f).padding(end = 6.dp)) {
-                LearnCategoryCard("Movement", Icons.Filled.DirectionsWalk, NirogColor.forestPaleLight) { state.searchQuery = "walk"; state.currentScreen = "articles" }
-            }
-            Box(modifier = Modifier.weight(1f).padding(start = 6.dp)) {
-                LearnCategoryCard("Mindfulness", Icons.Filled.SelfImprovement, NirogColor.surfaceNeutral) { state.searchQuery = "mind"; state.currentScreen = "articles" }
-            }
-        }
-
-        // Featured read article card
-        Text(
-            text = "Featured Read",
-            fontSize = 20.sp,
-            fontFamily = FontFamily.Serif,
-            fontWeight = FontWeight.Bold,
-            color = NirogColor.forest
-        )
-
-        val featured = featuredArticle?.getOrNull()?.firstOrNull()
-        when {
-            featuredArticle == null -> Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 8.dp)) {
-                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = NirogColor.forestSofter)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Loading from nirogbhumi.com...", fontSize = 13.sp, color = Color(0xFF697169))
-            }
-            featured == null -> Text(
-                "Couldn't load the latest article from nirogbhumi.com right now.",
-                fontSize = 13.sp, color = Color(0xFF697169)
-            )
-            else -> Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .border(width = 0.5.dp, color = NirogColor.outlineVariant.copy(alpha = 0.35f), shape = RoundedCornerShape(24.dp))
-                    .clickable {
-                        runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(featured.link))) }
-                    },
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                shape = RoundedCornerShape(24.dp)
-            ) {
-                Column {
-                    featured.imageUrl?.let { url ->
-                        AsyncImage(
-                            model = url,
-                            contentDescription = featured.title,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(180.dp),
-                            contentScale = ContentScale.Crop
-                        )
-                    }
-
-                    Column(
-                        modifier = Modifier.padding(16.dp)
-                    ) {
-                        Text(
-                            text = featured.title,
-                            fontSize = 18.sp,
-                            fontFamily = FontFamily.Serif,
-                            fontWeight = FontWeight.Bold,
-                            color = NirogColor.forest
-                        )
-                        if (featured.excerpt.isNotBlank()) {
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = featured.excerpt,
-                                fontSize = 13.sp,
-                                color = NirogColor.inkTertiary,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(featured.dateLabel, fontSize = 11.sp, color = NirogColor.outline)
-                            Box(
-                                modifier = Modifier
-                                    .size(32.dp)
-                                    .background(NirogColor.forestSoft, CircleShape),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(Icons.Filled.ChevronRight, "Read", tint = Color.White)
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        // Every article and blog post from nirogbhumi.com: working search, the site's own topics, paging, offline copy.
+        ExploreFeed(state)
 
         // Store is not launched yet - a single clear teaser instead of a shop
         // front with nothing real to sell. It opens the (locked-down) store page only when a
