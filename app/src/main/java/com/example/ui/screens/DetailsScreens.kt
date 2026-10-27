@@ -263,7 +263,7 @@ fun BookConsultationStepper(state: NirogState) {
                 1 -> {
                     Text("Select consultation type", fontSize = 18.sp, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
 
-                    ConsultTypeOption("Blood sugar consultation", "We go through your sugar readings together with a specialist.", "30 min video • ₹499", state.selectedOnMedication == "Yes") {
+                    ConsultTypeOption("Blood sugar consultation", "We go through your blood sugar readings together with a specialist.", "30 min video • ₹499", state.selectedOnMedication == "Yes") {
                         state.selectedOnMedication = "Yes"
                         state.selectedConsultType = "diabetes_lifestyle"
                     }
@@ -476,7 +476,7 @@ private data class DailyProtocol(val id: String, val title: String, val autoComp
 // logged data (never a manual "trust me" toggle); tapping an incomplete
 // one deep-links into the exact screen that logs it.
 private val DAILY_PROTOCOLS = listOf(
-    DailyProtocol("fasting_reading", "Log a fasting sugar reading", autoCompletable = true) { it.isQuickLogFastingOpen = true },
+    DailyProtocol("fasting_reading", "Log a fasting blood sugar reading", autoCompletable = true) { it.isQuickLogFastingOpen = true },
     DailyProtocol("checkin", "Complete today's check-in", autoCompletable = true) { it.checkinStartStep = 0; it.currentScreen = "daily_checkin" },
     DailyProtocol("walk", "Walk 10 minutes", autoCompletable = true) { it.currentScreen = "walk_timer" },
     DailyProtocol("sleep", "Log last night's sleep", autoCompletable = true) { it.currentScreen = "sleep_overview" },
@@ -700,10 +700,10 @@ fun InsightDetailScreen(state: NirogState) {
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Text("How sleep can affect fasting sugar", fontSize = 22.sp, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+            Text("How sleep can affect fasting blood sugar", fontSize = 22.sp, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
 
             Text(
-                "This is general guidance, not an analysis of your specific data yet: short sleep (under 6 hours) is commonly linked to higher morning cortisol, which can push fasting glucose up. Keep logging both sleep and sugar readings - once you have enough of both, we'll show your own personal comparison here instead of general guidance.",
+                "This is general guidance, not an analysis of your specific data yet: short sleep (under 6 hours) is commonly linked to higher morning cortisol, which can push fasting glucose up. Keep logging both sleep and blood sugar readings - once you have enough of both, we'll show your own personal comparison here instead of general guidance.",
                 fontSize = 14.sp,
                 color = Color(0xFF434842),
                 lineHeight = 20.sp
@@ -719,7 +719,7 @@ fun InsightDetailScreen(state: NirogState) {
                         Text("YOUR OWN DATA", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFFB9832B))
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            "Fasting sugar has averaged %.0f mg/dL after shorter nights (under 6h, %d logged) vs %.0f mg/dL after longer ones (%d logged).".format(
+                            "Fasting blood sugar has averaged %.0f mg/dL after shorter nights (under 6h, %d logged) vs %.0f mg/dL after longer ones (%d logged).".format(
                                 insight.shortSleepAvg, insight.shortNights, insight.longSleepAvg, insight.longNights
                             ),
                             fontSize = 14.sp, color = Color(0xFF4B3B1B), lineHeight = 20.sp,
@@ -736,7 +736,7 @@ fun InsightDetailScreen(state: NirogState) {
                         Icon(Icons.Filled.Insights, contentDescription = null, tint = Color(0xFF9CB79F), modifier = Modifier.size(28.dp))
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            "Not enough data yet for your personal comparison (${health.sugarReadings.size}/5 sugar readings logged).",
+                            "Not enough data yet for your personal comparison (${health.sugarReadings.size}/5 blood sugar readings logged).",
                             fontSize = 13.sp,
                             color = Color(0xFF737972),
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -747,9 +747,9 @@ fun InsightDetailScreen(state: NirogState) {
 
             Divider(color = Color(0xFFC3C8C0).copy(alpha = 0.3f))
 
-            Text("How medication adherence can affect fasting sugar", fontSize = 22.sp, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+            Text("How medication adherence can affect fasting blood sugar", fontSize = 22.sp, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
             Text(
-                "Missing a dose can show up as higher fasting sugar the same day. Keep logging both medication and sugar readings on the same days to see your own comparison here.",
+                "Missing a dose can show up as higher fasting blood sugar the same day. Keep logging both medication and blood sugar readings on the same days to see your own comparison here.",
                 fontSize = 14.sp, color = Color(0xFF434842), lineHeight = 20.sp
             )
             if (medicationInsight != null) {
@@ -762,7 +762,7 @@ fun InsightDetailScreen(state: NirogState) {
                         Text("YOUR OWN DATA", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFFB9832B))
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            "Fasting sugar has averaged %.0f mg/dL on days you took your medication (%d logged) vs %.0f mg/dL on days it was missed (%d logged).".format(
+                            "Fasting blood sugar has averaged %.0f mg/dL on days you took your medication (%d logged) vs %.0f mg/dL on days it was missed (%d logged).".format(
                                 medicationInsight.takenAvg, medicationInsight.takenDays, medicationInsight.missedAvg, medicationInsight.missedDays
                             ),
                             fontSize = 14.sp, color = Color(0xFF4B3B1B), lineHeight = 20.sp,
@@ -788,7 +788,7 @@ fun InsightDetailScreen(state: NirogState) {
 
             Divider(color = Color(0xFFC3C8C0).copy(alpha = 0.3f))
 
-            Text("How meal timing can affect post-meal sugar", fontSize = 22.sp, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+            Text("How meal timing can affect after-meal blood sugar", fontSize = 22.sp, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
             Text(
                 "There's no single meal that always runs higher for everyone - it depends on what and when you eat. Keep logging post-meal readings across breakfast, lunch, and dinner to see if one of yours stands out.",
                 fontSize = 14.sp, color = Color(0xFF434842), lineHeight = 20.sp
@@ -849,7 +849,7 @@ fun InsightDetailScreen(state: NirogState) {
                 ) {
                     Column(modifier = Modifier.padding(14.dp)) {
                         Text("$readingDaysThisWeek/7", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
-                        Text("days with a sugar reading", fontSize = 11.sp, color = Color(0xFF737972))
+                        Text("days with a blood sugar reading", fontSize = 11.sp, color = Color(0xFF737972))
                     }
                 }
                 Card(
@@ -904,7 +904,7 @@ fun InsightDetailScreen(state: NirogState) {
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         if (state.isExperimentActive)
-                            "$nightsSinceStart of $experimentDaysElapsed nights so far had 7+ hours logged. Keep logging sleep and sugar readings to see if it lines up with lower fasting numbers."
+                            "$nightsSinceStart of $experimentDaysElapsed nights so far had 7+ hours logged. Keep logging sleep and blood sugar readings to see if it lines up with lower fasting numbers."
                         else
                             "We challenge you to log at least seven hours of restful sleep daily for the next week - tracked from your real sleep logs, not a manual checkbox.",
                         fontSize = 13.sp,
@@ -2490,7 +2490,7 @@ fun PrivacyConsentScreen(state: NirogState) {
                         Text("Anonymized data & research", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFF1B2219))
                     }
                     Text(
-                        "If you delete your account while this is switched on, your name and contact details are permanently deleted - but your health readings (sugar, BP, sleep, walks, weight, medications) stay on file with no link back to you. If it is off, your readings are deleted too. We only ever use anonymized data in aggregate, never about one person.",
+                        "If you delete your account while this is switched on, your name and contact details are permanently deleted - but your health readings (blood sugar, BP, sleep, walks, weight, medications) stay on file with no link back to you. If it is off, your readings are deleted too. We only ever use anonymized data in aggregate, never about one person.",
                         fontSize = 12.5.sp, color = Color(0xFF3F4A41), lineHeight = 18.sp
                     )
                     TextButton(

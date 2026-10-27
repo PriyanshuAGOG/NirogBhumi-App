@@ -111,13 +111,13 @@ fun OnboardingTourOverlay(state: NirogState) {
     val title = when (step) {
         0 -> "1. Your Daily Action"
         1 -> "2. Fast Metric Logging"
-        2 -> "3. Custom Sugar Stories"
+        2 -> "3. Custom Blood Sugar Stories"
         else -> "4. Expert Naturopathy & Yoga"
     }
     val description = when (step) {
         0 -> "Nirog Bhumi is designed to be calm and save screen time. You receive exactly ONE personalized lifestyle task per day. Focus on completing this single action!"
-        1 -> "Log fasting sugar, sleep, steps, or water in under 10 seconds. Simply click 'Today's Vitals' cards to log yours. Easy tracking, built for outcomes."
-        2 -> "Visit 'Insights' to read your 'Sugar Story'. We automatically analyze how sleep, walking after meals, and late-dinner habits impact your fasting glucose."
+        1 -> "Log fasting blood sugar, sleep, steps, or water in under 10 seconds. Simply click 'Today's Vitals' cards to log yours. Easy tracking, built for outcomes."
+        2 -> "Visit 'Insights' to read your 'Blood Sugar Story'. We automatically analyze how sleep, walking after meals, and late-dinner habits impact your fasting glucose."
         else -> "Tap the Care tab to open your lifestyle program, assigned yoga and naturopathy routines, and expert consultations."
     }
 
@@ -699,10 +699,11 @@ fun TodayTab(state: NirogState) {
                 VitalBentoCard(
                     icon = Icons.Filled.Bloodtype,
                     iconColor = NirogColor.errorColor,
-                    title = "Blood Sugar",
+                    title = "Blood sugar",
                     value = health.latestGlucose?.value?.toInt()?.toString() ?: "—",
                     unit = if (health.latestGlucose != null) "mg/dL" else "",
-                    annotation = health.latestGlucose?.let { HealthLabels.day(it.measuredAtMillis, nowMs, health.zone) } ?: "Tap to log",
+                    // Say what kind of reading this is, so a fasting value is never mistaken for an after-meal one.
+                    annotation = health.latestGlucose?.let { "${HealthLabels.glucoseKind(it.kind)} · ${HealthLabels.day(it.measuredAtMillis, nowMs, health.zone)}" } ?: "Tap to log",
                     onClick = { state.isQuickLogFastingOpen = true }
                 )
             }
@@ -1119,8 +1120,8 @@ private fun SleepGlucoseInsightCard(state: NirogState) {
     val mealInsight = remember(health) { Insights.mealTiming(health.glucose, health.zone) }
 
     val summary = when {
-        sleepInsight != null -> "Your fasting sugar has averaged %.0f mg/dL after shorter nights (under 6h) vs %.0f mg/dL after longer ones, based on your own logs.".format(sleepInsight.shortSleepAvg, sleepInsight.longSleepAvg)
-        medicationInsight != null -> "On days you took your medication, fasting sugar averaged %.0f mg/dL, vs %.0f mg/dL on days it was missed.".format(medicationInsight.takenAvg, medicationInsight.missedAvg)
+        sleepInsight != null -> "Your fasting blood sugar has averaged %.0f mg/dL after shorter nights (under 6h) vs %.0f mg/dL after longer ones, based on your own logs.".format(sleepInsight.shortSleepAvg, sleepInsight.longSleepAvg)
+        medicationInsight != null -> "On days you took your medication, fasting blood sugar averaged %.0f mg/dL, vs %.0f mg/dL on days it was missed.".format(medicationInsight.takenAvg, medicationInsight.missedAvg)
         mealInsight != null -> "Your post-${mealInsight.mealLabel.lowercase()} sugar has averaged %.0f mg/dL, higher than after your other meals (%.0f mg/dL).".format(mealInsight.mealAvg, mealInsight.otherAvg)
         else -> return
     }
@@ -1372,7 +1373,7 @@ fun TrackTab(state: NirogState) {
                         color = if (health.today.checkedIn) NirogColor.forest else Color.White
                     )
                     Text(
-                        if (health.today.checkedIn) "Nicely done — tap to add another reading" else "Sugar, BP & weight — under 2 minutes",
+                        if (health.today.checkedIn) "Nicely done — tap to add another reading" else "Blood sugar, BP & weight — under 2 minutes",
                         fontSize = 13.sp,
                         color = if (health.today.checkedIn) Color(0xFF4B6450) else NirogColor.forestPale
                     )
@@ -1393,7 +1394,7 @@ fun TrackTab(state: NirogState) {
                 modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                QuickLogChip("Sugar", Icons.Filled.Bloodtype, NirogColor.errorColor) { state.checkinStartStep = 0; state.currentScreen = "daily_checkin" }
+                QuickLogChip("Blood sugar", Icons.Filled.Bloodtype, NirogColor.errorColor) { state.checkinStartStep = 0; state.currentScreen = "daily_checkin" }
                 QuickLogChip("BP", Icons.Filled.Favorite, NirogColor.forest) { state.checkinStartStep = 1; state.currentScreen = "daily_checkin" }
                 QuickLogChip("Weight", Icons.Filled.MonitorWeight, Color(0xFF4B6450)) { state.checkinStartStep = 2; state.currentScreen = "daily_checkin" }
                 QuickLogChip("Medication", Icons.Filled.Medication, Color(0xFF6D4C1E)) { state.checkinStartStep = 3; state.currentScreen = "daily_checkin" }
@@ -1410,9 +1411,9 @@ fun TrackTab(state: NirogState) {
                     icon = Icons.Filled.Bloodtype,
                     iconBg = Color(0xFFFFDAD6),
                     iconTint = NirogColor.errorColor,
-                    title = "Blood Sugar",
+                    title = "Blood sugar",
                     measuredValue = health.latestGlucose?.value?.toInt()?.toString() ?: "No data",
-                    labelSuffix = if (health.latestGlucose != null) "mg/dL" else "",
+                    labelSuffix = health.latestGlucose?.let { "mg/dL · ${HealthLabels.glucoseKind(it.kind).lowercase()}" } ?: "",
                     onClick = { state.currentScreen = "sugar_detail" }
                 )
             }
@@ -1660,7 +1661,7 @@ fun InsightsTab(state: NirogState) {
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        "Log at least 3 sugar readings this week and we'll show you real trends, not guesses.",
+                        "Log at least 3 blood sugar readings this week and we'll show you real trends, not guesses.",
                         fontSize = 13.sp,
                         color = NirogColor.outline,
                         textAlign = TextAlign.Center,
@@ -1677,7 +1678,7 @@ fun InsightsTab(state: NirogState) {
                 }
             }
         } else {
-            // Avg Fasting Sugar - computed from real logged readings
+            // Fasting blood sugar (average) - computed from real logged readings
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1690,9 +1691,9 @@ fun InsightsTab(state: NirogState) {
             ) {
                 Column(modifier = Modifier.padding(20.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Filled.WaterDrop, "Sugar", tint = Color(0xFF43242A), modifier = Modifier.size(18.dp))
+                        Icon(Icons.Filled.WaterDrop, "Blood sugar", tint = Color(0xFF43242A), modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Avg Fasting Sugar", fontWeight = FontWeight.SemiBold, color = NirogColor.inkTertiary)
+                        Text("Fasting blood sugar (average)", fontWeight = FontWeight.SemiBold, color = NirogColor.inkTertiary)
                     }
 
                     Spacer(modifier = Modifier.height(8.dp))
@@ -1819,9 +1820,9 @@ fun InsightsTab(state: NirogState) {
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
                             text = when {
-                                avg > com.nirogbhumi.app.health.domain.GlucoseRanges.HIGH_ABOVE -> "Your average fasting sugar this week is $avg mg/dL, above the typical target range. A short walk after meals and a consistent dinner time can help. Please discuss any persistent high readings with your doctor."
-                                avg < com.nirogbhumi.app.health.domain.GlucoseRanges.LOW_BELOW -> "Your average fasting sugar this week is $avg mg/dL, on the lower side. If you feel dizzy or shaky, eat something and tell your doctor about these readings."
-                                else -> "Your average fasting sugar this week is $avg mg/dL, within a typical range. Keep up your current routine, and keep logging so trends stay accurate."
+                                avg > com.nirogbhumi.app.health.domain.GlucoseRanges.HIGH_ABOVE -> "Your average fasting blood sugar this week is $avg mg/dL, above the typical target range. A short walk after meals and a consistent dinner time can help. Please discuss any persistent high readings with your doctor."
+                                avg < com.nirogbhumi.app.health.domain.GlucoseRanges.LOW_BELOW -> "Your average fasting blood sugar this week is $avg mg/dL, on the lower side. If you feel dizzy or shaky, eat something and tell your doctor about these readings."
+                                else -> "Your average fasting blood sugar this week is $avg mg/dL, within a typical range. Keep up your current routine, and keep logging so trends stay accurate."
                             },
                             fontSize = 13.sp,
                             color = NirogColor.inkPrimary,

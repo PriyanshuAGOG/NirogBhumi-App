@@ -210,7 +210,7 @@ fun RequestConsultationContent(
           onValueChange = { if (it.length <= CONCERN_MAX) concern = it },
           modifier = Modifier.fillMaxWidth(),
           minLines = 4,
-          placeholder = { Text("For example: my fasting sugar is high on weekends and I'm not sure what to change.") },
+          placeholder = { Text("For example: my fasting blood sugar is high on weekends and I'm not sure what to change.") },
           keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
           supportingText = {
             Text(
