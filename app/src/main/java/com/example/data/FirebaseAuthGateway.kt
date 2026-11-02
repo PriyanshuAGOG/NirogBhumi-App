@@ -49,6 +49,18 @@ object FirebaseAuthGateway {
             .addOnFailureListener { onError(it.message ?: "Google Sign-in cancelled") }
     }
 
+    /**
+     * A build that did not come from the Play Store cannot pass Google's silent app check, so the SDK tries it, waits for it to
+     * fail, and only then shows the "I'm not a robot" page. Tester builds go straight to that page instead, which removes the long
+     * wait. Play Store builds keep the silent check (members never see a page).
+     */
+    private fun prepareForPhoneVerification(auth: FirebaseAuth) {
+        if (com.nirogbhumi.app.BuildConfig.DEBUG) {
+            runCatching { auth.firebaseAuthSettings.forceRecaptchaFlowForTesting(true) }
+                .onFailure { Log.w("NirogAuth", "Could not switch to the direct human check: ${it.message}") }
+        }
+    }
+
     /** Logs the real reason (no phone number) for logcat and Crashlytics, and returns what the member should read. */
     private fun otpFailureText(error: FirebaseException): String {
         val code = (error as? FirebaseAuthException)?.errorCode
@@ -58,6 +70,7 @@ object FirebaseAuthGateway {
 
     fun sendOtp(activity: Activity, phone: String, onSent: (String) -> Unit, onError: (String) -> Unit) {
         val auth = auth() ?: return onError("Firebase is not configured. Add google-services.json for this app.")
+        prepareForPhoneVerification(auth)
         val callbacks = object : PhoneAuthProvider.OnVerificationStateChangedCallbacks() {
             override fun onVerificationCompleted(credential: PhoneAuthCredential) {
                 auth.signInWithCredential(credential).addOnSuccessListener { onSent("AUTO_VERIFIED") }
@@ -166,6 +179,7 @@ object FirebaseAuthGateway {
     fun sendLinkPhoneOtp(activity: Activity, phone: String, onSent: (String) -> Unit, onError: (String) -> Unit) {
         val auth = auth() ?: return onError("Firebase is not configured")
         val user = auth.currentUser ?: return onError("Please sign in again.")
+        prepareForPhoneVerification(auth)
         val callbacks = object : PhoneAuthProvider.OnVerificationStateChangedCallbacks() {
             override fun onVerificationCompleted(credential: PhoneAuthCredential) {
                 user.linkWithCredential(credential).addOnSuccessListener { onSent("AUTO_VERIFIED") }

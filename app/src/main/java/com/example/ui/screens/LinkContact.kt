@@ -35,7 +35,6 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -44,6 +43,7 @@ import com.nirogbhumi.app.data.CloudResult
 import com.nirogbhumi.app.data.FirebaseAuthGateway
 import com.nirogbhumi.app.data.MissingContact
 import com.nirogbhumi.app.ui.NirogState
+import com.nirogbhumi.app.ui.components.OtpCodeField
 
 /**
  * Asks for the sign-in method this account does not have yet, so the phone number AND the email both open the SAME account:
@@ -73,12 +73,13 @@ fun LinkContactScreen(state: NirogState) {
     }
 
     fun saved(values: Map<String, Any?>) {
+        // The sign-in method is already attached. Copying it into the profile happens in the background (Firestore queues
+        // the write if the connection is poor), so the member is never left waiting on it.
         state.repository.saveProfile(values) { result ->
-            busy = false
-            // The sign-in method is attached either way; a failed copy into the profile is not worth blocking on.
             if (result is CloudResult.Failure) android.util.Log.w("NirogAuth", "Profile copy of contact failed: ${result.message}")
-            proceed()
         }
+        busy = false
+        proceed()
     }
 
     Column(
@@ -147,23 +148,25 @@ fun LinkContactScreen(state: NirogState) {
                     }
                 } else {
                     Text("We sent a 6-digit code to +91 $phone.", fontSize = 13.sp, color = Ink.copy(alpha = 0.7f))
-                    OutlinedTextField(
-                        value = code, onValueChange = { if (it.all(Char::isDigit) && it.length <= 6) { code = it; error = "" } },
-                        singleLine = true, label = { Text("6-digit code") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                        visualTransformation = VisualTransformation.None, modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp), colors = fieldColors,
-                    )
-                    PrimaryAction("Verify and continue", code.length == 6 && !busy, busy) {
+                    fun verify(entered: String) {
+                        if (busy) return
                         busy = true; error = ""
-                        FirebaseAuthGateway.linkPhone(verificationId, code,
+                        FirebaseAuthGateway.linkPhone(verificationId, entered,
                             onSuccess = { saved(mapOf("phone" to "+91$phone")) },
-                            onError = { busy = false; error = it })
+                            onError = { busy = false; error = it; code = "" })
                     }
+                    OtpCodeField(value = code, onValueChange = { code = it; error = "" }, isError = error.isNotBlank(), enabled = !busy, onComplete = { verify(it) })
+                    PrimaryAction("Verify and continue", code.length == 6 && !busy, busy) { verify(code) }
                     TextButton(onClick = { verificationId = ""; code = ""; error = "" }, enabled = !busy) {
                         Text("Change the number or send a new code", color = DeepGreen, fontSize = 13.sp)
                     }
                 }
+                if (busy) Text(
+                    if (missing == MissingContact.EMAIL) "Securing your account. This can take a few seconds on a slow connection."
+                    else if (verificationId.isEmpty()) "Sending your code. Google may ask you to tap \"I'm not a robot\" in your browser first: do it, then come back here."
+                    else "Checking your code…",
+                    color = Ink.copy(alpha = 0.6f), fontSize = 12.sp, lineHeight = 16.sp,
+                )
                 if (error.isNotBlank()) Text(error, color = Color(0xFF8B2E2E), fontSize = 12.sp)
             }
         }

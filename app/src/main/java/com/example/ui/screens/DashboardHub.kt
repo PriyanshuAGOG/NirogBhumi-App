@@ -1,5 +1,7 @@
 package com.nirogbhumi.app.ui.screens
 
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import com.nirogbhumi.app.health.domain.ActivityCard
 import androidx.compose.animation.*
 import androidx.compose.foundation.*
@@ -53,6 +55,7 @@ fun MainHub(state: NirogState) {
         topBar = {
             NirogTopAppBar(
                 profileName = state.profileName,
+                photoUrl = state.photoUrl,
                 onProfileClick = {
                     state.currentScreen = "profile"
                 },
@@ -108,145 +111,109 @@ private fun markTourSeen(context: android.content.Context) {
         .edit().putBoolean("onboarding_tour_seen", true).apply()
 }
 
+private data class TourStep(val icon: androidx.compose.ui.graphics.vector.ImageVector, val title: String, val text: String)
+
+private val TOUR_STEPS = listOf(
+    TourStep(Icons.Filled.TaskAlt, "One small thing a day", "Each day we suggest one simple, doable action. Finish it and you've had a good day."),
+    TourStep(Icons.Filled.EditNote, "Log in seconds", "Tap a card on Today to record your blood sugar, sleep, steps or water. It takes about ten seconds."),
+    TourStep(Icons.Filled.Insights, "See what's working", "Insights shows how sleep, walking and meals affect your blood sugar, in plain words."),
+    TourStep(Icons.Filled.MedicalServices, "Your care team", "In Care you can join a batch, message your coach, and book a consultation."),
+)
+
 @Composable
 fun OnboardingTourOverlay(state: NirogState) {
     val context = LocalContext.current
-    val step = state.currentTourStep
-    val title = when (step) {
-        0 -> "1. Your Daily Action"
-        1 -> "2. Fast Metric Logging"
-        2 -> "3. Custom Blood Sugar Stories"
-        else -> "4. Expert Naturopathy & Yoga"
+    val step = state.currentTourStep.coerceIn(0, TOUR_STEPS.lastIndex)
+    val current = TOUR_STEPS[step]
+    val last = step == TOUR_STEPS.lastIndex
+
+    fun finish() {
+        state.shouldShowTour = false
+        markTourSeen(context)
+        state.activeTab = "Today"
     }
-    val description = when (step) {
-        0 -> "Nirog Bhumi is designed to be calm and save screen time. You receive exactly ONE personalized lifestyle task per day. Focus on completing this single action!"
-        1 -> "Log fasting blood sugar, sleep, steps, or water in under 10 seconds. Simply click 'Today's Vitals' cards to log yours. Easy tracking, built for outcomes."
-        2 -> "Visit 'Insights' to read your 'Blood Sugar Story'. We automatically analyze how sleep, walking after meals, and late-dinner habits impact your fasting glucose."
-        else -> "Tap the Care tab to open your lifestyle program, assigned yoga and naturopathy routines, and expert consultations."
+    fun goTo(index: Int) {
+        state.currentTourStep = index
+        state.activeTab = when (index) { 2 -> "Insights"; 3 -> "Care"; else -> "Today" }
     }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.72f))
+            .background(Color.Black.copy(alpha = 0.6f))
             .clickable(enabled = true) { /* Consume taps */ },
-        contentAlignment = Alignment.Center
+        contentAlignment = Alignment.BottomCenter
     ) {
+        // A bottom sheet rather than a centred box: the screen being explained stays visible above it.
         Column(
             modifier = Modifier
-                .padding(24.dp)
                 .fillMaxWidth()
-                .background(NirogColor.surface, RoundedCornerShape(24.dp))
-                .border(1.dp, NirogColor.forestSoft, RoundedCornerShape(24.dp))
-                .padding(24.dp),
+                .background(NirogColor.surface, RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
+                .navigationBarsPadding()
+                .padding(horizontal = 24.dp, vertical = 20.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Icon Sparkle
-            Box(
-                modifier = Modifier
-                    .size(48.dp)
-                    .background(NirogColor.surfaceAlt, CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Stars,
-                    contentDescription = "Feature Sparkle",
-                    tint = NirogColor.forestSoft,
-                    modifier = Modifier.size(28.dp)
-                )
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("Step ${step + 1} of ${TOUR_STEPS.size}", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = NirogColor.forest.copy(alpha = 0.6f))
+                TextButton(onClick = { finish() }) {
+                    Text("Skip", color = NirogColor.forest.copy(alpha = 0.6f), fontWeight = FontWeight.SemiBold)
+                }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
-
+            Box(
+                modifier = Modifier.size(56.dp).background(NirogColor.surfaceAlt, CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(imageVector = current.icon, contentDescription = null, tint = NirogColor.forestSoft, modifier = Modifier.size(30.dp))
+            }
+            Spacer(modifier = Modifier.height(14.dp))
             Text(
-                text = title,
-                fontSize = 20.sp,
+                text = current.title,
+                fontSize = 22.sp,
                 fontFamily = FontFamily.Serif,
                 fontWeight = FontWeight.Bold,
-                color = NirogColor.forest
+                color = NirogColor.forest,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
             )
-
             Spacer(modifier = Modifier.height(8.dp))
-
             Text(
-                text = description,
-                fontSize = 14.sp,
+                text = current.text,
+                fontSize = 15.sp,
                 color = NirogColor.inkTertiary,
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                lineHeight = 20.sp
+                lineHeight = 22.sp
             )
+            Spacer(modifier = Modifier.height(18.dp))
 
-            Spacer(modifier = Modifier.height(24.dp))
-
-            // Step dots
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                for (i in 0..3) {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                TOUR_STEPS.indices.forEach { i ->
                     Box(
                         modifier = Modifier
-                            .size(if (i == step) 10.dp else 6.dp)
+                            .size(width = if (i == step) 22.dp else 7.dp, height = 7.dp)
                             .background(
-                                color = if (i == step) NirogColor.forestSoft else NirogColor.forest.copy(alpha = 0.25f),
-                                shape = CircleShape
+                                color = if (i == step) NirogColor.forestSoft else NirogColor.forest.copy(alpha = 0.2f),
+                                shape = RoundedCornerShape(4.dp)
                             )
                     )
                 }
             }
+            Spacer(modifier = Modifier.height(18.dp))
 
-            Spacer(modifier = Modifier.height(20.dp))
-
-            // CTA Button
-            Button(
-                onClick = {
-                    if (step < 3) {
-                        state.currentTourStep++
-                        when (state.currentTourStep) {
-                            1 -> state.activeTab = "Today"
-                            2 -> state.activeTab = "Insights"
-                            3 -> state.activeTab = "Care"
-                        }
-                    } else {
-                        state.shouldShowTour = false
-                        markTourSeen(context)
-                        state.activeTab = "Today"
-                    }
-                },
-                modifier = Modifier.fillMaxWidth().height(48.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = NirogColor.forestSoft),
-                shape = RoundedCornerShape(24.dp)
-            ) {
-                Text(
-                    text = if (step < 3) "Next Key Feature" else "Start My 2-Min Routine",
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-
-            if (step > 0) {
-                Spacer(modifier = Modifier.height(8.dp))
-                TextButton(
-                    onClick = {
-                        state.currentTourStep--
-                        when (state.currentTourStep) {
-                            0 -> state.activeTab = "Today"
-                            1 -> state.activeTab = "Today"
-                            2 -> state.activeTab = "Insights"
-                        }
-                    }
-                ) {
-                    Text("Previous", color = NirogColor.forestSoft, fontWeight = FontWeight.Bold)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (step > 0) {
+                    OutlinedButton(
+                        onClick = { goTo(step - 1) },
+                        modifier = Modifier.weight(1f).height(48.dp),
+                        shape = RoundedCornerShape(24.dp),
+                    ) { Text("Back", color = NirogColor.forestSoft, fontWeight = FontWeight.Bold) }
                 }
-            } else {
-                Spacer(modifier = Modifier.height(8.dp))
-                TextButton(
-                    onClick = {
-                        state.shouldShowTour = false
-                        markTourSeen(context)
-                    }
+                Button(
+                    onClick = { if (last) finish() else goTo(step + 1) },
+                    modifier = Modifier.weight(if (step > 0) 2f else 1f).height(48.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = NirogColor.forestSoft),
+                    shape = RoundedCornerShape(24.dp)
                 ) {
-                    Text("Skip Tour", color = NirogColor.forest.copy(alpha = 0.5f))
+                    Text(text = if (last) "Get started" else "Next", color = Color.White, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -258,6 +225,7 @@ fun OnboardingTourOverlay(state: NirogState) {
 fun NirogTopAppBar(
     profileName: String,
     onProfileClick: () -> Unit,
+    photoUrl: String = "",
     onNotificationClick: () -> Unit,
     activeTab: String = "Today",
     chatUnread: Boolean = false,
@@ -277,38 +245,43 @@ fun NirogTopAppBar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                // Initials avatar - no placeholder/stranger photo until the user uploads their own
-                Box(
-                    modifier = Modifier
-                        .size(38.dp)
-                        .clip(CircleShape)
-                        .background(NirogColor.forestSoft)
-                        .border(1.dp, NirogColor.outlineVariant, CircleShape)
-                        .clickable { onProfileClick() },
-                    contentAlignment = Alignment.Center
-                ) {
+            // The member's own picture (or their initial until they add one): the only thing on the left, and it opens their profile.
+            Box(
+                modifier = Modifier
+                    .size(42.dp)
+                    .clip(CircleShape)
+                    .background(NirogColor.forestSoft)
+                    .border(1.dp, NirogColor.outlineVariant, CircleShape)
+                    .clickable { onProfileClick() }
+                    .semantics { contentDescription = "Your profile" },
+                contentAlignment = Alignment.Center
+            ) {
+                if (photoUrl.isNotBlank()) {
+                    coil.compose.AsyncImage(
+                        model = photoUrl,
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                    )
+                } else {
                     Text(
                         text = profileName.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?",
                         color = Color.White,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 15.sp
+                        fontSize = 16.sp
                     )
                 }
-                Spacer(modifier = Modifier.width(10.dp))
-                NirogLogo(modifier = Modifier.size(28.dp))
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = "Nirog Bhumi",
-                    fontSize = 22.sp,
-                    fontFamily = FontFamily.Serif,
-                    fontWeight = FontWeight.Bold,
-                    color = NirogColor.forest
-                )
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
-                // Messages and notifications are both always one tap away, on every tab.
+                // Notifications, then messages at the far edge: both always one tap away, on every tab.
+                IconButton(onClick = onNotificationClick) {
+                    Icon(
+                        imageVector = Icons.Filled.Notifications,
+                        contentDescription = "Notifications",
+                        tint = NirogColor.forest
+                    )
+                }
                 IconButton(onClick = onChatClick) {
                     BadgedBox(badge = { if (chatUnread) Badge(containerColor = NirogColor.terracotta) }) {
                         Icon(
@@ -317,13 +290,6 @@ fun NirogTopAppBar(
                             tint = NirogColor.forest
                         )
                     }
-                }
-                IconButton(onClick = onNotificationClick) {
-                    Icon(
-                        imageVector = Icons.Filled.Notifications,
-                        contentDescription = "Notifications",
-                        tint = NirogColor.forest
-                    )
                 }
             }
         }
@@ -2271,14 +2237,11 @@ fun LearnTab(state: NirogState) {
         // Every article and blog post from nirogbhumi.com: working search, the site's own topics, paging, offline copy.
         ExploreFeed(state)
 
-        // Store is not launched yet - a single clear teaser instead of a shop
-        // front with nothing real to sell. It opens the (locked-down) store page only when a
-        // store address on our own site has been configured for this build.
-        val storeOpen = com.nirogbhumi.app.web.UrlPolicy.isAllowedHttps(com.nirogbhumi.app.BuildConfig.STORE_URL)
+        // The shop on nirogbhumi.com, listed in the app; ordering and payment happen on the website.
         Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable { state.currentScreen = if (storeOpen) "store_web" else "coming_soon" }
+                .clickable { state.currentScreen = "store" }
                 .border(width = 0.5.dp, color = NirogColor.outlineVariant.copy(alpha = 0.35f), shape = RoundedCornerShape(24.dp)),
             colors = CardDefaults.cardColors(containerColor = Color(0xFFEEE8DC)),
             shape = RoundedCornerShape(24.dp)
@@ -2295,9 +2258,9 @@ fun LearnTab(state: NirogState) {
                         fontWeight = FontWeight.Bold,
                         color = NirogColor.forest
                     )
-                    Text(if (storeOpen) "Wellness tools and kits" else "Wellness tools and kits - coming soon", fontSize = 12.sp, color = NirogColor.outline)
+                    Text("Wellness products from nirogbhumi.com", fontSize = 12.sp, color = NirogColor.outline)
                 }
-                Icon(Icons.Filled.ChevronRight, "Coming soon", tint = NirogColor.forest)
+                Icon(Icons.Filled.ChevronRight, "Open the store", tint = NirogColor.forest)
             }
         }
         Spacer(modifier = Modifier.height(32.dp))

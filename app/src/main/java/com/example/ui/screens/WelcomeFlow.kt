@@ -34,6 +34,9 @@ import com.nirogbhumi.app.ui.NirogState
 import com.nirogbhumi.app.ui.OfficialContact
 import com.nirogbhumi.app.ui.diabetesAnswer
 import com.nirogbhumi.app.data.FirebaseAuthGateway
+import com.nirogbhumi.app.ui.components.OtpCodeField
+import androidx.compose.foundation.relocation.bringIntoViewRequester
+import kotlinx.coroutines.launch
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 
@@ -723,10 +726,16 @@ fun LoginMobileScreen(state: NirogState) {
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.Center
                         ) {
-                            Text(text = "Send OTP", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            Text(text = if (state.authBusy) "Sending your code…" else "Send OTP", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
                             Spacer(modifier = Modifier.width(8.dp))
                             Icon(imageVector = Icons.Filled.ArrowForward, contentDescription = "Proceed", tint = Color.White)
                         }
+                    }
+                    if (state.authBusy) {
+                        Text(
+                            "Google may ask you to tap \"I'm not a robot\" in your browser first. Do it, then come back here: the code arrives by SMS.",
+                            color = Ink.copy(alpha = 0.6f), fontSize = 12.sp, lineHeight = 16.sp,
+                        )
                     }
                     if (state.authError.isNotBlank()) Text(state.authError, color = Color(0xFF8B2E2E), fontSize = 12.sp)
                 }
@@ -765,11 +774,20 @@ fun LoginMobileScreen(state: NirogState) {
 // SCREEN 5: OTP VERIFICATION
 @Composable
 fun LoginOtpScreen(state: NirogState) {
-    val otpDigits = remember { mutableStateListOf("", "", "", "", "", "") }
+    var otpCode by remember { mutableStateOf("") }
     var isValidState by remember { mutableStateOf(true) }
     var resendTimer by remember { mutableStateOf(28) }
     val activity = LocalActivity.current
     val context = LocalContext.current.applicationContext
+
+    fun verifyCode(code: String) {
+        if (state.authBusy) return
+        state.authBusy = true
+        state.authError = ""
+        FirebaseAuthGateway.verifyOtp(state.otpVerificationId, code,
+            onSuccess = { state.authBusy = false; routeAfterAuthSuccess(state, context) },
+            onError = { state.authBusy = false; state.authError = it; isValidState = false; otpCode = "" })
+    }
 
     LaunchedEffect(Unit) {
         while (resendTimer > 0) {
@@ -832,44 +850,18 @@ fun LoginOtpScreen(state: NirogState) {
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    // Multi-box inputs
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        for (i in 0..5) {
-                            OutlinedTextField(
-                                value = otpDigits[i],
-                                onValueChange = { newVal ->
-                                    if (newVal.all { it.isDigit() } && newVal.length <= 1) {
-                                        otpDigits[i] = newVal
-                                    }
-                                },
-                                modifier = Modifier
-                                    .width(42.dp)
-                                    .height(58.dp)
-                                    .semantics { contentDescription = "OTP digit ${i + 1} of 6" },
-                                textStyle = LocalTextStyle.current.copy(
-                                    fontSize = 18.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    textAlign = TextAlign.Center,
-                                    color = Ink
-                                ),
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                shape = RoundedCornerShape(12.dp),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = if (isValidState) DeepGreen else Color.Red,
-                                    unfocusedBorderColor = Line,
-                                    focusedContainerColor = Paper,
-                                    unfocusedContainerColor = Paper.copy(alpha = 0.4f)
-                                )
-                            )
-                        }
-                    }
+                    // One field drawn as six boxes: type straight through, paste the whole code, and it submits itself on the last digit.
+                    OtpCodeField(
+                        value = otpCode,
+                        onValueChange = { otpCode = it; isValidState = true; state.authError = "" },
+                        isError = !isValidState,
+                        enabled = !state.authBusy,
+                        onComplete = { verifyCode(it) },
+                    )
 
                     if (!isValidState) {
                         Text(
-                            text = "Invalid OTP code entered. Please retry.",
+                            text = "That code didn't work. Please check it and try again.",
                             color = Color.Red,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold
@@ -901,17 +893,7 @@ fun LoginOtpScreen(state: NirogState) {
                     }
 
                     Button(
-                        onClick = {
-                            val pinVal = otpDigits.joinToString("")
-                            if (pinVal.length < 6) {
-                                isValidState = false
-                            } else {
-                                state.authBusy = true
-                                FirebaseAuthGateway.verifyOtp(state.otpVerificationId, pinVal,
-                                    onSuccess = { state.authBusy = false; routeAfterAuthSuccess(state, context) },
-                                    onError = { state.authBusy = false; state.authError = it; isValidState = false })
-                            }
-                        },
+                        onClick = { if (otpCode.length < 6) isValidState = false else verifyCode(otpCode) },
                         enabled = !state.authBusy,
                         modifier = Modifier
                             .fillMaxWidth()
@@ -919,7 +901,7 @@ fun LoginOtpScreen(state: NirogState) {
                         colors = ButtonDefaults.buttonColors(containerColor = DeepGreen),
                         shape = RoundedCornerShape(27.dp)
                     ) {
-                        Text(text = "Verify & Proceed", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        Text(text = if (state.authBusy) "Checking your code…" else "Verify & Proceed", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
                     }
 
                     if (state.authError.isNotBlank()) Text(state.authError, color = Color(0xFF8B2E2E), fontSize = 12.sp)
@@ -1329,12 +1311,25 @@ fun PasswordResetScreen(state: NirogState) {
 }
 
 // SCREEN 10: USER DATA PROTECTION & TRIPLE CONSENT SCREEN
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ConsentScreen(state: NirogState) {
     var check1 by remember { mutableStateOf(false) }
     var check2 by remember { mutableStateOf(false) }
     var check3 by remember { mutableStateOf(false) }
     var isSaving by remember { mutableStateOf(false) }
+
+    val scope = rememberCoroutineScope()
+    val consentScroll = rememberScrollState()
+    val row1 = remember { androidx.compose.foundation.relocation.BringIntoViewRequester() }
+    val row2 = remember { androidx.compose.foundation.relocation.BringIntoViewRequester() }
+    val row3 = remember { androidx.compose.foundation.relocation.BringIntoViewRequester() }
+    // After one box is ticked, scroll so the next unticked one is on screen: nobody has to hunt for them below the fold.
+    fun revealNextUnticked(c1: Boolean, c2: Boolean, c3: Boolean) {
+        val next = when { !c1 -> row1; !c2 -> row2; !c3 -> row3; else -> null } ?: return
+        scope.launch { next.bringIntoView() }
+    }
+    val confirmed = listOf(check1, check2, check3).count { it }
 
     Column(
         modifier = Modifier
@@ -1368,7 +1363,7 @@ fun ConsentScreen(state: NirogState) {
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(consentScroll)
                 .padding(horizontal = 20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
@@ -1399,9 +1394,18 @@ fun ConsentScreen(state: NirogState) {
             Spacer(modifier = Modifier.height(12.dp))
 
             // Triple critical checkboxes
-            ConsentCheckRow(checked = check1, onCheckedChange = { check1 = it }, label = "I agree to health data tracking & secure cloud database persistence.")
-            ConsentCheckRow(checked = check2, onCheckedChange = { check2 = it }, label = "I allow certified Nirog Bhumi experts to see my health readings when I book a consultation.")
-            ConsentCheckRow(checked = check3, onCheckedChange = { check3 = it }, label = "I understand this application is for health tracking and lifestyle support, not medicine prescription.")
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("Please confirm these three", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = Ink)
+                TextButton(onClick = { check1 = true; check2 = true; check3 = true }) {
+                    Text("Tick all three", color = DeepGreen, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                }
+            }
+            ConsentCheckRow(checked = check1, onCheckedChange = { check1 = it; if (it) revealNextUnticked(true, check2, check3) },
+                label = "I agree to health data tracking & secure cloud database persistence.", modifier = Modifier.bringIntoViewRequester(row1))
+            ConsentCheckRow(checked = check2, onCheckedChange = { check2 = it; if (it) revealNextUnticked(check1, true, check3) },
+                label = "I allow certified Nirog Bhumi experts to see my health readings when I book a consultation.", modifier = Modifier.bringIntoViewRequester(row2))
+            ConsentCheckRow(checked = check3, onCheckedChange = { check3 = it; if (it) revealNextUnticked(check1, check2, true) },
+                label = "I understand this application is for health tracking and lifestyle support, not medicine prescription.", modifier = Modifier.bringIntoViewRequester(row3))
 
             TextButton(onClick = { state.legalReturnRoute = "consent"; state.currentScreen = "legal_center" }) {
                 Text("Read full policies and medical disclaimer", color = DeepGreen, fontWeight = FontWeight.SemiBold)
@@ -1416,13 +1420,6 @@ fun ConsentScreen(state: NirogState) {
                 lineHeight = 17.sp
             )
 
-            if (!(check1 && check2 && check3)) {
-                Text(
-                    "Check all three items above to continue.",
-                    color = Ink.copy(alpha = 0.55f),
-                    fontSize = 12.sp
-                )
-            }
             if (state.authError.isNotBlank()) {
                 Text(state.authError, color = Color(0xFF8B2E2E), fontSize = 12.sp)
             }
@@ -1430,13 +1427,23 @@ fun ConsentScreen(state: NirogState) {
             Spacer(modifier = Modifier.height(32.dp))
         }
 
-        // Sticky consent continue bar
-        Box(
+        // Sticky consent continue bar. It always says how many of the three are confirmed, and tapping the hint jumps to the next one.
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(Paper)
-                .padding(16.dp)
+                .padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
+            if (confirmed < 3) {
+                Text(
+                    "$confirmed of 3 confirmed. Tap here to see the next one.",
+                    color = DeepGreen, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier
+                        .clickable { revealNextUnticked(check1, check2, check3) }
+                        .padding(bottom = 8.dp),
+                )
+            }
             Button(
                 onClick = {
                     state.authError = ""
@@ -1502,9 +1509,9 @@ fun ConsentInformationBullet(title: String, desc: String, icon: androidx.compose
 }
 
 @Composable
-fun ConsentCheckRow(checked: Boolean, onCheckedChange: (Boolean) -> Unit, label: String) {
+fun ConsentCheckRow(checked: Boolean, onCheckedChange: (Boolean) -> Unit, label: String, modifier: Modifier = Modifier) {
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clickable { onCheckedChange(!checked) }
             .padding(vertical = 4.dp),

@@ -8,6 +8,8 @@ import os, re, subprocess, sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OFFICIAL = "priyanshu@nirogbhumi.com"
+# Team sign-in accounts that unlock the Developer screen (DeveloperAccess.kt). Not contact addresses; never shown to members.
+TEAM_ACCOUNTS = {"gk@nirogbhumi.com"}
 EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}")
 SKIP_PATH = re.compile(r"(^|/)(e2e|test|tests|rules-tests|node_modules|dist|build|lib)/|package-lock\.json$|\.(png|jpg|webp|jar|ttf|otf|ico|keystore|jks)$")
 SKIP_MATCH = re.compile(r"\.gserviceaccount\.com$|\.example$|@example\.(com|org)$|^nirogbhumi\.com@evil")
@@ -23,7 +25,7 @@ for rel in files:
         continue
     for n, line in enumerate(text.splitlines(), 1):
         for m in EMAIL.findall(line):
-            if m.lower() == OFFICIAL or SKIP_MATCH.search(m):
+            if m.lower() == OFFICIAL or m.lower() in TEAM_ACCOUNTS or SKIP_MATCH.search(m):
                 continue
             # URLs such as https://user@host/ in docs/tests describing blocked links are not addresses.
             if re.search(r"[a-z]+://[^\s]*" + re.escape(m), line):

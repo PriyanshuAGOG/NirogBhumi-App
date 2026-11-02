@@ -54,14 +54,6 @@ class MainActivity : ComponentActivity() {
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
-    // Lets testers get prompted to install new builds from inside the app itself,
-    // instead of depending on the separate "Firebase App Tester" companion app or
-    // an easily-missed email - this is what the debug distribution channel is for.
-    if (BuildConfig.DEBUG) {
-      com.google.firebase.appdistribution.FirebaseAppDistribution.getInstance()
-        .updateIfNewReleaseAvailable()
-        .addOnFailureListener { /* not signed in as a tester yet, or no newer release - nothing to show */ }
-    }
     nirogState.pendingDeepLink = sanitizedRoute(intent.getStringExtra("route"))
     applyQuickLogWidgetAction(intent, coldStart = true)
     val tourSeen = getSharedPreferences("nirog_prefs", MODE_PRIVATE).getBoolean("onboarding_tour_seen", false)
@@ -367,7 +359,11 @@ fun ActiveScreenContent(state: NirogState) {
       "dashboard" -> MainHub(state)
       "profile" -> ProfileScreen(state)
       "profile_edit" -> ProfileEditScreen(state)
-      "developer_settings" -> DeveloperSettingsScreen(state)
+      "developer_settings" -> {
+        val user = runCatching { com.google.firebase.auth.FirebaseAuth.getInstance().currentUser }.getOrNull()
+        if (com.nirogbhumi.app.ui.DeveloperAccess.isDeveloper(user?.email, user?.isEmailVerified == true)) DeveloperSettingsScreen(state)
+        else LaunchedEffect(Unit) { state.currentScreen = "profile" }
+      }
       "device_hub" -> DeviceSyncScreen(state)
       "notifications" -> NotificationInboxScreen(state)
       "notification_settings" -> NotificationSettingsScreen(state)
@@ -382,6 +378,7 @@ fun ActiveScreenContent(state: NirogState) {
       "health_file" -> HealthFileScreen(state)
       "bp_overview" -> BpOverviewScreen(state)
       "weight_overview" -> WeightOverviewScreen(state)
+      "store" -> StoreScreen(state)
       "store_web" -> SafeWebViewScreen("Store", BuildConfig.STORE_URL, onBack = { state.currentScreen = "dashboard" })
       "trends_30" -> TrendsScreen(state)
       "sleep_overview" -> SleepOverviewScreen(state)

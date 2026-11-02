@@ -1097,6 +1097,11 @@ fun ProfileScreen(state: NirogState) {
     val context = LocalContext.current
     var updateCheckMessage by remember { mutableStateOf<String?>(null) }
     var checkingUpdate by remember { mutableStateOf(false) }
+    val updateScope = rememberCoroutineScope()
+    val isDeveloper = remember(state.userEmail) {
+        val user = runCatching { com.google.firebase.auth.FirebaseAuth.getInstance().currentUser }.getOrNull()
+        com.nirogbhumi.app.ui.DeveloperAccess.isDeveloper(user?.email ?: state.userEmail, user?.isEmailVerified == true)
+    }
     var uploadingPhoto by remember { mutableStateOf(false) }
     val photoPickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
@@ -1254,33 +1259,40 @@ fun ProfileScreen(state: NirogState) {
             // Device & Network Abuse policy risk and a dead, confusing control.
             SettingsRow(Icons.Filled.Description, "Legal & policies", showDivider = com.nirogbhumi.app.BuildConfig.DEBUG) { state.currentScreen = "legal_center" }
             if (com.nirogbhumi.app.BuildConfig.DEBUG) {
-                SettingsRow(Icons.Filled.SystemUpdate, "Check for updates", showDivider = false) {
+                SettingsRow(Icons.Filled.SystemUpdate, if (checkingUpdate) "Checking…" else "Check for updates", showDivider = false) {
                     if (checkingUpdate) return@SettingsRow
                     checkingUpdate = true
-                    val activity = context as? android.app.Activity
-                    if (activity == null) {
+                    val versionCode = runCatching {
+                        val info = context.packageManager.getPackageInfo(context.packageName, 0)
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) info.longVersionCode.toInt()
+                        else @Suppress("DEPRECATION") info.versionCode
+                    }.getOrDefault(0)
+                    updateScope.launch {
+                        val result = com.nirogbhumi.app.update.UpdateManager.checkNow(context, versionCode)
                         checkingUpdate = false
-                        updateCheckMessage = "Couldn't check for updates right now."
-                        return@SettingsRow
+                        result.onSuccess { info ->
+                            state.updateCheckError = ""
+                            if (info != null) {
+                                // The normal update prompt (download and install) takes over from here.
+                                state.availableUpdate = info
+                                updateCheckMessage = "A newer version (${info.latestVersionName}) is available. Follow the prompt to update."
+                            } else {
+                                updateCheckMessage = "You have the latest version."
+                            }
+                        }.onFailure {
+                            updateCheckMessage = "We couldn't check for updates right now. Please check your internet connection and try again."
+                        }
                     }
-                    com.google.firebase.appdistribution.FirebaseAppDistribution.getInstance()
-                        .updateIfNewReleaseAvailable()
-                        .addOnSuccessListener {
-                            checkingUpdate = false
-                            updateCheckMessage = "You're on the latest build available to testers."
-                        }
-                        .addOnFailureListener { error ->
-                            checkingUpdate = false
-                            updateCheckMessage = "Update check failed: ${error.message ?: "unknown error"}. " +
-                                "If this is your first check, you may need to sign in as a tester in the browser tab that just opened."
-                        }
                 }
             }
         }
 
-        SettingsSection(title = "Developer") {
-            SettingsRow(Icons.Filled.Build, "Developer settings", showDivider = false) {
-                state.currentScreen = "developer_settings"
+        // Only the two team accounts (verified email) see this; testers and members never do.
+        if (isDeveloper) {
+            SettingsSection(title = "Developer") {
+                SettingsRow(Icons.Filled.Build, "Developer settings", showDivider = false) {
+                    state.currentScreen = "developer_settings"
+                }
             }
         }
 
