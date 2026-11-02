@@ -66,6 +66,10 @@ class NirogState {
     var otpVerificationId by mutableStateOf("")
     var authError by mutableStateOf("")
     var authBusy by mutableStateOf(false)
+    // After sign-in, the account is asked for the sign-in method it lacks (email for phone sign-ups, phone for email sign-ups).
+    var linkContactRequired by mutableStateOf(false)
+    var linkContactNext by mutableStateOf("consent")
+    var contactPromptShown by mutableStateOf(false)
     var consentHealthData by mutableStateOf(false)
     var consentExpertReview by mutableStateOf(false)
     var consentMedicalDisclaimer by mutableStateOf(false)

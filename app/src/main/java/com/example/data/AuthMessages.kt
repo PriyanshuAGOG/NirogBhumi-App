@@ -29,6 +29,23 @@ object AuthMessages {
         }
     }
 
+    /** Failures while attaching the second sign-in method (email or phone) to an account. [what] is "email" or "phone number". */
+    fun linkFailure(errorCode: String?, message: String?, what: String): String {
+        val code = errorCode.orEmpty().uppercase()
+        val text = message.orEmpty().lowercase()
+        return when {
+            code == "ERROR_EMAIL_ALREADY_IN_USE" || code == "ERROR_CREDENTIAL_ALREADY_IN_USE" || code == "ERROR_ACCOUNT_EXISTS_WITH_DIFFERENT_CREDENTIAL" ||
+                "already in use" in text || "already associated" in text || "already exists" in text ->
+                "That $what already belongs to another account. Use a different one, or sign out and sign in with it."
+            code == "ERROR_PROVIDER_ALREADY_LINKED" -> "This account already has a $what."
+            code == "ERROR_WEAK_PASSWORD" -> "Choose a stronger password: at least ${AccountContacts.MIN_PASSWORD} characters with a letter."
+            code == "ERROR_INVALID_EMAIL" -> "That email address doesn't look right."
+            code == "ERROR_REQUIRES_RECENT_LOGIN" -> "For your safety please sign in again, then add your $what."
+            "network" in text || code == "ERROR_NETWORK_REQUEST_FAILED" -> "No internet connection. Check your network and try again."
+            else -> "We couldn't add your $what. Please check it and try again."
+        }
+    }
+
     fun codeCheckFailure(errorCode: String?, message: String?): String {
         val code = errorCode.orEmpty().uppercase()
         val text = message.orEmpty().lowercase()

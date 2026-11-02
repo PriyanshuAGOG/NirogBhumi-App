@@ -355,6 +355,7 @@ fun ActiveScreenContent(state: NirogState) {
       "consent" -> ConsentScreen(state)
       "login_mobile" -> LoginMobileScreen(state)
       "login_otp" -> LoginOtpScreen(state)
+      "link_contact" -> LinkContactScreen(state)
       "email_auth" -> EmailAuthScreen(state)
       "password_reset" -> PasswordResetScreen(state)
       "setup_profile" -> SetupProfileScreen(state)

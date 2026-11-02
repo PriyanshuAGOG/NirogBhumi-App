@@ -141,6 +141,7 @@ private fun routeAfterAuthSuccess(state: NirogState, context: android.content.Co
     val uid = runCatching { FirebaseAuth.getInstance().currentUser?.uid }.getOrNull()
     if (uid == null) { state.currentScreen = "consent"; return }
     refreshAdminClaim(state)
+    val missingContact = FirebaseAuthGateway.missingContact()
     FirebaseFirestore.getInstance().collection("users").document(uid).get()
         .addOnSuccessListener { document ->
             if (document.getBoolean("onboardingComplete") == true) {
@@ -163,9 +164,20 @@ private fun routeAfterAuthSuccess(state: NirogState, context: android.content.Co
                 if (resumeStep != null) {
                     state.checkinStartStep = resumeStep
                     state.currentScreen = "daily_checkin"
+                } else if (missingContact != com.nirogbhumi.app.data.MissingContact.NONE && !state.contactPromptShown) {
+                    // An existing account that has only one way in is asked once per app start to add the other.
+                    state.contactPromptShown = true
+                    state.linkContactRequired = false
+                    state.linkContactNext = deepLinkFallback
+                    state.currentScreen = "link_contact"
                 } else {
                     state.currentScreen = deepLinkFallback
                 }
+            } else if (missingContact != com.nirogbhumi.app.data.MissingContact.NONE) {
+                // A new account must have both before onboarding continues.
+                state.linkContactRequired = true
+                state.linkContactNext = "consent"
+                state.currentScreen = "link_contact"
             } else {
                 state.currentScreen = "consent"
             }
@@ -569,6 +581,7 @@ fun ValueSlidesScreen(state: NirogState) {
 // SCREEN 4: INTUITIVE PHONE LOGIN SCREEN
 @Composable
 fun LoginMobileScreen(state: NirogState) {
+    val context = LocalContext.current.applicationContext
     var phoneInput by remember { mutableStateOf("") }
     var isAgreedToTerms by remember { mutableStateOf(true) }
     val activity = LocalActivity.current
@@ -691,7 +704,7 @@ fun LoginMobileScreen(state: NirogState) {
                                 onSent = { id ->
                                     state.authBusy = false
                                     state.otpVerificationId = id
-                                    state.currentScreen = if (id == "AUTO_VERIFIED") "consent" else "login_otp"
+                                    if (id == "AUTO_VERIFIED") routeAfterAuthSuccess(state, context) else state.currentScreen = "login_otp"
                                 },
                                 onError = { error -> state.authBusy = false; state.authError = error }
                             )

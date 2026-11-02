@@ -139,5 +139,59 @@ object FirebaseAuthGateway {
             .addOnFailureListener { onError("That code didn't match. Please try again.") }
     }
 
+    // ---- one account, both sign-in methods ----
+
+    fun missingContact(): MissingContact {
+        val user = auth()?.currentUser ?: return MissingContact.NONE
+        return AccountContacts.missing(user.providerData.map { it.providerId }, user.phoneNumber, user.email)
+    }
+
+    private fun failCode(error: Exception): String? = (error as? FirebaseAuthException)?.errorCode
+
+    /** For an account created with the phone number: attaches an email and password, so the email also signs in to it. */
+    fun linkEmailPassword(email: String, password: String, onSuccess: () -> Unit, onError: (String) -> Unit) {
+        val user = auth()?.currentUser ?: return onError("Please sign in again.")
+        user.linkWithCredential(com.google.firebase.auth.EmailAuthProvider.getCredential(email.trim(), password))
+            .addOnSuccessListener {
+                runCatching { it.user?.sendEmailVerification() }   // best effort; the account works without it
+                onSuccess()
+            }
+            .addOnFailureListener {
+                Log.w("NirogAuth", "Linking email failed: code=${failCode(it)} message=${it.message}")
+                onError(AuthMessages.linkFailure(failCode(it), it.message, "email"))
+            }
+    }
+
+    /** Sends an SMS code to a number that should be attached to the signed-in account. `onSent` gets the verification id ("AUTO_VERIFIED" if the phone confirmed itself and the number is already attached). */
+    fun sendLinkPhoneOtp(activity: Activity, phone: String, onSent: (String) -> Unit, onError: (String) -> Unit) {
+        val auth = auth() ?: return onError("Firebase is not configured")
+        val user = auth.currentUser ?: return onError("Please sign in again.")
+        val callbacks = object : PhoneAuthProvider.OnVerificationStateChangedCallbacks() {
+            override fun onVerificationCompleted(credential: PhoneAuthCredential) {
+                user.linkWithCredential(credential).addOnSuccessListener { onSent("AUTO_VERIFIED") }
+                    .addOnFailureListener { onError(AuthMessages.linkFailure(failCode(it), it.message, "phone number")) }
+            }
+            override fun onVerificationFailed(error: FirebaseException) = onError(otpFailureText(error))
+            override fun onCodeSent(id: String, token: PhoneAuthProvider.ForceResendingToken) = onSent(id)
+        }
+        PhoneAuthProvider.verifyPhoneNumber(
+            PhoneAuthOptions.newBuilder(auth).setPhoneNumber(phone).setTimeout(60, TimeUnit.SECONDS).setActivity(activity).setCallbacks(callbacks).build()
+        )
+    }
+
+    /** Checks the SMS code and attaches the number to the signed-in account. */
+    fun linkPhone(id: String, code: String, onSuccess: () -> Unit, onError: (String) -> Unit) {
+        val user = auth()?.currentUser ?: return onError("Please sign in again.")
+        if (id == "AUTO_VERIFIED") return onSuccess()
+        if (id.isBlank()) return onError("Ask for a new code first.")
+        user.linkWithCredential(PhoneAuthProvider.getCredential(id, code))
+            .addOnSuccessListener { onSuccess() }
+            .addOnFailureListener {
+                Log.w("NirogAuth", "Linking phone failed: code=${failCode(it)} message=${it.message}")
+                val c = failCode(it).orEmpty()
+                onError(if (c == "ERROR_INVALID_VERIFICATION_CODE" || c == "ERROR_SESSION_EXPIRED") AuthMessages.codeCheckFailure(c, it.message) else AuthMessages.linkFailure(c, it.message, "phone number"))
+            }
+    }
+
     fun signOut() { auth()?.signOut() }
 }
