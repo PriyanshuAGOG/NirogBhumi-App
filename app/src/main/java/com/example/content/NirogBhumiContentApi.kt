@@ -37,16 +37,18 @@ data class SavedArticles(val articles: List<NirogBhumiArticle>, val savedAtMilli
  * against our own host before it is shown, so a bad feed entry can never open somewhere else.
  */
 object NirogBhumiContentApi {
-    private const val BASE_URL = "https://nirogbhumi.com/wp-json/wp/v2/posts"
-    private const val CATEGORIES_URL = "https://nirogbhumi.com/wp-json/wp/v2/categories"
+    // The site publishes its articles as its own content type, "Education Articles" (nb_education_post), with its own topics
+    // (nb_education_topic). Its ordinary WordPress "posts" list is empty, so that is not where the app reads from.
+    private const val BASE_URL = "https://nirogbhumi.com/wp-json/wp/v2/nb_education_post"
+    private const val CATEGORIES_URL = "https://nirogbhumi.com/wp-json/wp/v2/nb_education_topic"
     const val PAGE_SIZE = 12
-    private const val CACHE_FILE = "learn-articles-v1.json"
+    private const val CACHE_FILE = "learn-articles-v2.json"
     private const val MAX_CACHED = 24
 
     suspend fun fetchPage(page: Int, search: String? = null, perPage: Int = PAGE_SIZE, categoryId: Int? = null): Result<ArticlePage> = withContext(Dispatchers.IO) {
         runCatching {
             val q = ArticleSearch.effective(search)?.let { "&search=" + URLEncoder.encode(it, "UTF-8") }.orEmpty()
-            val c = categoryId?.takeIf { it > 0 }?.let { "&categories=$it" }.orEmpty()
+            val c = categoryId?.takeIf { it > 0 }?.let { "&nb_education_topic=$it" }.orEmpty()
             val url = URL("$BASE_URL?_embed&per_page=$perPage&page=${page.coerceAtLeast(1)}&orderby=date&order=desc$q$c")
             val connection = (url.openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
@@ -122,11 +124,13 @@ object NirogBhumiContentApi {
             if (!UrlPolicy.isAllowedHttps(link)) return@mapNotNull null
             val title = HtmlText.plain(post.optJSONObject("title")?.optString("rendered"))
             val excerpt = HtmlText.plain(post.optJSONObject("excerpt")?.optString("rendered"))
+            // A featured picture when the article has one; these articles usually carry theirs inside the text, so fall back to its first image.
             val imageUrl = post.optJSONObject("_embedded")
                 ?.optJSONArray("wp:featuredmedia")
                 ?.optJSONObject(0)
                 ?.optString("source_url")
                 ?.takeIf { it.isNotBlank() && it.startsWith("https://", ignoreCase = true) }
+                ?: firstImage(post.optJSONObject("content")?.optString("rendered"))
             NirogBhumiArticle(
                 id = id,
                 title = title.ifBlank { "Nirog Bhumi article" },
@@ -137,6 +141,12 @@ object NirogBhumiContentApi {
             )
         }
     }
+
+    private val imageTag = Regex("""<img\b[^>]*?\bsrc\s*=\s*["']([^"']+)["']""", RegexOption.IGNORE_CASE)
+
+    /** The first picture inside article HTML, if it is a secure address. */
+    internal fun firstImage(html: String?): String? =
+        html?.let { imageTag.find(it)?.groupValues?.get(1) }?.trim()?.takeIf { it.startsWith("https://", ignoreCase = true) && it.length <= 2048 }
 
     // ---- offline copy of the first page ----
 

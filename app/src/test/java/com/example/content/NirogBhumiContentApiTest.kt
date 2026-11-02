@@ -69,5 +69,22 @@ class NirogBhumiContentApiTest {
         assertEquals("Diabetes & Sugar", list[0].name)
         assertEquals(12, list[0].count)
     }
-}
 
+    @Test fun usesTheFirstPictureInsideTheArticleWhenThereIsNoFeaturedOne() {
+        val json = """[{"id":345,"date":"2026-06-23T10:08:00","link":"https://nirogbhumi.com/education-articles/plate/","title":{"rendered":"Plate"},
+            "excerpt":{"rendered":"<p>Short</p>"},
+            "content":{"rendered":"<p>Hi</p><figure><img class=\"x\" decoding=\"async\" src=\"https://nirogbhumi.com/wp-content/uploads/2026/06/image-3-1024x683.png\" alt=\"\"></figure>"}}]"""
+        assertEquals("https://nirogbhumi.com/wp-content/uploads/2026/06/image-3-1024x683.png", NirogBhumiContentApi.parseArticles(json)[0].imageUrl)
+    }
+
+    @Test fun anInsecurePictureInsideTheTextIsIgnored() {
+        assertNull(NirogBhumiContentApi.firstImage("<img src=\"http://nirogbhumi.com/a.png\">"))
+        assertNull(NirogBhumiContentApi.firstImage("<p>no picture</p>"))
+        assertNull(NirogBhumiContentApi.firstImage(null))
+    }
+
+    @Test fun topicNamesWithEntitiesAreReadable() {
+        val topics = NirogBhumiContentApi.parseCategories("""[{"id":32,"count":1,"name":"Recovery, Stress &amp; Tracking","slug":"recovery-stress-tracking"},{"id":28,"count":0,"name":"Movement","slug":"movement"}]""")
+        assertEquals(listOf("Recovery, Stress & Tracking"), topics.map { it.name })
+    }
+}
