@@ -66,6 +66,31 @@ jobs:
           echo "VERSION_CODE=$VERSION_CODE" >> "$GITHUB_ENV"
           echo "VERSION_NAME=1.0.$VERSION_CODE" >> "$GITHUB_ENV"
           echo "GIT_COMMIT=$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
+      # The private tester key (made once with scripts/setup_tester_release.sh). Its fingerprints are registered in Firebase,
+      # which is what lets phone-number sign-in work on a build that did not come from the Play Store. Without the secret the
+      # build falls back to the committed debug key: it still installs, but phone sign-in will be refused.
+      - name: Use the private tester signing key
+        env:
+          TESTER_KEYSTORE_BASE64: ${{ secrets.TESTER_KEYSTORE_BASE64 }}
+          TESTER_STORE_PASSWORD: ${{ secrets.TESTER_STORE_PASSWORD }}
+          TESTER_KEY_ALIAS: ${{ secrets.TESTER_KEY_ALIAS }}
+          TESTER_KEY_PASSWORD: ${{ secrets.TESTER_KEY_PASSWORD }}
+        run: |
+          if [ -z "$TESTER_KEYSTORE_BASE64" ] || [ -z "$TESTER_STORE_PASSWORD" ] || [ -z "$TESTER_KEY_ALIAS" ] || [ -z "$TESTER_KEY_PASSWORD" ]; then
+            echo "::warning::Tester signing key secrets are not set. This build uses the shared debug key, so phone-number sign-in will not work on it. Run scripts/setup_tester_release.sh once."
+            exit 0
+          fi
+          KEYSTORE="$RUNNER_TEMP/tester.keystore"
+          printf '%s' "$TESTER_KEYSTORE_BASE64" | base64 --decode --ignore-garbage > "$KEYSTORE"
+          echo "::add-mask::$TESTER_STORE_PASSWORD"
+          echo "::add-mask::$TESTER_KEY_PASSWORD"
+          {
+            echo "TESTER_KEYSTORE_PATH=$KEYSTORE"
+            echo "TESTER_STORE_PASSWORD=$TESTER_STORE_PASSWORD"
+            echo "TESTER_KEY_ALIAS=$TESTER_KEY_ALIAS"
+            echo "TESTER_KEY_PASSWORD=$TESTER_KEY_PASSWORD"
+          } >> "$GITHUB_ENV"
+          echo "Signing with the private tester key."
       - name: Build debug APK
         run: |
           chmod +x gradlew
@@ -114,18 +139,18 @@ jobs:
         continue-on-error: true
         env:
           APP_DISTRIBUTION_TESTERS: ${{ secrets.APP_DISTRIBUTION_TESTERS }}
+          # The group the invite link belongs to (made by scripts/setup_tester_release.sh). Anyone in it gets every build.
+          APP_DISTRIBUTION_GROUP: nirog-testers
         run: |
-          if [ -z "$APP_DISTRIBUTION_TESTERS" ]; then
-            echo "APP_DISTRIBUTION_TESTERS secret not set - skipping App Distribution upload."
-            exit 0
-          fi
+          TARGETS=(--groups "$APP_DISTRIBUTION_GROUP")
+          if [ -n "$APP_DISTRIBUTION_TESTERS" ]; then TARGETS+=(--testers "$APP_DISTRIBUTION_TESTERS"); fi
           # No FIREBASE_TOKEN env var set here - firebase-tools falls back to
           # GOOGLE_APPLICATION_CREDENTIALS (exported by the auth step above)
           # automatically once FIREBASE_TOKEN is absent.
           if npx --yes firebase-tools@15.22.3 appdistribution:distribute "$APK_PATH" \
             --app 1:126409331898:android:b4e478566dcbeeb7009e83 \
             --project nirog-bhumi-app \
-            --testers "$APP_DISTRIBUTION_TESTERS" \
+            "${TARGETS[@]}" \
             --release-notes "Automated debug build - commit ${{ github.sha }}"; then
             echo "Distributed to testers."
           else

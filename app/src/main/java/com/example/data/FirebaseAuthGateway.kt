@@ -2,9 +2,11 @@ package com.nirogbhumi.app.data
 
 import android.app.Activity
 import android.content.Intent
+import android.util.Log
 import com.google.firebase.FirebaseApp
 import com.google.firebase.FirebaseException
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.FirebaseAuthException
 import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.auth.PhoneAuthCredential
 import com.google.firebase.auth.PhoneAuthOptions
@@ -47,6 +49,13 @@ object FirebaseAuthGateway {
             .addOnFailureListener { onError(it.message ?: "Google Sign-in cancelled") }
     }
 
+    /** Logs the real reason (no phone number) for logcat and Crashlytics, and returns what the member should read. */
+    private fun otpFailureText(error: FirebaseException): String {
+        val code = (error as? FirebaseAuthException)?.errorCode
+        Log.w("NirogAuth", "Phone verification failed: ${error.javaClass.simpleName} code=$code message=${error.message}")
+        return AuthMessages.otpFailure(code, error.message)
+    }
+
     fun sendOtp(activity: Activity, phone: String, onSent: (String) -> Unit, onError: (String) -> Unit) {
         val auth = auth() ?: return onError("Firebase is not configured. Add google-services.json for this app.")
         val callbacks = object : PhoneAuthProvider.OnVerificationStateChangedCallbacks() {
@@ -54,7 +63,7 @@ object FirebaseAuthGateway {
                 auth.signInWithCredential(credential).addOnSuccessListener { onSent("AUTO_VERIFIED") }
                     .addOnFailureListener { onError(it.message ?: "Automatic verification failed") }
             }
-            override fun onVerificationFailed(error: FirebaseException) = onError(error.message ?: "OTP could not be sent")
+            override fun onVerificationFailed(error: FirebaseException) = onError(otpFailureText(error))
             override fun onCodeSent(id: String, token: PhoneAuthProvider.ForceResendingToken) = onSent(id)
         }
         PhoneAuthProvider.verifyPhoneNumber(
@@ -69,7 +78,7 @@ object FirebaseAuthGateway {
         if (id == "AUTO_VERIFIED") return onSuccess()
         auth.signInWithCredential(PhoneAuthProvider.getCredential(id, code))
             .addOnSuccessListener { onSuccess() }
-            .addOnFailureListener { onError(it.message ?: "Invalid OTP") }
+            .addOnFailureListener { onError(AuthMessages.codeCheckFailure((it as? FirebaseAuthException)?.errorCode, it.message)) }
     }
 
     fun email(email: String, password: String, create: Boolean, onSuccess: () -> Unit, onError: (String) -> Unit) {
@@ -110,7 +119,7 @@ object FirebaseAuthGateway {
             override fun onVerificationCompleted(credential: PhoneAuthCredential) {
                 user.reauthenticate(credential).addOnSuccessListener { onSent("AUTO_VERIFIED") }.addOnFailureListener { onError(it.message ?: "Automatic verification failed") }
             }
-            override fun onVerificationFailed(error: FirebaseException) = onError(error.message ?: "The code could not be sent")
+            override fun onVerificationFailed(error: FirebaseException) = onError(otpFailureText(error))
             override fun onCodeSent(id: String, token: PhoneAuthProvider.ForceResendingToken) = onSent(id)
         }
         PhoneAuthProvider.verifyPhoneNumber(

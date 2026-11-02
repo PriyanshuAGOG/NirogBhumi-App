@@ -66,11 +66,30 @@ android {
     // for real users. Google Sign-In therefore intentionally does not
     // work on debug builds; validate it only on a signed release build
     // using the private release keystore instead.
+    //
+    // Tester builds are the exception: when the private tester key is supplied (CI decodes it from a GitHub secret into
+    // the TESTER_* variables), the debug build is signed with it instead. That key's fingerprints ARE registered in
+    // Firebase, which is what makes phone-number sign-in work on a sideloaded build. Without it, the committed
+    // key above is used and phone sign-in is expected not to work.
+    val testerKeystorePath = System.getenv("TESTER_KEYSTORE_PATH")
+    val testerStorePassword = System.getenv("TESTER_STORE_PASSWORD")
+    val testerKeyAlias = System.getenv("TESTER_KEY_ALIAS")
+    val testerKeyPassword = System.getenv("TESTER_KEY_PASSWORD")
+    val useTesterKey = testerKeystorePath != null && testerStorePassword != null && testerKeyAlias != null && testerKeyPassword != null
     getByName("debug") {
-      storeFile = file("ci-debug.keystore")
-      storePassword = "android"
-      keyAlias = "androiddebugkey"
-      keyPassword = "android"
+      if (useTesterKey) {
+        val testerFile = file(testerKeystorePath!!)
+        require(testerFile.exists()) { "Tester keystore does not exist: $testerKeystorePath" }
+        storeFile = testerFile
+        storePassword = testerStorePassword
+        keyAlias = testerKeyAlias
+        keyPassword = testerKeyPassword
+      } else {
+        storeFile = file("ci-debug.keystore")
+        storePassword = "android"
+        keyAlias = "androiddebugkey"
+        keyPassword = "android"
+      }
     }
   }
 
