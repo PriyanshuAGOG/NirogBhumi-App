@@ -2236,6 +2236,7 @@ fun LearnTab(state: NirogState) {
 
         // Every article and blog post from nirogbhumi.com: working search, the site's own topics, paging, offline copy.
         ExploreFeed(state)
+        MoreOnWebsiteLink()
 
         // The shop on nirogbhumi.com, listed in the app; ordering and payment happen on the website.
         Card(

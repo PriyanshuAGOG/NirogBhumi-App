@@ -107,48 +107,9 @@ object StoreCatalog {
     }
 }
 
-/** Finds the consultation booking page on the website by looking at its published pages, so no address has to be guessed. */
+/** Addresses on the website that the app sends people to. All are on our own host (UrlPolicy checks again before opening). */
 object WebsiteLinks {
     const val HOME_URL = "https://nirogbhumi.com/"
-    private const val PAGES_URL = "https://nirogbhumi.com/wp-json/wp/v2/pages?per_page=20&_fields=link,title&search="
-
-    /** The best page for booking a consultation among WordPress pages, or null. Own-site links only. */
-    fun pickBookingPage(pagesJson: String): String? {
-        val array = runCatching { JSONArray(pagesJson) }.getOrNull() ?: return null
-        var best: Pair<Int, String>? = null
-        for (i in 0 until array.length()) {
-            val page = array.optJSONObject(i) ?: continue
-            val link = page.optString("link")
-            if (!UrlPolicy.isAllowedHttps(link)) continue
-            val title = HtmlText.plain(page.optJSONObject("title")?.optString("rendered")).lowercase()
-            val slug = link.lowercase()
-            val score = (if ("consult" in title || "consult" in slug) 2 else 0) +
-                (if ("book" in title || "appointment" in title || "book" in slug || "appointment" in slug) 2 else 0) +
-                (if ("policy" in title || "terms" in title || "privacy" in title) -5 else 0)
-            if (score > 0 && (best == null || score > best.first)) best = score to link
-        }
-        return best?.second
-    }
-
-    @Volatile private var cached: String? = null
-
-    suspend fun consultationUrl(): String {
-        cached?.let { return it }
-        val found = withContext(Dispatchers.IO) {
-            listOf("consultation", "appointment", "book").firstNotNullOfOrNull { term ->
-                runCatching {
-                    val connection = (URL(PAGES_URL + term).openConnection() as HttpURLConnection).apply {
-                        connectTimeout = 8_000; readTimeout = 8_000; instanceFollowRedirects = false
-                        setRequestProperty("Accept", "application/json")
-                    }
-                    try {
-                        if (connection.responseCode in 200..299) pickBookingPage(connection.inputStream.bufferedReader().use { it.readText() }) else null
-                    } finally {
-                        connection.disconnect()
-                    }
-                }.getOrNull()
-            }
-        }
-        return (found ?: HOME_URL).also { cached = it }
-    }
+    const val CONSULTATION_URL = "https://nirogbhumi.com/consultation"
+    const val EDUCATION_URL = "https://nirogbhumi.com/education"
 }

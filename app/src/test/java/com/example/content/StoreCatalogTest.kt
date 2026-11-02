@@ -58,17 +58,9 @@ class StoreCatalogTest {
         assertTrue(StoreCatalog.parseProducts("{}").isEmpty())
     }
 
-    @Test fun findsTheBookingPageAmongPages() {
-        val pages = """[
-          {"link":"https://nirogbhumi.com/privacy-policy/","title":{"rendered":"Privacy Policy"}},
-          {"link":"https://nirogbhumi.com/about/","title":{"rendered":"About us"}},
-          {"link":"https://nirogbhumi.com/book-consultation/","title":{"rendered":"Book a Consultation"}},
-          {"link":"https://evil.example/consultation/","title":{"rendered":"Consultation"}}]"""
-        assertEquals("https://nirogbhumi.com/book-consultation/", WebsiteLinks.pickBookingPage(pages))
-    }
-
-    @Test fun noBookingPageGivesNull() {
-        assertNull(WebsiteLinks.pickBookingPage("""[{"link":"https://nirogbhumi.com/about/","title":{"rendered":"About"}}]"""))
-        assertNull(WebsiteLinks.pickBookingPage("nope"))
+    @Test fun websiteLinksStayOnOurOwnSite() {
+        listOf(WebsiteLinks.HOME_URL, WebsiteLinks.CONSULTATION_URL, WebsiteLinks.EDUCATION_URL, StoreCatalog.SHOP_URL).forEach {
+            assertTrue(it, com.nirogbhumi.app.web.UrlPolicy.isAllowedHttps(it))
+        }
     }
 }

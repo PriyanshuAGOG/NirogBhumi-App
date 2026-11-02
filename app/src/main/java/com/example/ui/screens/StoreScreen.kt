@@ -179,29 +179,30 @@ private fun ProductCard(product: StoreProduct, onOpen: () -> Unit) {
 @Composable
 fun BookOnWebsiteCard() {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var opening by remember { mutableStateOf(false) }
     NirogCard {
         Text("Book a time yourself", style = NirogType.cardTitle, color = NirogColor.forest)
         Spacer(Modifier.height(NirogSpace.xs))
         Text("Pick a slot with our team on nirogbhumi.com. Or send a request below and we'll confirm a time with you.", style = NirogType.caption, color = NirogColor.inkMuted)
         Spacer(Modifier.height(NirogSpace.md))
         Button(
-            onClick = {
-                if (opening) return@Button
-                opening = true
-                scope.launch {
-                    val url = WebsiteLinks.consultationUrl()
-                    opening = false
-                    openOnWebsite(context, url)
-                }
-            },
+            onClick = { openOnWebsite(context, WebsiteLinks.CONSULTATION_URL) },
             colors = ButtonDefaults.buttonColors(containerColor = NirogColor.forest),
             shape = RoundedCornerShape(24.dp),
         ) {
-            Text(if (opening) "Opening…" else "Book on nirogbhumi.com")
+            Text("Book on nirogbhumi.com")
             Spacer(Modifier.size(8.dp))
             Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
         }
+    }
+}
+
+/** Under the article list: everything else lives on the website's Education page. */
+@Composable
+fun MoreOnWebsiteLink() {
+    val context = LocalContext.current
+    OutlinedButton(onClick = { openOnWebsite(context, WebsiteLinks.EDUCATION_URL) }, modifier = Modifier.fillMaxWidth()) {
+        Text("Browse all education on nirogbhumi.com")
+        Spacer(Modifier.size(8.dp))
+        Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
     }
 }
