@@ -63,13 +63,19 @@ echo "SHA-1:   $SHA1"
 echo "SHA-256: $SHA256"
 
 TOKEN="$(gcloud auth print-access-token)"
-api() { # method url [json]
-  local method="$1" url="$2" body="${3:-}"
-  if [ -n "$body" ]; then
-    curl -sS -o /tmp/api.out -w '%{http_code}' -X "$method" "$url" -H "Authorization: Bearer $TOKEN" -H "x-goog-user-project: $PROJECT_ID" -H 'Content-Type: application/json' -d "$body"
-  else
-    curl -sS -o /tmp/api.out -w '%{http_code}' -X "$method" "$url" -H "Authorization: Bearer $TOKEN" -H "x-goog-user-project: $PROJECT_ID"
-  fi
+MANUAL=()   # things the script could not do itself; printed at the end with exact steps
+
+call() { # method url json [quota-project-header]
+  local extra=()
+  [ -n "${4:-}" ] && extra=(-H "x-goog-user-project: $4")
+  curl -sS -o /tmp/api.out -w '%{http_code}' -X "$1" "$2" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' "${extra[@]}" -d "$3"
+}
+# First as the project, then (if your account may not bill calls to the project) as the shared Google Cloud SDK client.
+api() { # method url json
+  local code
+  code="$(call "$1" "$2" "$3" "$PROJECT_ID")"
+  if [ "$code" = "403" ]; then code="$(call "$1" "$2" "$3")"; fi
+  printf '%s' "$code"
 }
 
 # ------------------------------------------------- 2. fingerprints in Firebase
@@ -80,7 +86,8 @@ register() { # type hash
   case "$code" in
     200) echo "Registered $1." ;;
     409) echo "$1 was already registered." ;;
-    *)   echo "Could not register $1 (HTTP $code):"; cat /tmp/api.out; echo; exit 1 ;;
+    *)   echo "Could not register $1 automatically (HTTP $code); the manual step is listed at the end."
+         MANUAL+=("Firebase Console > Project settings (gear) > General > Your apps > Nirog Bhumi (Android) > Add fingerprint > paste the $1 value: $2") ;;
   esac
 }
 register SHA_1 "$SHA1"
@@ -92,8 +99,8 @@ code="$(api POST "https://firebaseappdistribution.googleapis.com/v1/projects/$PR
 case "$code" in
   200) echo "Group created." ;;
   409) echo "Group already exists." ;;
-  *)   echo "Could not create the group (HTTP $code):"; cat /tmp/api.out; echo
-       echo "You can make it by hand: Firebase Console > App Distribution > Testers & Groups > Add group, with the ID \"$GROUP_ID\"." ;;
+  *)   echo "Could not create the group automatically (HTTP $code); the manual step is listed at the end."
+       MANUAL+=("Firebase Console > App Distribution > Testers & Groups > Add group > name it anything, but set the group ID to: $GROUP_ID") ;;
 esac
 
 # ------------------------------------------------------- 4. GitHub secrets
@@ -111,6 +118,11 @@ set_secret TESTER_KEY_ALIAS "$ALIAS"
 set_secret TESTER_KEY_PASSWORD "$KEY_PASSWORD"
 
 say "Done"
+if [ "${#MANUAL[@]}" -gt 0 ]; then
+  echo
+  echo "TWO-MINUTE MANUAL STEPS (your account is not allowed to make these changes from here):"
+  for m in "${MANUAL[@]}"; do echo "  * $m"; done
+fi
 cat <<EOF
 Next:
   - Start a build so it is signed with the new key:
