@@ -22,3 +22,13 @@ which category each Nirog Bhumi feature is in, so nobody ships a payment flow th
 - Tell Play about the store and consultations in the Console "Payments / Monetization" declarations: paid features =
   physical goods and services only.
 - No Razorpay/UPI keys in the app (there are none today; `docs/RELEASE_CHECKLIST.md` keeps secrets in Firebase secret management).
+
+
+## Store listing in the app (added with the website integration)
+
+The Learn tab now lists the products from the shop on nirogbhumi.com (read from the site's public store list). The app
+never takes payment: every product button opens the product's page on the website in the phone's browser, where the
+customer orders and pays. This is only acceptable on Google Play for **physical goods and real-world services**. If the
+shop sells anything digital (e-books, video courses, app features, memberships that unlock app content), remove those
+from the list or hide the store card before a Play production release, because those must use Google Play billing.
+Consultation booking on the website is a real-world service and is fine.

@@ -114,6 +114,37 @@ Send me anything that breaks and I fix it; a fixed build reaches every tester on
 
 ---
 
+## Sign-in settings only you can change (Firebase Console)
+
+**1. The SMS wording.** The text members get today reads "123456 is your verification code for
+nirogbhumi.app.firebaseapp.com". To change it:
+
+- Authentication > **Templates** > **SMS verification** > edit (pencil). Set the message to:
+
+  > Thank you for joining Nirog Bhumi, your diabetes wellness companion. Your OTP is %LOGIN_CODE%. Please do not share it with anyone.
+
+  Keep `%LOGIN_CODE%` exactly as written: Firebase replaces it with the 6-digit code.
+- Project settings (gear) > General > **Public-facing name**: set it to `Nirog Bhumi`, so any place Firebase names the
+  app, it says that and not the web address.
+
+If the console does not let you edit the text, the project may need *Identity Platform* turned on (Authentication shows a
+button for it; it is free at this scale). Indian mobile networks also require SMS text to be pre-registered (DLT), so
+Google may keep its own wording for Indian numbers whatever you type. If that happens, the "Public-facing name" change is
+the part that still applies. Tell me what you see and I will adjust the app side.
+
+**2. Why a "confirm you're human" web page appears.** Google checks that the app asking for an SMS is genuine. On a build
+installed from a link (not from the Play Store) that silent check cannot pass, so Google falls back to a quick web
+check. Two things reduce the wait: tester builds now go straight to the web check, and **builds installed from the
+Play Store do the check silently with no web page at all**. For the smoothest first run, move testers to a Play Store
+*internal testing* track (steps in `docs/CLOSED_TEST_AND_ROLLOUT.md`). Also make sure **Play Integrity API** is enabled:
+Google Cloud Console > APIs & Services > Library > "Play Integrity API" > Enable.
+
+**3. Developer settings.** The screen is now visible only when signed in with priyanshu@nirogbhumi.com or
+gk@nirogbhumi.com **and** that email is verified. Sign in with Google using that address, or verify the email from the
+message Firebase sends, to see it.
+
+---
+
 ## Notes
 
 - **Each build replaces the last.** Testers get an email and a notification when a new build is ready; they tap and
