@@ -64,6 +64,17 @@ fun LinkContactScreen(state: NirogState) {
     var verificationId by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
+    // A code that never arrives (or a send that hangs) must not trap anyone: the skip link appears after a wait, not only after an error.
+    var waitedForCode by remember { mutableStateOf(false) }
+    var sendIsSlow by remember { mutableStateOf(false) }
+    LaunchedEffect(verificationId) {
+        waitedForCode = false
+        if (verificationId.isNotEmpty()) { kotlinx.coroutines.delay(25_000); waitedForCode = true }
+    }
+    LaunchedEffect(busy) {
+        sendIsSlow = false
+        if (busy) { kotlinx.coroutines.delay(45_000); sendIsSlow = true }
+    }
 
     fun proceed() { state.currentScreen = state.linkContactNext }
 
@@ -158,7 +169,7 @@ fun LinkContactScreen(state: NirogState) {
                     OtpCodeField(value = code, onValueChange = { code = it; error = "" }, isError = error.isNotBlank(), enabled = !busy, onComplete = { verify(it) })
                     PrimaryAction("Verify and continue", code.length == 6 && !busy, busy) { verify(code) }
                     TextButton(onClick = { verificationId = ""; code = ""; error = "" }, enabled = !busy) {
-                        Text("Change the number or send a new code", color = DeepGreen, fontSize = 13.sp)
+                        Text(if (waitedForCode) "No code yet? Change the number or send a new one" else "Change the number or send a new code", color = DeepGreen, fontSize = 13.sp)
                     }
                 }
                 if (busy) Text(
@@ -172,7 +183,7 @@ fun LinkContactScreen(state: NirogState) {
         }
 
         // Never a dead end: optional for existing accounts, and for new ones as soon as something has gone wrong.
-        if (!required || error.isNotBlank()) {
+        if (!required || error.isNotBlank() || waitedForCode || sendIsSlow) {
             Spacer(Modifier.height(12.dp))
             TextButton(onClick = { proceed() }) {
                 Text(if (required) "I'll do this later" else "Not now", color = Ink.copy(alpha = 0.6f), fontSize = 14.sp)

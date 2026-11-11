@@ -737,7 +737,12 @@ fun LoginMobileScreen(state: NirogState) {
                             color = Ink.copy(alpha = 0.6f), fontSize = 12.sp, lineHeight = 16.sp,
                         )
                     }
-                    if (state.authError.isNotBlank()) Text(state.authError, color = Color(0xFF8B2E2E), fontSize = 12.sp)
+                    if (state.authError.isNotBlank()) {
+                        Text(state.authError, color = Color(0xFF8B2E2E), fontSize = 12.sp, lineHeight = 16.sp)
+                        TextButton(onClick = { state.authError = ""; state.currentScreen = "email_auth" }) {
+                            Text("Sign in with email instead", color = DeepGreen, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        }
+                    }
                 }
             }
 
@@ -889,6 +894,13 @@ fun LoginOtpScreen(state: NirogState) {
                             }) {
                                 Text("Resend code", color = DeepGreen, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                             }
+                        }
+                    }
+
+                    // Never a dead end: if the SMS does not arrive, email gets the member in.
+                    if (resendTimer == 0 || state.authError.isNotBlank()) {
+                        TextButton(onClick = { state.authError = ""; state.currentScreen = "email_auth" }, modifier = Modifier.fillMaxWidth()) {
+                            Text("Didn't get the code? Sign in with email instead", color = DeepGreen, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                         }
                     }
 

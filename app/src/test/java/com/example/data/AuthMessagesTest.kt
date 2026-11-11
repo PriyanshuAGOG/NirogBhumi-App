@@ -43,4 +43,21 @@ class AuthMessagesTest {
         assertTrue(AuthMessages.codeCheckFailure("ERROR_SESSION_EXPIRED", null).contains("expired"))
         assertTrue(AuthMessages.codeCheckFailure(null, null).contains("new one"))
     }
+
+    @Test
+    fun `installation problems are told apart from other failures so the normal check can be tried`() {
+        assertTrue(AuthMessages.isAppVerificationProblem(null, "This request is missing a valid app identifier"))
+        assertTrue(AuthMessages.isAppVerificationProblem(null, "reCAPTCHA verification failed"))
+        assertTrue(AuthMessages.isAppVerificationProblem("ERROR_INTERNAL_ERROR", null))
+        assertFalse(AuthMessages.isAppVerificationProblem("ERROR_INVALID_PHONE_NUMBER", "invalid format"))
+        assertFalse(AuthMessages.isAppVerificationProblem("ERROR_TOO_MANY_REQUESTS", "too many requests"))
+    }
+
+    @Test
+    fun `technical detail never carries a phone number`() {
+        val text = AuthMessages.technicalDetail("FirebaseException", "ERROR_X", "Failed for +919876543210 because 9876543210 is blocked")
+        assertFalse(text.contains("9876543210"))
+        assertTrue(text.contains("ERROR_X"))
+        assertTrue(text.length <= 300)
+    }
 }

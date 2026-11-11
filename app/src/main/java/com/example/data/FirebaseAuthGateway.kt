@@ -54,35 +54,58 @@ object FirebaseAuthGateway {
      * fail, and only then shows the "I'm not a robot" page. Tester builds go straight to that page instead, which removes the long
      * wait. Play Store builds keep the silent check (members never see a page).
      */
-    private fun prepareForPhoneVerification(auth: FirebaseAuth) {
+    private fun prepareForPhoneVerification(auth: FirebaseAuth, direct: Boolean) {
         if (com.nirogbhumi.app.BuildConfig.DEBUG) {
-            runCatching { auth.firebaseAuthSettings.forceRecaptchaFlowForTesting(true) }
-                .onFailure { Log.w("NirogAuth", "Could not switch to the direct human check: ${it.message}") }
+            runCatching { auth.firebaseAuthSettings.forceRecaptchaFlowForTesting(direct) }
+                .onFailure { Log.w("NirogAuth", "Could not switch the human check mode: ${it.message}") }
         }
+    }
+
+    /**
+     * Starts the SMS check. On a tester build the first try goes straight to the web human check; if Google refuses that for
+     * a reason about the installation itself, it is tried once more the normal way before the member is told it failed.
+     */
+    private fun startPhoneVerification(
+        auth: FirebaseAuth, activity: Activity, phone: String,
+        onCompleted: (PhoneAuthCredential) -> Unit, onCodeSent: (String) -> Unit, onFailed: (String) -> Unit,
+        retried: Boolean = false,
+    ) {
+        prepareForPhoneVerification(auth, direct = !retried)
+        val callbacks = object : PhoneAuthProvider.OnVerificationStateChangedCallbacks() {
+            override fun onVerificationCompleted(credential: PhoneAuthCredential) = onCompleted(credential)
+            override fun onVerificationFailed(error: FirebaseException) {
+                val code = (error as? FirebaseAuthException)?.errorCode
+                if (!retried && com.nirogbhumi.app.BuildConfig.DEBUG && AuthMessages.isAppVerificationProblem(code, error.message)) {
+                    Log.w("NirogAuth", "Direct human check refused (${error.javaClass.simpleName} $code); retrying the normal way")
+                    startPhoneVerification(auth, activity, phone, onCompleted, onCodeSent, onFailed, retried = true)
+                } else {
+                    onFailed(otpFailureText(error))
+                }
+            }
+            override fun onCodeSent(id: String, token: PhoneAuthProvider.ForceResendingToken) = onCodeSent(id)
+        }
+        PhoneAuthProvider.verifyPhoneNumber(
+            PhoneAuthOptions.newBuilder(auth).setPhoneNumber(phone).setTimeout(60, TimeUnit.SECONDS).setActivity(activity).setCallbacks(callbacks).build()
+        )
     }
 
     /** Logs the real reason (no phone number) for logcat and Crashlytics, and returns what the member should read. */
     private fun otpFailureText(error: FirebaseException): String {
         val code = (error as? FirebaseAuthException)?.errorCode
         Log.w("NirogAuth", "Phone verification failed: ${error.javaClass.simpleName} code=$code message=${error.message}")
-        return AuthMessages.otpFailure(code, error.message)
+        val friendly = AuthMessages.otpFailure(code, error.message)
+        // Tester builds also show the real reason, so a screenshot from a tester tells us exactly what Google answered.
+        return if (com.nirogbhumi.app.BuildConfig.DEBUG) friendly + "\n\nFor the team: " + AuthMessages.technicalDetail(error.javaClass.simpleName, code, error.message) else friendly
     }
 
     fun sendOtp(activity: Activity, phone: String, onSent: (String) -> Unit, onError: (String) -> Unit) {
         val auth = auth() ?: return onError("Firebase is not configured. Add google-services.json for this app.")
-        prepareForPhoneVerification(auth)
-        val callbacks = object : PhoneAuthProvider.OnVerificationStateChangedCallbacks() {
-            override fun onVerificationCompleted(credential: PhoneAuthCredential) {
+        startPhoneVerification(auth, activity, phone,
+            onCompleted = { credential ->
                 auth.signInWithCredential(credential).addOnSuccessListener { onSent("AUTO_VERIFIED") }
-                    .addOnFailureListener { onError(it.message ?: "Automatic verification failed") }
-            }
-            override fun onVerificationFailed(error: FirebaseException) = onError(otpFailureText(error))
-            override fun onCodeSent(id: String, token: PhoneAuthProvider.ForceResendingToken) = onSent(id)
-        }
-        PhoneAuthProvider.verifyPhoneNumber(
-            PhoneAuthOptions.newBuilder(auth).setPhoneNumber(phone).setTimeout(60, TimeUnit.SECONDS)
-                .setActivity(activity).setCallbacks(callbacks).build()
-        )
+                    .addOnFailureListener { onError(AuthMessages.codeCheckFailure((it as? FirebaseAuthException)?.errorCode, it.message)) }
+            },
+            onCodeSent = onSent, onFailed = onError)
     }
 
     fun verifyOtp(id: String, code: String, onSuccess: () -> Unit, onError: (String) -> Unit) {
@@ -179,18 +202,12 @@ object FirebaseAuthGateway {
     fun sendLinkPhoneOtp(activity: Activity, phone: String, onSent: (String) -> Unit, onError: (String) -> Unit) {
         val auth = auth() ?: return onError("Firebase is not configured")
         val user = auth.currentUser ?: return onError("Please sign in again.")
-        prepareForPhoneVerification(auth)
-        val callbacks = object : PhoneAuthProvider.OnVerificationStateChangedCallbacks() {
-            override fun onVerificationCompleted(credential: PhoneAuthCredential) {
+        startPhoneVerification(auth, activity, phone,
+            onCompleted = { credential ->
                 user.linkWithCredential(credential).addOnSuccessListener { onSent("AUTO_VERIFIED") }
                     .addOnFailureListener { onError(AuthMessages.linkFailure(failCode(it), it.message, "phone number")) }
-            }
-            override fun onVerificationFailed(error: FirebaseException) = onError(otpFailureText(error))
-            override fun onCodeSent(id: String, token: PhoneAuthProvider.ForceResendingToken) = onSent(id)
-        }
-        PhoneAuthProvider.verifyPhoneNumber(
-            PhoneAuthOptions.newBuilder(auth).setPhoneNumber(phone).setTimeout(60, TimeUnit.SECONDS).setActivity(activity).setCallbacks(callbacks).build()
-        )
+            },
+            onCodeSent = onSent, onFailed = onError)
     }
 
     /** Checks the SMS code and attaches the number to the signed-in account. */

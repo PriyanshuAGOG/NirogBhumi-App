@@ -9,6 +9,18 @@ package com.nirogbhumi.app.data
 object AuthMessages {
     private const val EMAIL_SENTENCE = "You can also sign in with email instead."
 
+    /** The failures that mean "Google could not confirm this installation", where trying the other check may work. */
+    fun isAppVerificationProblem(errorCode: String?, message: String?): Boolean {
+        val code = errorCode.orEmpty().uppercase()
+        val text = message.orEmpty().lowercase()
+        return "recaptcha" in text || "app identifier" in text || "play integrity" in text || "safetynet" in text ||
+            "app verification" in text || "internal error" in text || code == "ERROR_INTERNAL_ERROR" || code == "ERROR_MISSING_CLIENT_IDENTIFIER"
+    }
+
+    /** One line of technical detail for the team's test builds, with anything that looks like a phone number removed. */
+    fun technicalDetail(exceptionName: String, errorCode: String?, message: String?): String =
+        "$exceptionName ${errorCode.orEmpty()} - ${message.orEmpty()}".replace(Regex("\\+?\\d{8,}"), "[number]").trim().take(300)
+
     fun otpFailure(errorCode: String?, message: String?): String {
         val code = errorCode.orEmpty().uppercase()
         val text = message.orEmpty().lowercase()

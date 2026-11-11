@@ -145,6 +145,35 @@ message Firebase sends, to see it.
 
 ---
 
+## If the SMS code does not arrive (do these in order, about 10 minutes)
+
+Tell the tester to open the app and accept the "Update available" prompt (it appears within about 30 minutes of opening the
+app; Firebase App Tester also emails them). The updated app shows a grey "For the team" line under any sign-in error.
+**Ask them for a screenshot of it** and send it to me: it names the exact reason Google gave.
+
+Then, in the Firebase Console (project nirog-bhumi-app):
+
+1. **Authentication > Sign-in method > Phone** is *Enabled*.
+2. **Authentication > Settings > SMS region policy**: India (+91) is allowed (if the policy is "Allow", +91 must be on the list).
+3. **Authentication > Usage**: look at SMS sent today against the quota. A new project has a low daily SMS quota; if you
+   are at the limit, codes stop for everybody until tomorrow. (Raising it needs the project on the Blaze plan, with the
+   quota request on the same page.)
+4. **App Check > APIs > Authentication**: it must say *Unenforced* (or not be listed). If it says *Enforced*, test builds
+   are refused because their debug tokens are not registered. Set it to Unenforced for now.
+5. **Authentication > Settings > SMS defense / fraud protection** (shown only with Identity Platform): set it to *Audit
+   only* or off while testing; the blocking mode refuses numbers it considers risky.
+6. **Authentication > Sign-in method > Phone > Phone numbers for testing**: add each tester's number with a 6-digit code of
+   your choice. Those numbers get **no SMS** and sign in with that code, so they work even where real SMS does not arrive.
+   Use this only for testers (anyone who knows a number and its code can sign in as that tester), and remove them after testing.
+
+**Why real SMS can fail for some people even when everything above is right:** Indian mobile networks block SMS from
+unregistered senders, and numbers on the Do Not Disturb list often never receive Firebase's codes. This affects some
+testers and not others. For launch, the fix is an Indian SMS provider with a registered sender (DLT), connected to the app
+through a small server function; tell me if you want that built (it needs your company's DLT registration first).
+Until then, email sign-in always works, and the app now offers it whenever the code does not come.
+
+---
+
 ## Notes
 
 - **Each build replaces the last.** Testers get an email and a notification when a new build is ready; they tap and
