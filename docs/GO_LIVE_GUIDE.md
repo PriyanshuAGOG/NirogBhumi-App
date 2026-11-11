@@ -59,6 +59,17 @@ you give me the input. **Both** = joint.
      gcloud projects add-iam-policy-binding nirog-bhumi-app --member="serviceAccount:$SA" --role="$r" --condition=None --quiet
    done
    ```
+   **Also the sign-up trigger** (found in production on 2026-11-11: every new sign-up logged `onUserCreate ... 7 PERMISSION_DENIED`).
+   `onUserCreate` is a first-generation function, which runs as a *different* account (the App Engine default account) from the
+   functions above, and it had no database access either. Run, in Cloud Shell:
+   ```bash
+   PROJECT=nirog-bhumi-app
+   SA=$(gcloud functions describe onUserCreate --region=asia-south1 --project=$PROJECT --format='value(serviceAccountEmail)')
+   echo "onUserCreate runs as: $SA"
+   gcloud projects add-iam-policy-binding $PROJECT --member="serviceAccount:$SA" --role=roles/datastore.user --condition=None --quiet
+   ```
+   The app also calls `ensureUserProfile` after every sign-in, which creates or completes the same record as the account that
+   already has access, so a missing grant no longer breaks sign-up; but fix the grant so the trigger works as designed.
    Then the signed-link grant below.
    **Signed-link grant** (You, 2 min, Cloud Shell):
    ```bash

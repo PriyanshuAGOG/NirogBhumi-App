@@ -20,7 +20,7 @@ const OFFICIAL = 'priyanshu@nirogbhumi.com';
 // Keep in step with `node firebase/functions/scripts/list-callables.mjs` (CI's authz-matrix test fails when a callable is added
 // without a declared access level; add it here as well).
 const CALLABLES = ['adminEnrollUser', 'adminManageDeletion', 'bootstrapSuperAdmin', 'bulkOnboard', 'cancelAccountDeletion', 'cancelConsultation',
-  'createAnnouncement', 'createAuditLog', 'createStaffAccount', 'deleteAnnouncement', 'ensureProgramMembership', 'getExportDownloadLink',
+  'createAnnouncement', 'createAuditLog', 'createStaffAccount', 'deleteAnnouncement', 'ensureProgramMembership', 'ensureUserProfile', 'getExportDownloadLink',
   'getHealthFileShareLink', 'inviteToProgram', 'markAnnouncementSeen', 'previewAnnouncementAudience', 'redeemProgramCode',
   'reportClientError', 'requestAccountDeletion', 'requestDataExport', 'revokeInvite', 'sendBulkNotification', 'setUserRole'];
 

@@ -10,7 +10,7 @@ const callables = Object.entries(fns).filter(([, fn]) => fn && fn.__endpoint && 
 // 'bootstrap' = only the owner's own email address, once; 'public' = anyone, signed in or not.
 const POLICY = {
   adminEnrollUser: 'staff', adminManageDeletion: 'admin', bootstrapSuperAdmin: 'bootstrap', bulkOnboard: 'staff',
-  cancelAccountDeletion: 'member', cancelConsultation: 'member', createAnnouncement: 'staff', createAuditLog: 'admin',
+  cancelAccountDeletion: 'member', cancelConsultation: 'member', ensureUserProfile: 'member', createAnnouncement: 'staff', createAuditLog: 'admin',
   createStaffAccount: 'admin', deleteAnnouncement: 'staff', ensureProgramMembership: 'member', getExportDownloadLink: 'member',
   getHealthFileShareLink: 'member', inviteToProgram: 'staff', markAnnouncementSeen: 'member', previewAnnouncementAudience: 'staff',
   redeemProgramCode: 'member', requestAccountDeletion: 'member', requestDataExport: 'member', revokeInvite: 'staff',

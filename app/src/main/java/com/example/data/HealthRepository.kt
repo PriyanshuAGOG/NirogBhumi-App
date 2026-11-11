@@ -83,6 +83,8 @@ interface HealthRepository : HealthLogBackend {
     // all depend on that roster doc or the users/{uid} fields it mirrors.
     // Never grants a new enrollment; only repairs an already-active one.
     fun ensureProgramMembership(done: (CloudResult<Boolean>) -> Unit = {})
+    /** Makes sure the account's base record (role, status, contact, created time) exists; creates or completes it on the server. Safe to call on every sign-in. */
+    fun ensureUserProfile(done: (CloudResult<Boolean>) -> Unit = {})
 
     // Announcements are read from the caller's own fan-out feed
     // (users/{uid}/announcements) rather than a per-program collection, since
@@ -528,6 +530,22 @@ class FirebaseHealthRepository : HealthRepository {
         val base = error.message ?: "That program code wasn't recognized"
         val message = if (functionsError != null) "$base (code: ${functionsError.code.name.lowercase()})" else base
         return CloudResult.Failure(message, error)
+    }
+
+    override fun ensureUserProfile(done: (CloudResult<Boolean>) -> Unit) {
+        if (userId == null) return done(CloudResult.Success(false))
+        val callable = functions?.getHttpsCallable("ensureUserProfile") ?: return done(CloudResult.Failure("Firebase is not configured"))
+        // Not routed through reporting(): the caller ignores the outcome, and the sign-in flow reports its own problems.
+        callable.call()
+            .addOnSuccessListener { result ->
+                @Suppress("UNCHECKED_CAST")
+                done(CloudResult.Success((result.data as? Map<String, Any?>)?.get("created") == true))
+            }
+            .addOnFailureListener {
+                android.util.Log.w("NirogAuth", "ensureUserProfile failed: ${it.message}")
+                ClientErrorReporter.report("account:ensure_profile", it.message ?: "Could not prepare the account", (it as? com.google.firebase.functions.FirebaseFunctionsException)?.code?.name)
+                done(CloudResult.Failure(it.message ?: "Could not prepare the account", it))
+            }
     }
 
     override fun ensureProgramMembership(done: (CloudResult<Boolean>) -> Unit) {

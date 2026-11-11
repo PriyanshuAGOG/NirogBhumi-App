@@ -145,47 +145,57 @@ private fun routeAfterAuthSuccess(state: NirogState, context: android.content.Co
     if (uid == null) { state.currentScreen = "consent"; return }
     refreshAdminClaim(state)
     val missingContact = FirebaseAuthGateway.missingContact()
-    FirebaseFirestore.getInstance().collection("users").document(uid).get()
-        .addOnSuccessListener { document ->
-            if (document.getBoolean("onboardingComplete") == true) {
-                applyProfileDocument(state, document)
-                // Resuming mid check-in: the OS can reclaim the process at any point
-                // (a call, a notification, low memory), which shouldn't cost a member
-                // their half-finished check-in. Only kicks in when nothing else (an
-                // explicit deep link) already claims this launch, and only for the
-                // same local calendar day - a stale step from a prior day would be
-                // confusing rather than helpful, so it's ignored once the day rolls
-                // over. CheckInFlow clears this same pref whenever a member finishes
-                // the flow or taps Close on purpose, so this only fires for a genuine
-                // interruption, never a deliberate exit.
-                val resumeStep = if (deepLinkFallback == "dashboard") {
-                    val prefs = context.getSharedPreferences("nirog_prefs", android.content.Context.MODE_PRIVATE)
-                    val savedDayKey = prefs.getLong("checkin_resume_daykey", -1L)
-                    val savedStep = prefs.getInt("checkin_resume_step", -1)
-                    if (savedStep in 0..3 && savedDayKey == com.nirogbhumi.app.ui.localDayKey(System.currentTimeMillis())) savedStep else null
-                } else null
-                if (resumeStep != null) {
-                    state.checkinStartStep = resumeStep
-                    state.currentScreen = "daily_checkin"
-                } else if (missingContact != com.nirogbhumi.app.data.MissingContact.NONE && !state.contactPromptShown) {
-                    // An existing account that has only one way in is asked once per app start to add the other.
-                    state.contactPromptShown = true
-                    state.linkContactRequired = false
-                    state.linkContactNext = deepLinkFallback
+    // The account's base record is created on the server. That normally happens by itself at sign-up; asking again here completes it for
+    // anyone it missed, and never waits more than a few seconds (sign-in must not depend on it).
+    var proceeded = false
+    fun proceed() {
+        if (proceeded) return
+        proceeded = true
+        FirebaseFirestore.getInstance().collection("users").document(uid).get()
+            .addOnSuccessListener { document ->
+                if (document.getBoolean("onboardingComplete") == true) {
+                    applyProfileDocument(state, document)
+                    // Resuming mid check-in: the OS can reclaim the process at any point
+                    // (a call, a notification, low memory), which shouldn't cost a member
+                    // their half-finished check-in. Only kicks in when nothing else (an
+                    // explicit deep link) already claims this launch, and only for the
+                    // same local calendar day - a stale step from a prior day would be
+                    // confusing rather than helpful, so it's ignored once the day rolls
+                    // over. CheckInFlow clears this same pref whenever a member finishes
+                    // the flow or taps Close on purpose, so this only fires for a genuine
+                    // interruption, never a deliberate exit.
+                    val resumeStep = if (deepLinkFallback == "dashboard") {
+                        val prefs = context.getSharedPreferences("nirog_prefs", android.content.Context.MODE_PRIVATE)
+                        val savedDayKey = prefs.getLong("checkin_resume_daykey", -1L)
+                        val savedStep = prefs.getInt("checkin_resume_step", -1)
+                        if (savedStep in 0..3 && savedDayKey == com.nirogbhumi.app.ui.localDayKey(System.currentTimeMillis())) savedStep else null
+                    } else null
+                    if (resumeStep != null) {
+                        state.checkinStartStep = resumeStep
+                        state.currentScreen = "daily_checkin"
+                    } else if (missingContact != com.nirogbhumi.app.data.MissingContact.NONE && !state.contactPromptShown) {
+                        // An existing account that has only one way in is asked once per app start to add the other.
+                        state.contactPromptShown = true
+                        state.linkContactRequired = false
+                        state.linkContactNext = deepLinkFallback
+                        state.currentScreen = "link_contact"
+                    } else {
+                        state.currentScreen = deepLinkFallback
+                    }
+                } else if (missingContact != com.nirogbhumi.app.data.MissingContact.NONE) {
+                    // A new account must have both before onboarding continues.
+                    state.linkContactRequired = true
+                    state.linkContactNext = "consent"
                     state.currentScreen = "link_contact"
                 } else {
-                    state.currentScreen = deepLinkFallback
+                    state.currentScreen = "consent"
                 }
-            } else if (missingContact != com.nirogbhumi.app.data.MissingContact.NONE) {
-                // A new account must have both before onboarding continues.
-                state.linkContactRequired = true
-                state.linkContactNext = "consent"
-                state.currentScreen = "link_contact"
-            } else {
-                state.currentScreen = "consent"
             }
-        }
-        .addOnFailureListener { state.currentScreen = "consent" }
+            .addOnFailureListener { state.currentScreen = "consent" }
+
+    }
+    state.repository.ensureUserProfile { proceed() }
+    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ proceed() }, 6_000L)
 }
 
 // SCREEN 1: SPLASH SCREEN
