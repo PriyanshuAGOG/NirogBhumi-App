@@ -185,7 +185,10 @@ fun LinkContactScreen(state: NirogState) {
         // Never a dead end: optional for existing accounts, and for new ones as soon as something has gone wrong.
         if (!required || error.isNotBlank() || waitedForCode || sendIsSlow) {
             Spacer(Modifier.height(12.dp))
-            TextButton(onClick = { proceed() }) {
+            TextButton(onClick = {
+                if (waitedForCode && error.isBlank()) com.nirogbhumi.app.data.ClientErrorReporter.report("sign_in:link_phone_no_code", "The SMS code did not arrive when adding a phone number and the member skipped")
+                proceed()
+            }) {
                 Text(if (required) "I'll do this later" else "Not now", color = Ink.copy(alpha = 0.6f), fontSize = 14.sp)
             }
         }

@@ -14,6 +14,7 @@ import { dayKeyIST, isMondayIST, sendWeeklyDigests, updateBatchPulse } from './s
 import { exportDownloadLink, processExportRequest, purgeExpiredExports } from './exportJob.js';
 import { notifySupportRequest } from './supportMail.js';
 import { OFFICIAL_CONTACT_EMAIL } from './email.js';
+import { networkKey, recordClientError } from './clientErrors.js';
 import { DELETION_GRACE_DAYS, cancelAccountDeletion as cancelDeletionRequest, processDueDeletions, scheduleAccountDeletion } from './accountDeletion.js';
 
 initializeApp();
@@ -1088,6 +1089,12 @@ export const getHealthFileShareLink = onCall({ region }, async request => {
     console.error('getHealthFileShareLink signing failed', error);
     throw new HttpsError('failed-precondition', 'Signed links are not set up yet - showing a standard link instead.');
   }
+});
+
+// Open to everyone on purpose: the problems it records (the SMS code not sending, a refused sign-in) happen before anyone is signed in.
+// See clientErrors.ts for what it keeps and how it is throttled.
+export const reportClientError = onCall({ region, maxInstances: 3 }, async request => {
+  return recordClientError(db, request.data, request.auth?.uid ?? null, networkKey(request.rawRequest?.ip));
 });
 
 export const createAuditLog = onCall({ region }, async request => {

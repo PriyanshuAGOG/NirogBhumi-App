@@ -899,7 +899,11 @@ fun LoginOtpScreen(state: NirogState) {
 
                     // Never a dead end: if the SMS does not arrive, email gets the member in.
                     if (resendTimer == 0 || state.authError.isNotBlank()) {
-                        TextButton(onClick = { state.authError = ""; state.currentScreen = "email_auth" }, modifier = Modifier.fillMaxWidth()) {
+                        TextButton(onClick = {
+                            // No error was shown, so the code simply never arrived: that is worth knowing about.
+                            if (state.authError.isBlank()) com.nirogbhumi.app.data.ClientErrorReporter.report("sign_in:phone_no_code", "The SMS code did not arrive and the member chose email")
+                            state.authError = ""; state.currentScreen = "email_auth"
+                        }, modifier = Modifier.fillMaxWidth()) {
                             Text("Didn't get the code? Sign in with email instead", color = DeepGreen, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                         }
                     }

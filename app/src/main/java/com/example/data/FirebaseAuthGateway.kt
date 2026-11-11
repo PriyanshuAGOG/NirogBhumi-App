@@ -44,7 +44,10 @@ object FirebaseAuthGateway {
                 val credential = GoogleAuthProvider.getCredential(token, null)
                 auth.signInWithCredential(credential)
                     .addOnSuccessListener { onSuccess() }
-                    .addOnFailureListener { onError(it.message ?: "Google Sign-in failed") }
+                    .addOnFailureListener {
+                        reportAuth("google", it.message ?: "Google Sign-in failed", it)
+                        onError(it.message ?: "Google Sign-in failed")
+                    }
             }
             .addOnFailureListener { onError(it.message ?: "Google Sign-in cancelled") }
     }
@@ -89,11 +92,18 @@ object FirebaseAuthGateway {
         )
     }
 
+    /** Sends one sign-in problem to the admin console (works before anyone is signed in). */
+    private fun reportAuth(stage: String, friendly: String, error: Exception?) {
+        val code = (error as? FirebaseAuthException)?.errorCode
+        ClientErrorReporter.report("sign_in:$stage", friendly, code, AuthMessages.technicalDetail(error?.javaClass?.simpleName.orEmpty(), code, error?.message))
+    }
+
     /** Logs the real reason (no phone number) for logcat and Crashlytics, and returns what the member should read. */
     private fun otpFailureText(error: FirebaseException): String {
         val code = (error as? FirebaseAuthException)?.errorCode
         Log.w("NirogAuth", "Phone verification failed: ${error.javaClass.simpleName} code=$code message=${error.message}")
         val friendly = AuthMessages.otpFailure(code, error.message)
+        reportAuth("phone_send", friendly, error)
         // Tester builds also show the real reason, so a screenshot from a tester tells us exactly what Google answered.
         return if (com.nirogbhumi.app.BuildConfig.DEBUG) friendly + "\n\nFor the team: " + AuthMessages.technicalDetail(error.javaClass.simpleName, code, error.message) else friendly
     }
@@ -103,7 +113,11 @@ object FirebaseAuthGateway {
         startPhoneVerification(auth, activity, phone,
             onCompleted = { credential ->
                 auth.signInWithCredential(credential).addOnSuccessListener { onSent("AUTO_VERIFIED") }
-                    .addOnFailureListener { onError(AuthMessages.codeCheckFailure((it as? FirebaseAuthException)?.errorCode, it.message)) }
+                    .addOnFailureListener {
+                        val friendly = AuthMessages.codeCheckFailure((it as? FirebaseAuthException)?.errorCode, it.message)
+                        reportAuth("phone_auto_verify", friendly, it)
+                        onError(friendly)
+                    }
             },
             onCodeSent = onSent, onFailed = onError)
     }
@@ -114,13 +128,21 @@ object FirebaseAuthGateway {
         if (id == "AUTO_VERIFIED") return onSuccess()
         auth.signInWithCredential(PhoneAuthProvider.getCredential(id, code))
             .addOnSuccessListener { onSuccess() }
-            .addOnFailureListener { onError(AuthMessages.codeCheckFailure((it as? FirebaseAuthException)?.errorCode, it.message)) }
+            .addOnFailureListener {
+                val friendly = AuthMessages.codeCheckFailure((it as? FirebaseAuthException)?.errorCode, it.message)
+                reportAuth("phone_code_check", friendly, it)
+                onError(friendly)
+            }
     }
 
     fun email(email: String, password: String, create: Boolean, onSuccess: () -> Unit, onError: (String) -> Unit) {
         val auth = auth() ?: return onError("Firebase is not configured")
         val task = if (create) auth.createUserWithEmailAndPassword(email, password) else auth.signInWithEmailAndPassword(email, password)
-        task.addOnSuccessListener { onSuccess() }.addOnFailureListener { onError(it.message ?: "Authentication failed") }
+        task.addOnSuccessListener { onSuccess() }.addOnFailureListener {
+            val message = it.message ?: "Authentication failed"
+            reportAuth(if (create) "email_sign_up" else "email_sign_in", message, it)
+            onError(message)
+        }
     }
 
     fun resetPassword(email: String, onSuccess: () -> Unit, onError: (String) -> Unit) {
@@ -194,7 +216,9 @@ object FirebaseAuthGateway {
             }
             .addOnFailureListener {
                 Log.w("NirogAuth", "Linking email failed: code=${failCode(it)} message=${it.message}")
-                onError(AuthMessages.linkFailure(failCode(it), it.message, "email"))
+                val friendly = AuthMessages.linkFailure(failCode(it), it.message, "email")
+                reportAuth("link_email", friendly, it)
+                onError(friendly)
             }
     }
 
@@ -205,7 +229,11 @@ object FirebaseAuthGateway {
         startPhoneVerification(auth, activity, phone,
             onCompleted = { credential ->
                 user.linkWithCredential(credential).addOnSuccessListener { onSent("AUTO_VERIFIED") }
-                    .addOnFailureListener { onError(AuthMessages.linkFailure(failCode(it), it.message, "phone number")) }
+                    .addOnFailureListener {
+                        val friendly = AuthMessages.linkFailure(failCode(it), it.message, "phone number")
+                        reportAuth("link_phone_auto", friendly, it)
+                        onError(friendly)
+                    }
             },
             onCodeSent = onSent, onFailed = onError)
     }
@@ -220,7 +248,9 @@ object FirebaseAuthGateway {
             .addOnFailureListener {
                 Log.w("NirogAuth", "Linking phone failed: code=${failCode(it)} message=${it.message}")
                 val c = failCode(it).orEmpty()
-                onError(if (c == "ERROR_INVALID_VERIFICATION_CODE" || c == "ERROR_SESSION_EXPIRED") AuthMessages.codeCheckFailure(c, it.message) else AuthMessages.linkFailure(c, it.message, "phone number"))
+                val friendly = if (c == "ERROR_INVALID_VERIFICATION_CODE" || c == "ERROR_SESSION_EXPIRED") AuthMessages.codeCheckFailure(c, it.message) else AuthMessages.linkFailure(c, it.message, "phone number")
+                reportAuth("link_phone", friendly, it)
+                onError(friendly)
             }
     }
 

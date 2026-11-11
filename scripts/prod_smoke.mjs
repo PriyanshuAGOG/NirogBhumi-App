@@ -22,7 +22,7 @@ const OFFICIAL = 'priyanshu@nirogbhumi.com';
 const CALLABLES = ['adminEnrollUser', 'adminManageDeletion', 'bootstrapSuperAdmin', 'bulkOnboard', 'cancelAccountDeletion', 'cancelConsultation',
   'createAnnouncement', 'createAuditLog', 'createStaffAccount', 'deleteAnnouncement', 'ensureProgramMembership', 'getExportDownloadLink',
   'getHealthFileShareLink', 'inviteToProgram', 'markAnnouncementSeen', 'previewAnnouncementAudience', 'redeemProgramCode',
-  'requestAccountDeletion', 'requestDataExport', 'revokeInvite', 'sendBulkNotification', 'setUserRole'];
+  'reportClientError', 'requestAccountDeletion', 'requestDataExport', 'revokeInvite', 'sendBulkNotification', 'setUserRole'];
 
 const rows = [];
 const record = (area, name, ok, detail = '') => { rows.push({ area, name, ok, detail }); console.log(`${ok ? 'PASS' : 'FAIL'}  ${area}: ${name}${detail ? `  (${detail})` : ''}`); };
@@ -57,12 +57,15 @@ for (const page of ['privacy-policy', 'terms', 'grievance', 'account-deletion'])
   console.log(`      ${placeholders === 0 ? 'no placeholders left' : `NOTE ${placeholders} placeholder(s) still on this page (blocks a production upload)`}`);
 }
 
+const PUBLIC = new Set(['reportClientError']);
+
 // 3. Callable functions: reachable, and they refuse a signed-out caller
 for (const name of CALLABLES) {
   const res = await get(`https://${REGION}-${PROJECT}.cloudfunctions.net/${name}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"data":{}}' });
   let status = '';
   try { status = JSON.parse(await res.text())?.error?.status || ''; } catch { /* not JSON */ }
-  const good = res.status === 401 && status === 'UNAUTHENTICATED';
+  // reportClientError is open on purpose (sign-in problems happen before sign-in): an empty call must be refused as a bad request, not accepted.
+  const good = PUBLIC.has(name) ? res.status === 400 && status === 'INVALID_ARGUMENT' : res.status === 401 && status === 'UNAUTHENTICATED';
   const why = res.status === 403 ? 'HTTP 403: not publicly invokable (org policy / invoker binding)' : res.status === 404 ? 'HTTP 404: not deployed' : res.status >= 500 ? `HTTP ${res.status}: function error` : `HTTP ${res.status} ${status}`;
   record('functions', `${name} refuses a signed-out caller`, good, good ? '' : why);
 }

@@ -158,6 +158,43 @@ await step('dashboard counts are real numbers (no failed tiles)', async () => {
   await snap(admin.page, 'admin-dashboard');
 });
 
+await step('app problems reported before anyone signs in appear on the dashboard, the sidebar and the Error reports page', async () => {
+  const report = async (data) => (await (await fetch('http://127.0.0.1:5001/demo-nirog-bhumi/asia-south1/reportClientError', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ data }),   // no sign-in header at all
+  })).json());
+  const base = { appVersion: '1.0.250', versionCode: 250, device: 'Samsung SM-A515F', androidSdk: 34 };
+  const first = await report({ ...base, screen: 'sign_in:phone_send', message: 'We could not confirm that this app installation is genuine, so the code was not sent.', code: 'ERROR_X', detail: 'FirebaseException ERROR_X for +919876543210', installId: 'phoneA' });
+  expect(first.result?.accepted === true, `a signed-out report should be accepted: ${JSON.stringify(first)}`);
+  await report({ ...base, screen: 'sign_in:phone_send', message: 'We could not confirm that this app installation is genuine, so the code was not sent.', code: 'ERROR_X', installId: 'phoneB' });
+  await report({ ...base, screen: 'crash', message: 'The app closed unexpectedly: IllegalStateException at Home.render(Home.kt:42)', installId: 'phoneA' });
+  const empty = await report({});
+  expect(empty.error?.status === 'INVALID_ARGUMENT', `an empty report should be refused as a bad request: ${JSON.stringify(empty)}`);
+
+  await go(admin.page, '/dashboard');
+  const alert = admin.page.getByTestId('error-alert');
+  await alert.waitFor();
+  await eventually(async () => /2 open app problems/.test(await alert.innerText()), 'the dashboard should say 2 open app problems (the repeated one counts once)');
+  expect(/3 times in total/.test(await alert.innerText()), 'it should also say how many times in total');
+  expect(/1 sign-in/.test(await alert.innerText()) && /1 crash/.test(await alert.innerText()), 'it should split sign-in problems from crashes');
+  await admin.page.locator('a.nav-item', { hasText: 'Error Reports' }).locator('.nav-badge', { hasText: '2' }).waitFor();
+
+  await go(admin.page, '/error-reports');
+  await admin.page.getByText('Sign-in: SMS code could not be sent').waitFor();
+  await admin.page.getByText('2×').first().waitFor();
+  await admin.page.getByText('Samsung SM-A515F').first().waitFor();
+  const stored = JSON.stringify(await emulatorDocs('errorReports'));
+  expect(!stored.includes('9876543210'), 'a phone number must never be stored in a report');
+  await admin.page.getByRole('button', { name: 'Sign-in problems' }).click();
+  expect((await admin.page.getByText('App crashed').count()) === 0, 'the sign-in filter should hide the crash');
+  await admin.page.getByRole('button', { name: 'Crashes' }).click();
+  await admin.page.getByText('App crashed').waitFor();
+  await admin.page.getByRole('button', { name: 'Mark resolved' }).first().click();
+  await admin.page.getByText('Nothing here').waitFor();
+  await go(admin.page, '/dashboard');
+  await eventually(async () => /1 open app problem\b/.test(await admin.page.getByTestId('error-alert').innerText()), 'resolving one should leave 1 open');
+  await noBanner(admin.page, 'Error reports');
+});
+
 await step('programs page lists both batches and the pending invite without errors', async () => {
   await go(admin.page, '/programs');
   await admin.page.getByText('July Batch').first().waitFor();

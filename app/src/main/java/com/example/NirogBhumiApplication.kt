@@ -13,6 +13,13 @@ import com.nirogbhumi.app.appcheck.installVariantAppCheckProvider
 class NirogBhumiApplication : Application() {
     override fun onCreate() {
         super.onCreate()
+        // Saves a note when the app dies so the next launch can report it. Crashlytics is off in tester builds, so without this a crash
+        // on a tester's phone would leave no trace anywhere. The earlier handler (the system's, or Crashlytics) still runs afterwards.
+        val previousCrashHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, error ->
+            runCatching { com.nirogbhumi.app.data.ClientErrorReporter.recordCrash(this, error) }
+            previousCrashHandler?.uncaughtException(thread, error)
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val manager = getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(
@@ -34,6 +41,7 @@ class NirogBhumiApplication : Application() {
         com.nirogbhumi.app.notifications.ReminderScheduler.rescheduleAllEnabled(this)
         com.nirogbhumi.app.update.UpdateManager.schedulePeriodicCheck(this)
         val app = FirebaseApp.initializeApp(this) ?: return
+        com.nirogbhumi.app.data.ClientErrorReporter.init(this)
         FirebaseFirestore.getInstance(app).firestoreSettings = FirebaseFirestoreSettings.Builder()
             .setLocalCacheSettings(
                 com.google.firebase.firestore.PersistentCacheSettings.newBuilder().build()

@@ -145,6 +145,24 @@ message Firebase sends, to see it.
 
 ---
 
+## Where to find the real logs
+
+| What you want to know | Where to look |
+|---|---|
+| Every problem the app hits, including sign-in and SMS failures, with Google's exact reason, phone model and app version | **Admin console > Error Reports** (`https://nirog-bhumi-app.web.app`). A red box on the Overview page and a badge in the sidebar show when anything is open. |
+| Whether Google is refusing or throttling the SMS requests | Google Cloud Console > **APIs & Services > Identity Toolkit API > Metrics**: filter the method `SendVerificationCode`; the response-code chart shows 200 (ok), 400, 403 (blocked) and 429 (throttled/quota). Also **Quotas** on the same page. |
+| How many SMS were sent today, and the limit | Firebase Console > **Authentication > Usage** |
+| Whether the tester's account was created | Firebase Console > **Authentication > Users** |
+| A server-side failure in any backend function | Firebase Console > **Functions > Logs**, or Google Cloud Console > **Logging > Logs Explorer** |
+| What one phone is doing right now | Plug it in, then `adb logcat -s NirogAuth NirogReport` (tester builds log the real reason under those tags) |
+| Crash reports | Test builds do not use Crashlytics by design; their crashes now appear in **Error Reports** instead (they are sent the next time the app opens). |
+
+The admin console to use is **`https://nirog-bhumi-app.web.app`** (Firebase Hosting). It is the only copy the deploy
+workflow updates. An older copy elsewhere (for example on Vercel) is a separate deployment that does not receive new
+versions or fixes; stop using it, or sign-in problems and the new alerts will not show there.
+
+---
+
 ## If the SMS code does not arrive (do these in order, about 10 minutes)
 
 Tell the tester to open the app and accept the "Update available" prompt (it appears within about 30 minutes of opening the

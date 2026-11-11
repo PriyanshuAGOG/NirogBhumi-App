@@ -1,34 +1,14 @@
-import { useEffect, useState } from 'react'
-import {
-  collection,
-  doc,
-  limit,
-  onSnapshot,
-  orderBy,
-  query,
-  serverTimestamp,
-  updateDoc,
-} from 'firebase/firestore'
+import { useState } from 'react'
+import { doc, serverTimestamp, updateDoc } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import { useAuth } from '../auth/AuthProvider'
 import { errText } from '../lib/errors'
 import { relativeTime } from '../lib/time'
+import { describeScreen, kindOf, useErrorReports, type ErrorReport } from '../lib/errorReports'
 import './Support.css'
 
-interface ErrorReport {
-  id: string
-  userId?: string
-  screen?: string
-  message?: string
-  code?: string | null
-  resolved?: boolean
-  createdAt?: unknown
-  reviewedBy?: string
-  reviewedAt?: unknown
-}
-
-function shortId(id: string | undefined): string {
-  if (!id) return 'unknown'
+function shortId(id: string | null | undefined): string {
+  if (!id) return 'not signed in'
   return id.length > 8 ? `${id.slice(0, 6)}…` : id
 }
 
@@ -41,34 +21,16 @@ function shortId(id: string | undefined): string {
  */
 export default function ErrorReports() {
   const { user } = useAuth()
-  const [items, setItems] = useState<ErrorReport[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [filter, setFilter] = useState<'open' | 'resolved' | 'all'>('open')
+  const { reports: items, loading, error } = useErrorReports(true)
+  const [filter, setFilter] = useState<'open' | 'sign_in' | 'crash' | 'resolved' | 'all'>('open')
   const [busyId, setBusyId] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
-
-  useEffect(() => {
-    // Ordered + bounded server-side (not fetch-everything-then-sort) - this
-    // collection can grow fast since every real failure writes to it.
-    const unsub = onSnapshot(
-      query(collection(db, 'errorReports'), orderBy('createdAt', 'desc'), limit(300)),
-      (snap) => {
-        setItems(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<ErrorReport, 'id'>) })))
-        setLoading(false)
-        setError(null)
-      },
-      (err) => {
-        setLoading(false)
-        setError(errText(err, 'Could not load error reports'))
-      },
-    )
-    return unsub
-  }, [])
 
   const visible = items.filter((i) => {
     if (filter === 'all') return true
     if (filter === 'resolved') return i.resolved === true
+    if (filter === 'sign_in') return i.resolved !== true && kindOf(i) === 'sign_in'
+    if (filter === 'crash') return i.resolved !== true && kindOf(i) === 'crash'
     return i.resolved !== true
   })
 
@@ -89,6 +51,7 @@ export default function ErrorReports() {
   }
 
   const openCount = items.filter((i) => i.resolved !== true).length
+  const signInOpen = items.filter((i) => i.resolved !== true && kindOf(i) === 'sign_in').length
 
   return (
     <section className="page">
@@ -97,19 +60,20 @@ export default function ErrorReports() {
         <h1>Error reports</h1>
         <p className="page-lede">
           Every failure the app actually surfaced to a real member, reported automatically - no
-          need to reproduce a bug blind. {openCount} open right now.
+          need to reproduce a bug blind. Includes problems before anyone signs in (the SMS code, a refused
+          sign-in) and app crashes. {openCount} open right now{signInOpen > 0 ? `, ${signInOpen} of them sign-in problems` : ''}.
         </p>
       </header>
 
       <div className="toolbar">
         <div className="seg" role="tablist">
-          {(['open', 'resolved', 'all'] as const).map((f) => (
+          {(['open', 'sign_in', 'crash', 'resolved', 'all'] as const).map((f) => (
             <button
               key={f}
               className={'seg-btn' + (filter === f ? ' seg-btn-active' : '')}
               onClick={() => setFilter(f)}
             >
-              {f === 'open' ? 'Open' : f === 'resolved' ? 'Resolved' : 'All'}
+              {f === 'open' ? 'Open' : f === 'sign_in' ? 'Sign-in problems' : f === 'crash' ? 'Crashes' : f === 'resolved' ? 'Resolved' : 'All'}
             </button>
           ))}
         </div>
@@ -146,18 +110,24 @@ export default function ErrorReports() {
       ) : (
         <div className="sup-list">
           {visible.map((item) => (
-            <article key={item.id} className="card sup-card">
+            <article key={item.id} className="card sup-card" data-kind={kindOf(item)}>
               <div className="sup-head">
-                <span className="sup-subject">{item.screen ?? 'unknown operation'}</span>
-                <span className={`tag ${item.resolved ? 'tag-good' : 'tag-warn'}`}>
-                  {item.resolved ? 'Resolved' : 'Open'}
+                <span className="sup-subject">{describeScreen(item.screen)}</span>
+                <span className="err-tags">
+                  {(item.count ?? 1) > 1 && <span className="tag tag-warn" title="How many times this exact problem happened">{item.count}×</span>}
+                  <span className={`tag ${item.resolved ? 'tag-good' : 'tag-warn'}`}>{item.resolved ? 'Resolved' : 'Open'}</span>
                 </span>
               </div>
               {item.message && <p className="sup-message">{item.message}</p>}
               {item.code && <code className="sup-code">{item.code}</code>}
+              {item.detail && <p className="sup-meta err-detail">{item.detail}</p>}
               <div className="sup-foot">
                 <span className="sup-meta">
-                  {shortId(item.userId)} · {relativeTime(item.createdAt)}
+                  {shortId(item.userId)}
+                  {item.device ? ` · ${item.device}` : ''}
+                  {item.appVersion ? ` · app ${item.appVersion}` : ''}
+                  {item.installs && item.installs.length > 1 ? ` · ${item.installs.length} phones` : ''}
+                  {' · '}last {relativeTime(item.createdAt)}
                 </span>
                 {!item.resolved && (
                   <button
