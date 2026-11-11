@@ -68,6 +68,8 @@ you give me the input. **Both** = joint.
    echo "onUserCreate runs as: $SA"
    gcloud projects add-iam-policy-binding $PROJECT --member="serviceAccount:$SA" --role=roles/datastore.user --condition=None --quiet
    ```
+   (Not needed any more: the function is now deployed to run as the Compute default account like the others, so no extra grant is
+   required. The command is kept in case that is ever reverted. It needs an account that can change project permissions.)
    The app also calls `ensureUserProfile` after every sign-in, which creates or completes the same record as the account that
    already has access, so a missing grant no longer breaks sign-up; but fix the grant so the trigger works as designed.
    Then the signed-link grant below.

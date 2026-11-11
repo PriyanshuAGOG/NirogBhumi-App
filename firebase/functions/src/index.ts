@@ -56,7 +56,11 @@ async function ensureBaseUserDoc(uid: string, user: { phoneNumber?: string | nul
   return wrote;
 }
 
-export const onUserCreate = functions.region(region).auth.user().onCreate(async user => {
+// Runs as the same account as every other function (the project's Compute default account, which was given database access), instead of the
+// App Engine default account a first-generation function would otherwise use. The deploy account may act as it (roles/iam.serviceAccountUser).
+const RUNTIME_ACCOUNT = '126409331898-compute@developer.gserviceaccount.com';
+
+export const onUserCreate = functions.region(region).runWith({ serviceAccount: RUNTIME_ACCOUNT }).auth.user().onCreate(async user => {
   await ensureBaseUserDoc(user.uid, user);
 });
 
