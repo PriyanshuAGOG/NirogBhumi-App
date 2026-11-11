@@ -20,7 +20,7 @@ data class ScreenExperience(
 
 val ScreenExperiences = mapOf(
     "quick_sugar" to ScreenExperience(
-        fields = listOf(FormFieldSpec("value", "Fasting sugar", FieldType.NUMBER, suffix = "mg/dL"), FormFieldSpec("time", "Time", FieldType.TIME), FormFieldSpec("note", "Optional note", FieldType.MULTILINE, false)),
+        fields = listOf(FormFieldSpec("value", "Fasting blood sugar", FieldType.NUMBER, suffix = "mg/dL"), FormFieldSpec("time", "Time", FieldType.TIME), FormFieldSpec("note", "Optional note", FieldType.MULTILINE, false)),
         writeCollection = "glucoseReadings", successRoute = "dashboard"
     ),
     "quick_walk" to ScreenExperience(choices = listOf("5 min", "10 min", "15 min", "30 min", "Custom"), checklist = listOf("After breakfast", "After lunch", "After dinner", "Normal walk"), writeCollection = "walkLogs", successRoute = "walking_overview"),
@@ -50,7 +50,7 @@ val ScreenExperiences = mapOf(
     ),
     "privacy_consent" to ScreenExperience(checklist = listOf("Health data storage", "Expert review when care is requested", "Consultation data", "Device data import", "Anonymized research (optional)", "Marketing notifications (optional)")),
     "health_connect_permissions" to ScreenExperience(checklist = listOf("Steps", "Sleep", "Heart rate", "Weight", "Blood glucose", "Blood pressure")),
-    "program_checklist" to ScreenExperience(checklist = listOf("Log fasting sugar", "Walk after a meal", "Complete yoga", "Dinner before 8:30 PM", "Follow today’s food plan"), writeCollection = "checklistLogs", successRoute = "active_journey")
+    "program_checklist" to ScreenExperience(checklist = listOf("Log fasting blood sugar", "Walk after a meal", "Complete yoga", "Dinner before 8:30 PM", "Follow today’s food plan"), writeCollection = "checklistLogs", successRoute = "active_journey")
     ,"support" to ScreenExperience(
         fields = listOf(FormFieldSpec("subject", "How can we help?"), FormFieldSpec("message", "Describe the issue", FieldType.MULTILINE)),
         choices = listOf("App help", "Account and privacy", "Consultation", "Program", "Order and delivery", "Report a safety concern"),
@@ -59,9 +59,9 @@ val ScreenExperiences = mapOf(
 )
 
 private val RouteDestinations = mapOf(
-    "track_hub" to mapOf("Blood Sugar" to "sugar_detail", "Blood Pressure" to "bp_overview", "Sleep" to "sleep_overview", "Walking and Activity" to "walking_overview", "Lab Reports" to "lab_reports"),
-    "sugar_detail" to mapOf("Latest fasting sugar" to "sugar_reading_detail", "History" to "sugar_reading_detail"),
-    "insights_hub" to mapOf("Weekly Report" to "weekly_report", "Sugar Story" to "sugar_story", "30-Day Trends" to "trends_30", "Share with Expert" to "health_file"),
+    "track_hub" to mapOf("Blood sugar" to "sugar_detail", "Blood Pressure" to "bp_overview", "Sleep" to "sleep_overview", "Walking and Activity" to "walking_overview", "Lab Reports" to "lab_reports"),
+    "sugar_detail" to mapOf("Latest fasting blood sugar" to "sugar_reading_detail", "History" to "sugar_reading_detail"),
+    "insights_hub" to mapOf("Weekly Report" to "weekly_report", "Blood Sugar Story" to "sugar_story", "30-Day Trends" to "trends_30", "Share with Expert" to "health_file"),
     "care_hub" to mapOf("Consultations" to "consultation_types", "Program Mode" to "active_journey", "Expert notes" to "expert_notes", "Upcoming care" to "consultation_detail"),
     "consultation_types" to mapOf("Diabetes lifestyle" to "consult_stepper", "Diet review" to "consult_stepper", "Yoga" to "consult_stepper", "Naturopathy" to "consult_stepper", "Follow-up" to "consult_stepper"),
     "active_journey" to mapOf("Today’s checklist" to "program_checklist", "Plans" to "diet_plan", "Expert note" to "expert_notes"),

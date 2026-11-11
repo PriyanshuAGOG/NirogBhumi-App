@@ -197,6 +197,7 @@ fun RequestConsultationContent(
       Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = NirogSpace.lg),
       verticalArrangement = Arrangement.spacedBy(NirogSpace.lg),
     ) {
+      BookOnWebsiteCard()
       Column(verticalArrangement = Arrangement.spacedBy(NirogSpace.sm)) {
         SectionLabel("What kind of support?")
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(NirogSpace.sm)) {
@@ -210,7 +211,7 @@ fun RequestConsultationContent(
           onValueChange = { if (it.length <= CONCERN_MAX) concern = it },
           modifier = Modifier.fillMaxWidth(),
           minLines = 4,
-          placeholder = { Text("For example: my fasting sugar is high on weekends and I'm not sure what to change.") },
+          placeholder = { Text("For example: my fasting blood sugar is high on weekends and I'm not sure what to change.") },
           keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
           supportingText = {
             Text(

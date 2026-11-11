@@ -44,6 +44,18 @@ export interface LogEntry {
   data: Record<string, unknown>
 }
 
+/** What kind of blood sugar reading it was, in words a coach would use. */
+const READING_TYPE: Record<string, string> = {
+  fasting: 'fasting',
+  post_meal: 'after a meal',
+  random: 'any time',
+  hba1c: 'HbA1c lab value',
+  device: 'from a device',
+}
+
+/** True when the entry was copied from Health Connect or a device rather than typed in by the member. */
+export const isImported = (d: Record<string, unknown>) => d.source === 'health_connect' || d.source === 'device'
+
 const fromDevice = (d: Record<string, unknown>) => (d.source === 'health_connect' || d.source === 'device' ? ' · from device' : '')
 
 /** Sleep length in minutes from the canonical field, or from what older entries stored (hours, or a start and wake time). */
@@ -69,7 +81,7 @@ export function summarizeLog(entry: LogEntry): string {
   switch (entry.kind) {
     case 'glucoseReadings': {
       const value = d.value != null ? `${d.value} ${d.unit ?? 'mg/dL'}` : '—'
-      const type = typeof d.readingType === 'string' ? d.readingType.replace('_', ' ') : ''
+      const type = typeof d.readingType === 'string' ? (READING_TYPE[d.readingType] ?? d.readingType.replace('_', ' ')) : ''
       const status = d.status === 'critical' ? ' · critical' : d.status === 'needs_attention' ? ' · needs attention' : ''
       return `${value}${type ? ` (${type})` : ''}${status}`
     }

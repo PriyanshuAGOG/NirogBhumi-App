@@ -46,9 +46,14 @@ configured".
 
 ## 4. Reinstalling after a new build
 
-Re-run the same workflow, download the new artifact, and reinstall — debug
-builds share a signature so `adb install -r` (or a plain re-install) upgrades
-in place without uninstalling first.
+Builds signed with the same key upgrade in place. Tester builds are signed with
+the private tester key made by `scripts/setup_tester_release.sh`; builds made
+without that key use the shared debug key. Switching between the two needs an
+uninstall first (Android refuses to update an app signed with a different key).
+
+**Phone-number sign-in only works on builds signed with the registered tester
+key.** For handing the app to a group of testers (invite link, group, what to
+send them) use `docs/TESTER_GUIDE.md` instead of the manual steps above.
 
 ## 5. Moving beyond APK-only distribution
 

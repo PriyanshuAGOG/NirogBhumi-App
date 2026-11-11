@@ -66,6 +66,10 @@ class NirogState {
     var otpVerificationId by mutableStateOf("")
     var authError by mutableStateOf("")
     var authBusy by mutableStateOf(false)
+    // After sign-in, the account is asked for the sign-in method it lacks (email for phone sign-ups, phone for email sign-ups).
+    var linkContactRequired by mutableStateOf(false)
+    var linkContactNext by mutableStateOf("consent")
+    var contactPromptShown by mutableStateOf(false)
     var consentHealthData by mutableStateOf(false)
     var consentExpertReview by mutableStateOf(false)
     var consentMedicalDisclaimer by mutableStateOf(false)
@@ -135,6 +139,8 @@ class NirogState {
 
     // Epoch millis a scheduled account deletion will run at, or null when none is pending. Drives the banner shown everywhere.
     var pendingDeletionMillis by mutableStateOf<Long?>(null)
+    /** True when the batch chat or announcements have something the member has not read. Drives the dot on the chat icon. */
+    var chatUnread by mutableStateOf(false)
 
     // Active Tab under Dashboard
     var activeTab by mutableStateOf("Today") // "Today", "Track", "Insights", "Care", "Learn"

@@ -1,5 +1,8 @@
 package com.nirogbhumi.app.ui.screens
 
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
+import com.nirogbhumi.app.health.domain.ActivityCard
 import androidx.compose.animation.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
@@ -42,6 +45,9 @@ import com.nirogbhumi.app.ui.theme.NirogType
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainHub(state: NirogState) {
+    // The dot on the chat icon: refreshed whenever the member lands here (for example, coming back from the chat).
+    LaunchedEffect(state.activeProgramId, state.isProgramActive) { refreshChatUnread(state) }
+
     // "Checked in today" is part of the shared health state (HealthUiState.today.checkedIn), so Today,
     // Track and the prompts all read the same answer; nothing is computed per tab any more.
 
@@ -49,6 +55,7 @@ fun MainHub(state: NirogState) {
         topBar = {
             NirogTopAppBar(
                 profileName = state.profileName,
+                photoUrl = state.photoUrl,
                 onProfileClick = {
                     state.currentScreen = "profile"
                 },
@@ -56,6 +63,7 @@ fun MainHub(state: NirogState) {
                     state.currentScreen = "notifications"
                 },
                 activeTab = state.activeTab,
+                chatUnread = state.chatUnread,
                 onChatClick = {
                     state.currentScreen = "chat_hub"
                 }
@@ -103,145 +111,109 @@ private fun markTourSeen(context: android.content.Context) {
         .edit().putBoolean("onboarding_tour_seen", true).apply()
 }
 
+private data class TourStep(val icon: androidx.compose.ui.graphics.vector.ImageVector, val title: String, val text: String)
+
+private val TOUR_STEPS = listOf(
+    TourStep(Icons.Filled.TaskAlt, "One small thing a day", "Each day we suggest one simple, doable action. Finish it and you've had a good day."),
+    TourStep(Icons.Filled.EditNote, "Log in seconds", "Tap a card on Today to record your blood sugar, sleep, steps or water. It takes about ten seconds."),
+    TourStep(Icons.Filled.Insights, "See what's working", "Insights shows how sleep, walking and meals affect your blood sugar, in plain words."),
+    TourStep(Icons.Filled.MedicalServices, "Your care team", "In Care you can join a batch, message your coach, and book a consultation."),
+)
+
 @Composable
 fun OnboardingTourOverlay(state: NirogState) {
     val context = LocalContext.current
-    val step = state.currentTourStep
-    val title = when (step) {
-        0 -> "1. Your Daily Action"
-        1 -> "2. Fast Metric Logging"
-        2 -> "3. Custom Sugar Stories"
-        else -> "4. Expert Naturopathy & Yoga"
+    val step = state.currentTourStep.coerceIn(0, TOUR_STEPS.lastIndex)
+    val current = TOUR_STEPS[step]
+    val last = step == TOUR_STEPS.lastIndex
+
+    fun finish() {
+        state.shouldShowTour = false
+        markTourSeen(context)
+        state.activeTab = "Today"
     }
-    val description = when (step) {
-        0 -> "Nirog Bhumi is designed to be calm and save screen time. You receive exactly ONE personalized lifestyle task per day. Focus on completing this single action!"
-        1 -> "Log fasting sugar, sleep, steps, or water in under 10 seconds. Simply click 'Today's Vitals' cards to log yours. Easy tracking, built for outcomes."
-        2 -> "Visit 'Insights' to read your 'Sugar Story'. We automatically analyze how sleep, walking after meals, and late-dinner habits impact your fasting glucose."
-        else -> "Tap the Care tab to open your lifestyle program, assigned yoga and naturopathy routines, and expert consultations."
+    fun goTo(index: Int) {
+        state.currentTourStep = index
+        state.activeTab = when (index) { 2 -> "Insights"; 3 -> "Care"; else -> "Today" }
     }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.72f))
+            .background(Color.Black.copy(alpha = 0.6f))
             .clickable(enabled = true) { /* Consume taps */ },
-        contentAlignment = Alignment.Center
+        contentAlignment = Alignment.BottomCenter
     ) {
+        // A bottom sheet rather than a centred box: the screen being explained stays visible above it.
         Column(
             modifier = Modifier
-                .padding(24.dp)
                 .fillMaxWidth()
-                .background(NirogColor.surface, RoundedCornerShape(24.dp))
-                .border(1.dp, NirogColor.forestSoft, RoundedCornerShape(24.dp))
-                .padding(24.dp),
+                .background(NirogColor.surface, RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
+                .navigationBarsPadding()
+                .padding(horizontal = 24.dp, vertical = 20.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Icon Sparkle
-            Box(
-                modifier = Modifier
-                    .size(48.dp)
-                    .background(NirogColor.surfaceAlt, CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Stars,
-                    contentDescription = "Feature Sparkle",
-                    tint = NirogColor.forestSoft,
-                    modifier = Modifier.size(28.dp)
-                )
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("Step ${step + 1} of ${TOUR_STEPS.size}", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = NirogColor.forest.copy(alpha = 0.6f))
+                TextButton(onClick = { finish() }) {
+                    Text("Skip", color = NirogColor.forest.copy(alpha = 0.6f), fontWeight = FontWeight.SemiBold)
+                }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
-
+            Box(
+                modifier = Modifier.size(56.dp).background(NirogColor.surfaceAlt, CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(imageVector = current.icon, contentDescription = null, tint = NirogColor.forestSoft, modifier = Modifier.size(30.dp))
+            }
+            Spacer(modifier = Modifier.height(14.dp))
             Text(
-                text = title,
-                fontSize = 20.sp,
+                text = current.title,
+                fontSize = 22.sp,
                 fontFamily = FontFamily.Serif,
                 fontWeight = FontWeight.Bold,
-                color = NirogColor.forest
+                color = NirogColor.forest,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
             )
-
             Spacer(modifier = Modifier.height(8.dp))
-
             Text(
-                text = description,
-                fontSize = 14.sp,
+                text = current.text,
+                fontSize = 15.sp,
                 color = NirogColor.inkTertiary,
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                lineHeight = 20.sp
+                lineHeight = 22.sp
             )
+            Spacer(modifier = Modifier.height(18.dp))
 
-            Spacer(modifier = Modifier.height(24.dp))
-
-            // Step dots
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                for (i in 0..3) {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                TOUR_STEPS.indices.forEach { i ->
                     Box(
                         modifier = Modifier
-                            .size(if (i == step) 10.dp else 6.dp)
+                            .size(width = if (i == step) 22.dp else 7.dp, height = 7.dp)
                             .background(
-                                color = if (i == step) NirogColor.forestSoft else NirogColor.forest.copy(alpha = 0.25f),
-                                shape = CircleShape
+                                color = if (i == step) NirogColor.forestSoft else NirogColor.forest.copy(alpha = 0.2f),
+                                shape = RoundedCornerShape(4.dp)
                             )
                     )
                 }
             }
+            Spacer(modifier = Modifier.height(18.dp))
 
-            Spacer(modifier = Modifier.height(20.dp))
-
-            // CTA Button
-            Button(
-                onClick = {
-                    if (step < 3) {
-                        state.currentTourStep++
-                        when (state.currentTourStep) {
-                            1 -> state.activeTab = "Today"
-                            2 -> state.activeTab = "Insights"
-                            3 -> state.activeTab = "Care"
-                        }
-                    } else {
-                        state.shouldShowTour = false
-                        markTourSeen(context)
-                        state.activeTab = "Today"
-                    }
-                },
-                modifier = Modifier.fillMaxWidth().height(48.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = NirogColor.forestSoft),
-                shape = RoundedCornerShape(24.dp)
-            ) {
-                Text(
-                    text = if (step < 3) "Next Key Feature" else "Start My 2-Min Routine",
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-
-            if (step > 0) {
-                Spacer(modifier = Modifier.height(8.dp))
-                TextButton(
-                    onClick = {
-                        state.currentTourStep--
-                        when (state.currentTourStep) {
-                            0 -> state.activeTab = "Today"
-                            1 -> state.activeTab = "Today"
-                            2 -> state.activeTab = "Insights"
-                        }
-                    }
-                ) {
-                    Text("Previous", color = NirogColor.forestSoft, fontWeight = FontWeight.Bold)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (step > 0) {
+                    OutlinedButton(
+                        onClick = { goTo(step - 1) },
+                        modifier = Modifier.weight(1f).height(48.dp),
+                        shape = RoundedCornerShape(24.dp),
+                    ) { Text("Back", color = NirogColor.forestSoft, fontWeight = FontWeight.Bold) }
                 }
-            } else {
-                Spacer(modifier = Modifier.height(8.dp))
-                TextButton(
-                    onClick = {
-                        state.shouldShowTour = false
-                        markTourSeen(context)
-                    }
+                Button(
+                    onClick = { if (last) finish() else goTo(step + 1) },
+                    modifier = Modifier.weight(if (step > 0) 2f else 1f).height(48.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = NirogColor.forestSoft),
+                    shape = RoundedCornerShape(24.dp)
                 ) {
-                    Text("Skip Tour", color = NirogColor.forest.copy(alpha = 0.5f))
+                    Text(text = if (last) "Get started" else "Next", color = Color.White, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -253,8 +225,10 @@ fun OnboardingTourOverlay(state: NirogState) {
 fun NirogTopAppBar(
     profileName: String,
     onProfileClick: () -> Unit,
+    photoUrl: String = "",
     onNotificationClick: () -> Unit,
     activeTab: String = "Today",
+    chatUnread: Boolean = false,
     onChatClick: () -> Unit = {},
 ) {
     Surface(
@@ -271,52 +245,48 @@ fun NirogTopAppBar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                // Initials avatar - no placeholder/stranger photo until the user uploads their own
-                Box(
-                    modifier = Modifier
-                        .size(38.dp)
-                        .clip(CircleShape)
-                        .background(NirogColor.forestSoft)
-                        .border(1.dp, NirogColor.outlineVariant, CircleShape)
-                        .clickable { onProfileClick() },
-                    contentAlignment = Alignment.Center
-                ) {
+            // The member's own picture (or their initial until they add one): the only thing on the left, and it opens their profile.
+            Box(
+                modifier = Modifier
+                    .size(42.dp)
+                    .clip(CircleShape)
+                    .background(NirogColor.forestSoft)
+                    .border(1.dp, NirogColor.outlineVariant, CircleShape)
+                    .clickable { onProfileClick() }
+                    .semantics { contentDescription = "Your profile" },
+                contentAlignment = Alignment.Center
+            ) {
+                if (photoUrl.isNotBlank()) {
+                    coil.compose.AsyncImage(
+                        model = photoUrl,
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                    )
+                } else {
                     Text(
                         text = profileName.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?",
                         color = Color.White,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 15.sp
+                        fontSize = 16.sp
                     )
                 }
-                Spacer(modifier = Modifier.width(10.dp))
-                NirogLogo(modifier = Modifier.size(28.dp))
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = "Nirog Bhumi",
-                    fontSize = 22.sp,
-                    fontFamily = FontFamily.Serif,
-                    fontWeight = FontWeight.Bold,
-                    color = NirogColor.forest
-                )
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
-                // On the Care+ tab the top-right control is the batch chat hub
-                // (Announcements + General), not the notification bell.
-                if (activeTab == "Care") {
-                    IconButton(onClick = onChatClick) {
+                // Notifications, then messages at the far edge: both always one tap away, on every tab.
+                IconButton(onClick = onNotificationClick) {
+                    Icon(
+                        imageVector = Icons.Filled.Notifications,
+                        contentDescription = "Notifications",
+                        tint = NirogColor.forest
+                    )
+                }
+                IconButton(onClick = onChatClick) {
+                    BadgedBox(badge = { if (chatUnread) Badge(containerColor = NirogColor.terracotta) }) {
                         Icon(
                             imageVector = Icons.Filled.Forum,
-                            contentDescription = "Batch messages",
-                            tint = NirogColor.forest
-                        )
-                    }
-                } else {
-                    IconButton(onClick = onNotificationClick) {
-                        Icon(
-                            imageVector = Icons.Filled.Notifications,
-                            contentDescription = "Notifications",
+                            contentDescription = if (chatUnread) "Messages, something new" else "Messages",
                             tint = NirogColor.forest
                         )
                     }
@@ -398,7 +368,7 @@ fun TodayTab(state: NirogState) {
     // A deliberate walk (timed or typed in). Steps counted passively by a phone do not tick "walk done".
     val walkLoggedToday = health.today.activityMinutesToday > 0
     val sleepText = health.lastSleep?.let { ClockText.duration(it.durationMinutes) }
-    val stepsText = health.today.stepsToday.takeIf { it > 0 }?.let { String.format(java.util.Locale.US, "%,d", it) }
+    val activityCard = ActivityCard.forToday(health.today.stepsToday, health.today.activityMinutesToday)
     val bpText = health.latestBp?.let { HealthLabels.bp(it) }
 
     DisposableEffect(Unit) {
@@ -698,10 +668,11 @@ fun TodayTab(state: NirogState) {
                 VitalBentoCard(
                     icon = Icons.Filled.Bloodtype,
                     iconColor = NirogColor.errorColor,
-                    title = "Blood Sugar",
+                    title = "Blood sugar",
                     value = health.latestGlucose?.value?.toInt()?.toString() ?: "—",
                     unit = if (health.latestGlucose != null) "mg/dL" else "",
-                    annotation = health.latestGlucose?.let { HealthLabels.day(it.measuredAtMillis, nowMs, health.zone) } ?: "Tap to log",
+                    // Say what kind of reading this is, so a fasting value is never mistaken for an after-meal one.
+                    annotation = health.latestGlucose?.let { "${HealthLabels.glucoseKind(it.kind)} · ${HealthLabels.day(it.measuredAtMillis, nowMs, health.zone)}" } ?: "Tap to log",
                     onClick = { state.isQuickLogFastingOpen = true }
                 )
             }
@@ -746,10 +717,10 @@ fun TodayTab(state: NirogState) {
                 VitalBentoCard(
                     icon = Icons.Filled.DirectionsWalk,
                     iconColor = NirogColor.secondaryGreen,
-                    title = "Steps Done",
-                    value = stepsText ?: "—",
-                    unit = if (stepsText != null) "steps" else "",
-                    annotation = if (stepsText != null) "Today" else "No data yet",
+                    title = "Walking & activity",
+                    value = activityCard.value,
+                    unit = activityCard.unit,
+                    annotation = activityCard.note,
                     onClick = { state.currentScreen = "walking_overview" }
                 )
             }
@@ -1118,8 +1089,8 @@ private fun SleepGlucoseInsightCard(state: NirogState) {
     val mealInsight = remember(health) { Insights.mealTiming(health.glucose, health.zone) }
 
     val summary = when {
-        sleepInsight != null -> "Your fasting sugar has averaged %.0f mg/dL after shorter nights (under 6h) vs %.0f mg/dL after longer ones, based on your own logs.".format(sleepInsight.shortSleepAvg, sleepInsight.longSleepAvg)
-        medicationInsight != null -> "On days you took your medication, fasting sugar averaged %.0f mg/dL, vs %.0f mg/dL on days it was missed.".format(medicationInsight.takenAvg, medicationInsight.missedAvg)
+        sleepInsight != null -> "Your fasting blood sugar has averaged %.0f mg/dL after shorter nights (under 6h) vs %.0f mg/dL after longer ones, based on your own logs.".format(sleepInsight.shortSleepAvg, sleepInsight.longSleepAvg)
+        medicationInsight != null -> "On days you took your medication, fasting blood sugar averaged %.0f mg/dL, vs %.0f mg/dL on days it was missed.".format(medicationInsight.takenAvg, medicationInsight.missedAvg)
         mealInsight != null -> "Your post-${mealInsight.mealLabel.lowercase()} sugar has averaged %.0f mg/dL, higher than after your other meals (%.0f mg/dL).".format(mealInsight.mealAvg, mealInsight.otherAvg)
         else -> return
     }
@@ -1309,7 +1280,7 @@ fun TrackTab(state: NirogState) {
     var showActivityLog by remember { mutableStateOf(false) }
     val health = state.collectHealth()
     val sleepText = health.lastSleep?.let { ClockText.duration(it.durationMinutes) }
-    val stepsText = health.today.stepsToday.takeIf { it > 0 }?.let { String.format(java.util.Locale.US, "%,d", it) }
+    val activityCard = ActivityCard.forToday(health.today.stepsToday, health.today.activityMinutesToday)
     val bpText = health.latestBp?.let { HealthLabels.bp(it) }
 
     Column(
@@ -1371,7 +1342,7 @@ fun TrackTab(state: NirogState) {
                         color = if (health.today.checkedIn) NirogColor.forest else Color.White
                     )
                     Text(
-                        if (health.today.checkedIn) "Nicely done — tap to add another reading" else "Sugar, BP & weight — under 2 minutes",
+                        if (health.today.checkedIn) "Nicely done — tap to add another reading" else "Blood sugar, BP & weight — under 2 minutes",
                         fontSize = 13.sp,
                         color = if (health.today.checkedIn) Color(0xFF4B6450) else NirogColor.forestPale
                     )
@@ -1392,7 +1363,7 @@ fun TrackTab(state: NirogState) {
                 modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                QuickLogChip("Sugar", Icons.Filled.Bloodtype, NirogColor.errorColor) { state.checkinStartStep = 0; state.currentScreen = "daily_checkin" }
+                QuickLogChip("Blood sugar", Icons.Filled.Bloodtype, NirogColor.errorColor) { state.checkinStartStep = 0; state.currentScreen = "daily_checkin" }
                 QuickLogChip("BP", Icons.Filled.Favorite, NirogColor.forest) { state.checkinStartStep = 1; state.currentScreen = "daily_checkin" }
                 QuickLogChip("Weight", Icons.Filled.MonitorWeight, Color(0xFF4B6450)) { state.checkinStartStep = 2; state.currentScreen = "daily_checkin" }
                 QuickLogChip("Medication", Icons.Filled.Medication, Color(0xFF6D4C1E)) { state.checkinStartStep = 3; state.currentScreen = "daily_checkin" }
@@ -1409,9 +1380,9 @@ fun TrackTab(state: NirogState) {
                     icon = Icons.Filled.Bloodtype,
                     iconBg = Color(0xFFFFDAD6),
                     iconTint = NirogColor.errorColor,
-                    title = "Blood Sugar",
+                    title = "Blood sugar",
                     measuredValue = health.latestGlucose?.value?.toInt()?.toString() ?: "No data",
-                    labelSuffix = if (health.latestGlucose != null) "mg/dL" else "",
+                    labelSuffix = health.latestGlucose?.let { "mg/dL · ${HealthLabels.glucoseKind(it.kind).lowercase()}" } ?: "",
                     onClick = { state.currentScreen = "sugar_detail" }
                 )
             }
@@ -1446,7 +1417,7 @@ fun TrackTab(state: NirogState) {
                     iconBg = NirogColor.secondaryContainer.copy(alpha = 0.5f),
                     iconTint = NirogColor.secondaryGreen,
                     title = "Walking & Activity",
-                    measuredValue = stepsText ?: "No data",
+                    measuredValue = if (activityCard.hasData) activityCard.oneLine else "No data",
                     labelSuffix = "",
                     onClick = { state.currentScreen = "walking_overview" }
                 )
@@ -1603,7 +1574,7 @@ fun InsightsTab(state: NirogState) {
         }
     }
     val sleepText = health.lastSleep?.let { ClockText.duration(it.durationMinutes) }
-    val stepsText = health.today.stepsToday.takeIf { it > 0 }?.let { String.format(java.util.Locale.US, "%,d", it) }
+    val activityCard = ActivityCard.forToday(health.today.stepsToday, health.today.activityMinutesToday)
     val bpText = health.latestBp?.let { HealthLabels.bp(it) }
 
     Column(
@@ -1659,7 +1630,7 @@ fun InsightsTab(state: NirogState) {
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        "Log at least 3 sugar readings this week and we'll show you real trends, not guesses.",
+                        "Log at least 3 blood sugar readings this week and we'll show you real trends, not guesses.",
                         fontSize = 13.sp,
                         color = NirogColor.outline,
                         textAlign = TextAlign.Center,
@@ -1676,7 +1647,7 @@ fun InsightsTab(state: NirogState) {
                 }
             }
         } else {
-            // Avg Fasting Sugar - computed from real logged readings
+            // Fasting blood sugar (average) - computed from real logged readings
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1689,9 +1660,9 @@ fun InsightsTab(state: NirogState) {
             ) {
                 Column(modifier = Modifier.padding(20.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Filled.WaterDrop, "Sugar", tint = Color(0xFF43242A), modifier = Modifier.size(18.dp))
+                        Icon(Icons.Filled.WaterDrop, "Blood sugar", tint = Color(0xFF43242A), modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Avg Fasting Sugar", fontWeight = FontWeight.SemiBold, color = NirogColor.inkTertiary)
+                        Text("Fasting blood sugar (average)", fontWeight = FontWeight.SemiBold, color = NirogColor.inkTertiary)
                     }
 
                     Spacer(modifier = Modifier.height(8.dp))
@@ -1792,7 +1763,7 @@ fun InsightsTab(state: NirogState) {
                             }
                             Spacer(modifier = Modifier.height(12.dp))
                             Text(
-                                stepsText ?: "—",
+                                if (activityCard.hasData) activityCard.oneLine else "—",
                                 fontSize = 18.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = NirogColor.forest
                             )
                         }
@@ -1818,9 +1789,9 @@ fun InsightsTab(state: NirogState) {
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
                             text = when {
-                                avg > com.nirogbhumi.app.health.domain.GlucoseRanges.HIGH_ABOVE -> "Your average fasting sugar this week is $avg mg/dL, above the typical target range. A short walk after meals and a consistent dinner time can help. Please discuss any persistent high readings with your doctor."
-                                avg < com.nirogbhumi.app.health.domain.GlucoseRanges.LOW_BELOW -> "Your average fasting sugar this week is $avg mg/dL, on the lower side. If you feel dizzy or shaky, eat something and tell your doctor about these readings."
-                                else -> "Your average fasting sugar this week is $avg mg/dL, within a typical range. Keep up your current routine, and keep logging so trends stay accurate."
+                                avg > com.nirogbhumi.app.health.domain.GlucoseRanges.HIGH_ABOVE -> "Your average fasting blood sugar this week is $avg mg/dL, above the typical target range. A short walk after meals and a consistent dinner time can help. Please discuss any persistent high readings with your doctor."
+                                avg < com.nirogbhumi.app.health.domain.GlucoseRanges.LOW_BELOW -> "Your average fasting blood sugar this week is $avg mg/dL, on the lower side. If you feel dizzy or shaky, eat something and tell your doctor about these readings."
+                                else -> "Your average fasting blood sugar this week is $avg mg/dL, within a typical range. Keep up your current routine, and keep logging so trends stay accurate."
                             },
                             fontSize = 13.sp,
                             color = NirogColor.inkPrimary,
@@ -1898,6 +1869,9 @@ fun CareTab(state: NirogState) {
                 modifier = Modifier.padding(top = 4.dp)
             )
         }
+
+        // Messages are the first thing in Care for members of a program: not an icon to hunt for.
+        if (state.isProgramActive) MessagesShortcutCard(state)
 
         if (!state.isProgramActive) {
             // Booking currently lives on the website, not in-app - the in-app
@@ -2236,8 +2210,6 @@ private fun CareRow(icon: androidx.compose.ui.graphics.vector.ImageVector, title
 @Composable
 fun LearnTab(state: NirogState) {
     val context = LocalContext.current
-    var featuredArticle by remember { mutableStateOf<Result<List<com.nirogbhumi.app.content.NirogBhumiArticle>>?>(null) }
-    LaunchedEffect(Unit) { featuredArticle = com.nirogbhumi.app.content.NirogBhumiContentApi.fetchArticles(perPage = 1) }
 
     Column(
         modifier = Modifier
@@ -2255,148 +2227,22 @@ fun LearnTab(state: NirogState) {
                 color = NirogColor.forest
             )
             Text(
-                text = "Simple reads on Ayurveda and everyday health.",
+                text = "Articles and blogs from nirogbhumi.com.",
                 fontSize = 15.sp,
                 color = NirogColor.inkTertiary,
                 modifier = Modifier.padding(top = 4.dp)
             )
         }
 
-        // Search bar
-        OutlinedTextField(
-            value = state.searchQuery,
-            onValueChange = { state.searchQuery = it },
-            modifier = Modifier.fillMaxWidth(),
-            leadingIcon = { Icon(Icons.Filled.Search, "Search", tint = NirogColor.outline) },
-            label = { Text("Search articles, guides, or products") },
-            placeholder = { Text("Search articles, guides, or products...", color = NirogColor.outlineVariant) },
-            shape = RoundedCornerShape(12.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = NirogColor.forest,
-                unfocusedBorderColor = Color.Transparent,
-                focusedContainerColor = Color(0xFFEEE8DC).copy(alpha = 0.7f),
-                unfocusedContainerColor = Color(0xFFEEE8DC).copy(alpha = 0.7f)
-            )
-        )
+        // Every article and blog post from nirogbhumi.com: working search, the site's own topics, paging, offline copy.
+        ExploreFeed(state)
+        MoreOnWebsiteLink()
 
-        // Categories Bento Grid
-        Text(
-            text = "Categories",
-            fontSize = 20.sp,
-            fontFamily = FontFamily.Serif,
-            fontWeight = FontWeight.Bold,
-            color = NirogColor.forest
-        )
-
-        Row(modifier = Modifier.fillMaxWidth()) {
-            Box(modifier = Modifier.weight(1f).padding(end = 6.dp)) {
-                LearnCategoryCard("Diabetes", Icons.Filled.Spa, NirogColor.secondaryContainer) { state.searchQuery = "diabetes"; state.currentScreen = "articles" }
-            }
-            Box(modifier = Modifier.weight(1f).padding(start = 6.dp)) {
-                LearnCategoryCard("Food", Icons.Filled.Restaurant, Color(0xFFFFD9DE)) { state.searchQuery = "food"; state.currentScreen = "articles" }
-            }
-        }
-
-        Row(modifier = Modifier.fillMaxWidth()) {
-            Box(modifier = Modifier.weight(1f).padding(end = 6.dp)) {
-                LearnCategoryCard("Movement", Icons.Filled.DirectionsWalk, NirogColor.forestPaleLight) { state.searchQuery = "walk"; state.currentScreen = "articles" }
-            }
-            Box(modifier = Modifier.weight(1f).padding(start = 6.dp)) {
-                LearnCategoryCard("Mindfulness", Icons.Filled.SelfImprovement, NirogColor.surfaceNeutral) { state.searchQuery = "mind"; state.currentScreen = "articles" }
-            }
-        }
-
-        // Featured read article card
-        Text(
-            text = "Featured Read",
-            fontSize = 20.sp,
-            fontFamily = FontFamily.Serif,
-            fontWeight = FontWeight.Bold,
-            color = NirogColor.forest
-        )
-
-        val featured = featuredArticle?.getOrNull()?.firstOrNull()
-        when {
-            featuredArticle == null -> Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 8.dp)) {
-                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = NirogColor.forestSofter)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Loading from nirogbhumi.com...", fontSize = 13.sp, color = Color(0xFF697169))
-            }
-            featured == null -> Text(
-                "Couldn't load the latest article from nirogbhumi.com right now.",
-                fontSize = 13.sp, color = Color(0xFF697169)
-            )
-            else -> Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .border(width = 0.5.dp, color = NirogColor.outlineVariant.copy(alpha = 0.35f), shape = RoundedCornerShape(24.dp))
-                    .clickable {
-                        runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(featured.link))) }
-                    },
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                shape = RoundedCornerShape(24.dp)
-            ) {
-                Column {
-                    featured.imageUrl?.let { url ->
-                        AsyncImage(
-                            model = url,
-                            contentDescription = featured.title,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(180.dp),
-                            contentScale = ContentScale.Crop
-                        )
-                    }
-
-                    Column(
-                        modifier = Modifier.padding(16.dp)
-                    ) {
-                        Text(
-                            text = featured.title,
-                            fontSize = 18.sp,
-                            fontFamily = FontFamily.Serif,
-                            fontWeight = FontWeight.Bold,
-                            color = NirogColor.forest
-                        )
-                        if (featured.excerpt.isNotBlank()) {
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = featured.excerpt,
-                                fontSize = 13.sp,
-                                color = NirogColor.inkTertiary,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(featured.dateLabel, fontSize = 11.sp, color = NirogColor.outline)
-                            Box(
-                                modifier = Modifier
-                                    .size(32.dp)
-                                    .background(NirogColor.forestSoft, CircleShape),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(Icons.Filled.ChevronRight, "Read", tint = Color.White)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Store is not launched yet - a single clear teaser instead of a shop
-        // front with nothing real to sell. It opens the (locked-down) store page only when a
-        // store address on our own site has been configured for this build.
-        val storeOpen = com.nirogbhumi.app.web.UrlPolicy.isAllowedHttps(com.nirogbhumi.app.BuildConfig.STORE_URL)
+        // The shop on nirogbhumi.com, listed in the app; ordering and payment happen on the website.
         Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable { state.currentScreen = if (storeOpen) "store_web" else "coming_soon" }
+                .clickable { state.currentScreen = "store" }
                 .border(width = 0.5.dp, color = NirogColor.outlineVariant.copy(alpha = 0.35f), shape = RoundedCornerShape(24.dp)),
             colors = CardDefaults.cardColors(containerColor = Color(0xFFEEE8DC)),
             shape = RoundedCornerShape(24.dp)
@@ -2413,9 +2259,9 @@ fun LearnTab(state: NirogState) {
                         fontWeight = FontWeight.Bold,
                         color = NirogColor.forest
                     )
-                    Text(if (storeOpen) "Wellness tools and kits" else "Wellness tools and kits - coming soon", fontSize = 12.sp, color = NirogColor.outline)
+                    Text("Wellness products from nirogbhumi.com", fontSize = 12.sp, color = NirogColor.outline)
                 }
-                Icon(Icons.Filled.ChevronRight, "Coming soon", tint = NirogColor.forest)
+                Icon(Icons.Filled.ChevronRight, "Open the store", tint = NirogColor.forest)
             }
         }
         Spacer(modifier = Modifier.height(32.dp))
@@ -2448,6 +2294,43 @@ fun LearnCategoryCard(title: String, icon: androidx.compose.ui.graphics.vector.I
                 Icon(imageVector = icon, contentDescription = title, tint = NirogColor.forest, modifier = Modifier.size(18.dp))
             }
             Text(text = title, fontWeight = FontWeight.SemiBold, color = NirogColor.forest, fontSize = 14.sp)
+        }
+    }
+}
+
+/** Batch chat and the private line to the coach, side by side at the top of Care. */
+@Composable
+private fun MessagesShortcutCard(state: NirogState) {
+    Card(
+        modifier = Modifier.fillMaxWidth().border(width = 0.5.dp, color = NirogColor.outlineVariant.copy(alpha = 0.35f), shape = RoundedCornerShape(24.dp)),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        shape = RoundedCornerShape(24.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.Forum, contentDescription = null, tint = NirogColor.forest, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Messages", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = NirogColor.forest)
+            }
+            Text("Chat with your batch, or ask your coach something privately.", fontSize = 13.sp, color = NirogColor.inkTertiary)
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                Button(
+                    onClick = { state.currentScreen = "program_chat" },
+                    modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = NirogColor.forestSoft),
+                    shape = RoundedCornerShape(24.dp)
+                ) {
+                    BadgedBox(badge = { if (state.chatUnread) Badge(containerColor = NirogColor.terracotta) }) {
+                        Text("Batch chat", color = Color.White, fontWeight = FontWeight.Bold)
+                    }
+                }
+                OutlinedButton(
+                    onClick = { state.currentScreen = "coach_inbox" },
+                    modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                    shape = RoundedCornerShape(24.dp),
+                    border = BorderStroke(1.dp, NirogColor.outlineVariant),
+                ) { Text("Ask your coach", color = NirogColor.forest, fontWeight = FontWeight.Bold) }
+            }
         }
     }
 }

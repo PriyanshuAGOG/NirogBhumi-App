@@ -12,6 +12,7 @@ const Dashboard = lazy(() => import('./pages/Dashboard'))
 const Moderation = lazy(() => import('./pages/Moderation'))
 const Members = lazy(() => import('./pages/Members'))
 const MemberDetail = lazy(() => import('./pages/MemberDetail'))
+const Messages = lazy(() => import('./pages/Messages'))
 const Batches = lazy(() => import('./pages/Batches'))
 const Announcements = lazy(() => import('./pages/Announcements'))
 const Calendar = lazy(() => import('./pages/Calendar'))
@@ -105,6 +106,14 @@ function Gate() {
             element={
               <Protected permission="members">
                 <MemberDetail />
+              </Protected>
+            }
+          />
+          <Route
+            path="/messages"
+            element={
+              <Protected permission="members">
+                <Messages />
               </Protected>
             }
           />

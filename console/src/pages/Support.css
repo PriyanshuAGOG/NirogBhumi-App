@@ -49,3 +49,6 @@
   color: var(--ink-muted);
   font-weight: 600;
 }
+
+.err-tags { display: inline-flex; gap: 6px; align-items: center; }
+.err-detail { margin: 6px 0 0; word-break: break-word; }

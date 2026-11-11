@@ -1,5 +1,9 @@
 package com.nirogbhumi.app.ui.screens
 
+import com.nirogbhumi.app.health.domain.ChatPosition
+import com.nirogbhumi.app.health.domain.ChatKey
+import com.nirogbhumi.app.health.domain.ChatGrouping
+import androidx.compose.foundation.lazy.itemsIndexed
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -263,7 +267,7 @@ fun BookConsultationStepper(state: NirogState) {
                 1 -> {
                     Text("Select consultation type", fontSize = 18.sp, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
 
-                    ConsultTypeOption("Blood sugar consultation", "We go through your sugar readings together with a specialist.", "30 min video • ₹499", state.selectedOnMedication == "Yes") {
+                    ConsultTypeOption("Blood sugar consultation", "We go through your blood sugar readings together with a specialist.", "30 min video • ₹499", state.selectedOnMedication == "Yes") {
                         state.selectedOnMedication = "Yes"
                         state.selectedConsultType = "diabetes_lifestyle"
                     }
@@ -476,7 +480,7 @@ private data class DailyProtocol(val id: String, val title: String, val autoComp
 // logged data (never a manual "trust me" toggle); tapping an incomplete
 // one deep-links into the exact screen that logs it.
 private val DAILY_PROTOCOLS = listOf(
-    DailyProtocol("fasting_reading", "Log a fasting sugar reading", autoCompletable = true) { it.isQuickLogFastingOpen = true },
+    DailyProtocol("fasting_reading", "Log a fasting blood sugar reading", autoCompletable = true) { it.isQuickLogFastingOpen = true },
     DailyProtocol("checkin", "Complete today's check-in", autoCompletable = true) { it.checkinStartStep = 0; it.currentScreen = "daily_checkin" },
     DailyProtocol("walk", "Walk 10 minutes", autoCompletable = true) { it.currentScreen = "walk_timer" },
     DailyProtocol("sleep", "Log last night's sleep", autoCompletable = true) { it.currentScreen = "sleep_overview" },
@@ -700,10 +704,10 @@ fun InsightDetailScreen(state: NirogState) {
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Text("How sleep can affect fasting sugar", fontSize = 22.sp, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+            Text("How sleep can affect fasting blood sugar", fontSize = 22.sp, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
 
             Text(
-                "This is general guidance, not an analysis of your specific data yet: short sleep (under 6 hours) is commonly linked to higher morning cortisol, which can push fasting glucose up. Keep logging both sleep and sugar readings - once you have enough of both, we'll show your own personal comparison here instead of general guidance.",
+                "This is general guidance, not an analysis of your specific data yet: short sleep (under 6 hours) is commonly linked to higher morning cortisol, which can push fasting glucose up. Keep logging both sleep and blood sugar readings - once you have enough of both, we'll show your own personal comparison here instead of general guidance.",
                 fontSize = 14.sp,
                 color = Color(0xFF434842),
                 lineHeight = 20.sp
@@ -719,7 +723,7 @@ fun InsightDetailScreen(state: NirogState) {
                         Text("YOUR OWN DATA", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFFB9832B))
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            "Fasting sugar has averaged %.0f mg/dL after shorter nights (under 6h, %d logged) vs %.0f mg/dL after longer ones (%d logged).".format(
+                            "Fasting blood sugar has averaged %.0f mg/dL after shorter nights (under 6h, %d logged) vs %.0f mg/dL after longer ones (%d logged).".format(
                                 insight.shortSleepAvg, insight.shortNights, insight.longSleepAvg, insight.longNights
                             ),
                             fontSize = 14.sp, color = Color(0xFF4B3B1B), lineHeight = 20.sp,
@@ -736,7 +740,7 @@ fun InsightDetailScreen(state: NirogState) {
                         Icon(Icons.Filled.Insights, contentDescription = null, tint = Color(0xFF9CB79F), modifier = Modifier.size(28.dp))
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            "Not enough data yet for your personal comparison (${health.sugarReadings.size}/5 sugar readings logged).",
+                            "Not enough data yet for your personal comparison (${health.sugarReadings.size}/5 blood sugar readings logged).",
                             fontSize = 13.sp,
                             color = Color(0xFF737972),
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -747,9 +751,9 @@ fun InsightDetailScreen(state: NirogState) {
 
             Divider(color = Color(0xFFC3C8C0).copy(alpha = 0.3f))
 
-            Text("How medication adherence can affect fasting sugar", fontSize = 22.sp, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+            Text("How medication adherence can affect fasting blood sugar", fontSize = 22.sp, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
             Text(
-                "Missing a dose can show up as higher fasting sugar the same day. Keep logging both medication and sugar readings on the same days to see your own comparison here.",
+                "Missing a dose can show up as higher fasting blood sugar the same day. Keep logging both medication and blood sugar readings on the same days to see your own comparison here.",
                 fontSize = 14.sp, color = Color(0xFF434842), lineHeight = 20.sp
             )
             if (medicationInsight != null) {
@@ -762,7 +766,7 @@ fun InsightDetailScreen(state: NirogState) {
                         Text("YOUR OWN DATA", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFFB9832B))
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            "Fasting sugar has averaged %.0f mg/dL on days you took your medication (%d logged) vs %.0f mg/dL on days it was missed (%d logged).".format(
+                            "Fasting blood sugar has averaged %.0f mg/dL on days you took your medication (%d logged) vs %.0f mg/dL on days it was missed (%d logged).".format(
                                 medicationInsight.takenAvg, medicationInsight.takenDays, medicationInsight.missedAvg, medicationInsight.missedDays
                             ),
                             fontSize = 14.sp, color = Color(0xFF4B3B1B), lineHeight = 20.sp,
@@ -788,7 +792,7 @@ fun InsightDetailScreen(state: NirogState) {
 
             Divider(color = Color(0xFFC3C8C0).copy(alpha = 0.3f))
 
-            Text("How meal timing can affect post-meal sugar", fontSize = 22.sp, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+            Text("How meal timing can affect after-meal blood sugar", fontSize = 22.sp, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
             Text(
                 "There's no single meal that always runs higher for everyone - it depends on what and when you eat. Keep logging post-meal readings across breakfast, lunch, and dinner to see if one of yours stands out.",
                 fontSize = 14.sp, color = Color(0xFF434842), lineHeight = 20.sp
@@ -849,7 +853,7 @@ fun InsightDetailScreen(state: NirogState) {
                 ) {
                     Column(modifier = Modifier.padding(14.dp)) {
                         Text("$readingDaysThisWeek/7", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
-                        Text("days with a sugar reading", fontSize = 11.sp, color = Color(0xFF737972))
+                        Text("days with a blood sugar reading", fontSize = 11.sp, color = Color(0xFF737972))
                     }
                 }
                 Card(
@@ -904,7 +908,7 @@ fun InsightDetailScreen(state: NirogState) {
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         if (state.isExperimentActive)
-                            "$nightsSinceStart of $experimentDaysElapsed nights so far had 7+ hours logged. Keep logging sleep and sugar readings to see if it lines up with lower fasting numbers."
+                            "$nightsSinceStart of $experimentDaysElapsed nights so far had 7+ hours logged. Keep logging sleep and blood sugar readings to see if it lines up with lower fasting numbers."
                         else
                             "We challenge you to log at least seven hours of restful sleep daily for the next week - tracked from your real sleep logs, not a manual checkbox.",
                         fontSize = 13.sp,
@@ -942,11 +946,11 @@ fun InsightDetailScreen(state: NirogState) {
 fun DeviceSyncScreen(state: NirogState) {
     val context = LocalContext.current
     val healthConnect = remember { HealthConnectManager(context.applicationContext, state.repository) }
+    var showSyncReview by remember { mutableStateOf(false) }
+    if (showSyncReview) HealthConnectSyncDialog(state, healthConnect) { showSyncReview = false }
     val coroutineScope = rememberCoroutineScope()
 
     var isConnected by remember { mutableStateOf(false) }
-    var isSyncing by remember { mutableStateOf(false) }
-    var lastSyncMessage by remember { mutableStateOf<String?>(null) }
     var lastError by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
@@ -1045,44 +1049,28 @@ fun DeviceSyncScreen(state: NirogState) {
                             ) { Text("Connect", color = Color.White, fontWeight = FontWeight.Bold) }
                         } else {
                             Button(
-                                enabled = !isSyncing,
-                                onClick = {
-                                    isSyncing = true
-                                    lastError = null
-                                    coroutineScope.launch {
-                                        runCatching { healthConnect.syncLastThirtyDays() }
-                                            .onSuccess { summary ->
-                                                lastSyncMessage = "Synced ${summary.steps} steps, ${summary.sleep} sleep, ${summary.glucose} glucose, ${summary.bloodPressure} BP, ${summary.weight} weight records"
-                                            }
-                                            .onFailure { lastError = it.message ?: "Sync failed" }
-                                        isSyncing = false
-                                    }
-                                },
+                                onClick = { showSyncReview = true },
                                 modifier = Modifier.fillMaxWidth().height(48.dp),
                                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF314936)),
                                 shape = RoundedCornerShape(24.dp)
                             ) {
-                                if (isSyncing) CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
-                                else Text("Sync Now", color = Color.White, fontWeight = FontWeight.Bold)
+                                Text("Review and sync", color = Color.White, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
                 }
 
-                lastSyncMessage?.let {
-                    Text(it, fontSize = 12.sp, color = Color(0xFF426820), fontWeight = FontWeight.Medium)
-                }
                 lastError?.let {
                     Text(it, fontSize = 12.sp, color = Color(0xFF8B2E2E), fontWeight = FontWeight.Medium)
                 }
             }
         }
 
-        Text("What syncs automatically", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+        Text("What can be copied from Health Connect", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B3221))
+        Text("Only when you tap \"Review and sync\" and agree. Nothing is added in the background.", fontSize = 12.sp, color = Color(0xFF737972))
         listOf(
             "Steps" to Icons.Filled.DirectionsWalk,
             "Sleep" to Icons.Filled.Bedtime,
-            "Heart rate" to Icons.Filled.Favorite,
             "Weight" to Icons.Filled.MonitorWeight,
             "Blood glucose (supported CGMs)" to Icons.Filled.Bloodtype,
             "Blood pressure (supported cuffs)" to Icons.Filled.Favorite
@@ -1109,6 +1097,11 @@ fun ProfileScreen(state: NirogState) {
     val context = LocalContext.current
     var updateCheckMessage by remember { mutableStateOf<String?>(null) }
     var checkingUpdate by remember { mutableStateOf(false) }
+    val updateScope = rememberCoroutineScope()
+    val isDeveloper = remember(state.userEmail) {
+        val user = runCatching { com.google.firebase.auth.FirebaseAuth.getInstance().currentUser }.getOrNull()
+        com.nirogbhumi.app.ui.DeveloperAccess.isDeveloper(user?.email ?: state.userEmail, user?.isEmailVerified == true)
+    }
     var uploadingPhoto by remember { mutableStateOf(false) }
     val photoPickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
@@ -1266,33 +1259,40 @@ fun ProfileScreen(state: NirogState) {
             // Device & Network Abuse policy risk and a dead, confusing control.
             SettingsRow(Icons.Filled.Description, "Legal & policies", showDivider = com.nirogbhumi.app.BuildConfig.DEBUG) { state.currentScreen = "legal_center" }
             if (com.nirogbhumi.app.BuildConfig.DEBUG) {
-                SettingsRow(Icons.Filled.SystemUpdate, "Check for updates", showDivider = false) {
+                SettingsRow(Icons.Filled.SystemUpdate, if (checkingUpdate) "Checking…" else "Check for updates", showDivider = false) {
                     if (checkingUpdate) return@SettingsRow
                     checkingUpdate = true
-                    val activity = context as? android.app.Activity
-                    if (activity == null) {
+                    val versionCode = runCatching {
+                        val info = context.packageManager.getPackageInfo(context.packageName, 0)
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) info.longVersionCode.toInt()
+                        else @Suppress("DEPRECATION") info.versionCode
+                    }.getOrDefault(0)
+                    updateScope.launch {
+                        val result = com.nirogbhumi.app.update.UpdateManager.checkNow(context, versionCode)
                         checkingUpdate = false
-                        updateCheckMessage = "Couldn't check for updates right now."
-                        return@SettingsRow
+                        result.onSuccess { info ->
+                            state.updateCheckError = ""
+                            if (info != null) {
+                                // The normal update prompt (download and install) takes over from here.
+                                state.availableUpdate = info
+                                updateCheckMessage = "A newer version (${info.latestVersionName}) is available. Follow the prompt to update."
+                            } else {
+                                updateCheckMessage = "You have the latest version."
+                            }
+                        }.onFailure {
+                            updateCheckMessage = "We couldn't check for updates right now. Please check your internet connection and try again."
+                        }
                     }
-                    com.google.firebase.appdistribution.FirebaseAppDistribution.getInstance()
-                        .updateIfNewReleaseAvailable()
-                        .addOnSuccessListener {
-                            checkingUpdate = false
-                            updateCheckMessage = "You're on the latest build available to testers."
-                        }
-                        .addOnFailureListener { error ->
-                            checkingUpdate = false
-                            updateCheckMessage = "Update check failed: ${error.message ?: "unknown error"}. " +
-                                "If this is your first check, you may need to sign in as a tester in the browser tab that just opened."
-                        }
                 }
             }
         }
 
-        SettingsSection(title = "Developer") {
-            SettingsRow(Icons.Filled.Build, "Developer settings", showDivider = false) {
-                state.currentScreen = "developer_settings"
+        // Only the two team accounts (verified email) see this; testers and members never do.
+        if (isDeveloper) {
+            SettingsSection(title = "Developer") {
+                SettingsRow(Icons.Filled.Build, "Developer settings", showDivider = false) {
+                    state.currentScreen = "developer_settings"
+                }
             }
         }
 
@@ -2506,7 +2506,7 @@ fun PrivacyConsentScreen(state: NirogState) {
                         Text("Anonymized data & research", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFF1B2219))
                     }
                     Text(
-                        "If you delete your account while this is switched on, your name and contact details are permanently deleted - but your health readings (sugar, BP, sleep, walks, weight, medications) stay on file with no link back to you. If it is off, your readings are deleted too. We only ever use anonymized data in aggregate, never about one person.",
+                        "If you delete your account while this is switched on, your name and contact details are permanently deleted - but your health readings (blood sugar, BP, sleep, walks, weight, medications) stay on file with no link back to you. If it is off, your readings are deleted too. We only ever use anonymized data in aggregate, never about one person.",
                         fontSize = 12.5.sp, color = Color(0xFF3F4A41), lineHeight = 18.sp
                     )
                     TextButton(
@@ -3766,13 +3766,21 @@ fun ProgramChatScreen(state: NirogState) {
             records!!.isEmpty() -> Box(modifier = Modifier.fillMaxWidth().weight(1f).padding(horizontal = NirogSpace.lg), contentAlignment = Alignment.Center) {
                 EmptyStateCard(Icons.Filled.Forum, "No messages yet. Say hello to your program community!")
             }
-            else -> LazyColumn(
+            else -> {
+            // Messages from the same person a few minutes apart read as one group: name once, time once, a label when the day changes.
+            val positions = remember(records) {
+                ChatGrouping.positions(
+                    records!!.map { r -> ChatKey(r.values["userId"]?.toString().orEmpty(), (r.values["createdAt"] as? Timestamp)?.toDate()?.time) },
+                    java.time.ZoneId.systemDefault(), System.currentTimeMillis(),
+                )
+            }
+            LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxWidth().weight(1f).padding(horizontal = NirogSpace.lg),
                 reverseLayout = true,
-                verticalArrangement = Arrangement.spacedBy(NirogSpace.sm)
             ) {
-                items(records!!, key = { it.id }) { record ->
+                itemsIndexed(records!!, key = { _, r -> r.id }) { index, record ->
+                    val pos = positions.getOrNull(index) ?: ChatPosition(startsGroup = true, endsGroup = true, dayLabel = null)
                     val isMine = record.values["userId"] == myUid
                     val senderName = record.values["senderName"]?.toString() ?: "Member"
                     val text = record.values["text"]?.toString().orEmpty()
@@ -3786,14 +3794,24 @@ fun ProgramChatScreen(state: NirogState) {
                     val reactions = (record.values["reactions"] as? Map<String, Any?>).orEmpty()
 
                     Column(
-                        modifier = Modifier.fillMaxWidth().animateItem(),
+                        modifier = Modifier.fillMaxWidth().animateItem().padding(top = if (pos.startsGroup) 10.dp else 2.dp),
                         horizontalAlignment = if (isMine) Alignment.End else Alignment.Start,
                     ) {
+                        pos.dayLabel?.let { label ->
+                            Box(Modifier.fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
+                                Text(
+                                    label, style = NirogType.caption, color = NirogColor.inkMuted,
+                                    modifier = Modifier.clip(RoundedCornerShape(50)).background(NirogColor.surfaceSunken).padding(horizontal = 12.dp, vertical = 3.dp),
+                                )
+                            }
+                        }
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                             verticalAlignment = Alignment.Bottom,
                         ) {
-                            if (!isMine) {
+                            // The avatar sits beside the last message of a group; earlier ones keep the same left edge.
+                            if (!isMine && !pos.endsGroup) Spacer(Modifier.size(28.dp))
+                            if (!isMine && pos.endsGroup) {
                                 Box(
                                     modifier = Modifier.size(28.dp).clip(CircleShape).background(NirogColor.forestSoft),
                                     contentAlignment = Alignment.Center,
@@ -3806,14 +3824,14 @@ fun ProgramChatScreen(state: NirogState) {
                             }
                             Column(
                                 modifier = Modifier
-                                    .widthIn(max = 260.dp)
+                                    .widthIn(max = 300.dp)
                                     .clip(RoundedCornerShape(16.dp))
                                     .background(if (isMine) NirogColor.forest else NirogColor.surfaceCard)
                                     .then(if (isMine) Modifier else Modifier.border(0.5.dp, NirogColor.surfaceSunken, RoundedCornerShape(16.dp)))
                                     .combinedClickable(onClick = {}, onLongClick = { actionTarget = record })
                                     .padding(horizontal = 14.dp, vertical = 10.dp)
                             ) {
-                                if (!isMine) Text(senderName, style = NirogType.overline, color = NirogColor.forestSoft)
+                                if (!isMine && pos.startsGroup) Text(senderName, style = NirogType.overline, color = NirogColor.forestSoft)
                                 if (replyTo != null) {
                                     Column(
                                         modifier = Modifier
@@ -3866,15 +3884,15 @@ fun ProgramChatScreen(state: NirogState) {
                                         style = NirogType.body.copy(color = if (isMine) NirogColor.onAccent else NirogColor.inkPrimary),
                                     )
                                 }
+                                if (pos.endsGroup && sentAt != null) {
+                                    Text(
+                                        java.text.SimpleDateFormat("h:mm a", java.util.Locale.getDefault()).format(sentAt),
+                                        style = NirogType.overline,
+                                        color = if (isMine) NirogColor.onAccent.copy(alpha = 0.65f) else NirogColor.inkMuted,
+                                        modifier = Modifier.align(Alignment.End).padding(top = 2.dp),
+                                    )
+                                }
                             }
-                        }
-
-                        if (sentAt != null) {
-                            Text(
-                                java.text.SimpleDateFormat("h:mm a", java.util.Locale.getDefault()).format(sentAt),
-                                style = NirogType.caption, color = NirogColor.inkMuted,
-                                modifier = Modifier.padding(top = 2.dp, start = if (isMine) 0.dp else 34.dp, end = if (isMine) 4.dp else 0.dp),
-                            )
                         }
 
                         if (reactions.isNotEmpty()) {
@@ -3905,6 +3923,7 @@ fun ProgramChatScreen(state: NirogState) {
                         }
                     }
                 }
+            }
             }
         }
 

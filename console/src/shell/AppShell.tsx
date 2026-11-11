@@ -1,5 +1,7 @@
 import { NavLink, Outlet } from 'react-router-dom'
 import { useAuth, type Permission } from '../auth/AuthProvider'
+import { useInbox } from '../lib/inbox'
+import { useErrorReports } from '../lib/errorReports'
 import './AppShell.css'
 
 interface NavItem {
@@ -17,6 +19,7 @@ interface NavItem {
 const NAV: NavItem[] = [
   { to: '/dashboard', label: 'Overview', icon: '🏠', section: 'Overview' },
   { to: '/members', label: 'Members', icon: '💚', section: 'Care+', permission: 'members' },
+  { to: '/messages', label: 'Messages', icon: '✉️', section: 'Care+', permission: 'members' },
   { to: '/batches', label: 'Batches', icon: '👥', section: 'Care+', permission: 'batches' },
   { to: '/announcements', label: 'Announcements', icon: '📣', section: 'Care+', permission: 'announcements' },
   { to: '/calendar', label: 'Calendar', icon: '🗓️', section: 'Care+', permission: 'calendar' },
@@ -50,6 +53,10 @@ function roleLabel(role: string | null): string {
 export default function AppShell() {
   const { user, role, signOut, hasPermission } = useAuth()
   const isAdmin = role === 'admin' || role === 'super_admin'
+  // How many members are waiting for an answer: shown as a badge on Messages so nothing sits unseen.
+  const waitingForReply = useInbox().threads.filter((t) => t.awaitingReply).length
+  // Open app problems (sign-in failures, crashes, failed actions) as a red badge, so they cannot go unseen. Admins only.
+  const openErrors = useErrorReports(isAdmin).open.length
   const nav = NAV.filter(
     (item) => (!item.adminOnly || isAdmin) && (!item.permission || hasPermission(item.permission)),
   )
@@ -82,6 +89,16 @@ export default function AppShell() {
                     {item.icon}
                   </span>
                   <span>{item.label}</span>
+                  {item.to === '/error-reports' && openErrors > 0 && (
+                    <span className="nav-badge" aria-label={`${openErrors} open app problems`}>
+                      {openErrors > 99 ? '99+' : openErrors}
+                    </span>
+                  )}
+                  {item.to === '/messages' && waitingForReply > 0 && (
+                    <span className="nav-badge" aria-label={`${waitingForReply} waiting for a reply`}>
+                      {waitingForReply}
+                    </span>
+                  )}
                 </NavLink>
               ))}
             </div>

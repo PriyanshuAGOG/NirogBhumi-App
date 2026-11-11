@@ -7,14 +7,16 @@ const { fns, db, resetFirestore, call, rejectsWithCode } = require('./helpers.cj
 const callables = Object.entries(fns).filter(([, fn]) => fn && fn.__endpoint && 'callableTrigger' in fn.__endpoint).map(([name]) => name).sort();
 
 // 'member' = any signed-in person acting on their own data; 'staff' = admin, super_admin or coach; 'admin' = admin or super_admin;
-// 'bootstrap' = only the owner's own email address, once.
+// 'bootstrap' = only the owner's own email address, once; 'public' = anyone, signed in or not.
 const POLICY = {
   adminEnrollUser: 'staff', adminManageDeletion: 'admin', bootstrapSuperAdmin: 'bootstrap', bulkOnboard: 'staff',
-  cancelAccountDeletion: 'member', cancelConsultation: 'member', createAnnouncement: 'staff', createAuditLog: 'admin',
+  cancelAccountDeletion: 'member', cancelConsultation: 'member', ensureUserProfile: 'member', createAnnouncement: 'staff', createAuditLog: 'admin',
   createStaffAccount: 'admin', deleteAnnouncement: 'staff', ensureProgramMembership: 'member', getExportDownloadLink: 'member',
   getHealthFileShareLink: 'member', inviteToProgram: 'staff', markAnnouncementSeen: 'member', previewAnnouncementAudience: 'staff',
   redeemProgramCode: 'member', requestAccountDeletion: 'member', requestDataExport: 'member', revokeInvite: 'staff',
   sendBulkNotification: 'staff', setUserRole: 'admin',
+  // Open to everyone on purpose (sign-in problems happen before sign-in); its own test file proves what it will and will not keep.
+  reportClientError: 'public',
 };
 
 // Deliberately generic, plausible input so a function reaches its access check rather than failing on missing fields.
@@ -35,17 +37,17 @@ test('every callable has a declared access level', () => {
 });
 
 test('nobody who is signed out can call any function', async () => {
-  for (const name of callables) await rejectsWithCode(call(fns[name], DATA, null), 'unauthenticated').catch(e => { throw new Error(`${name}: ${e.message}`); });
+  for (const name of callables.filter(n => POLICY[n] !== 'public')) await rejectsWithCode(call(fns[name], DATA, null), 'unauthenticated').catch(e => { throw new Error(`${name}: ${e.message}`); });
 });
 
 test('an ordinary member is refused by every staff, admin and bootstrap function', async () => {
-  for (const name of callables.filter(n => POLICY[n] !== 'member')) {
+  for (const name of callables.filter(n => POLICY[n] !== 'member' && POLICY[n] !== 'public')) {
     await rejectsWithCode(call(fns[name], DATA, 'plain-member', 'user'), 'permission-denied').catch(e => { throw new Error(`${name}: ${e.message}`); });
   }
 });
 
 test('a member with no role claim at all is refused the same way', async () => {
-  for (const name of callables.filter(n => POLICY[n] !== 'member')) {
+  for (const name of callables.filter(n => POLICY[n] !== 'member' && POLICY[n] !== 'public')) {
     await rejectsWithCode(call(fns[name], DATA, 'no-role-member'), 'permission-denied').catch(e => { throw new Error(`${name}: ${e.message}`); });
   }
 });

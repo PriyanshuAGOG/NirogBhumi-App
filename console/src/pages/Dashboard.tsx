@@ -14,6 +14,8 @@ import {
 import { db } from '../lib/firebase'
 import { chunk } from '../lib/usePrograms'
 import { useScope } from '../lib/scope'
+import { useErrorReports, describeScreen } from '../lib/errorReports'
+import { relativeTime } from '../lib/time'
 import './Dashboard.css'
 
 interface TileState {
@@ -220,6 +222,7 @@ export default function Dashboard() {
   const support = useCount(() => ({ primary: [query(collection(db, 'supportRequests'), where('status', '==', 'open'))], fallback: [query(collection(db, 'supportRequests'))] }))
   const team = useCount(() => (isAdmin ? { primary: [query(collection(db, 'users'), where('role', 'in', ['admin', 'coach', 'super_admin']))] } : null), scopeDeps)
 
+  const errorSummary = useErrorReports(isAdmin)
   const { list: quiet, loading: quietLoading } = useQuietMembers(scope)
   const programName = useMemo(() => {
     const map = new Map(programs.map((p) => [p.id, p.name ?? 'Program']))
@@ -327,6 +330,31 @@ export default function Dashboard() {
           time — tap a tile to go straight to the work.
         </p>
       </header>
+
+      {isAdmin && !errorSummary.loading && !errorSummary.error && (
+        errorSummary.open.length > 0 ? (
+          <Link to="/error-reports" className="alert-card" role="alert" data-testid="error-alert">
+            <span className="alert-icon" aria-hidden>🚨</span>
+            <span className="alert-body">
+              <strong>
+                {errorSummary.open.length} open app {errorSummary.open.length === 1 ? 'problem' : 'problems'}
+                {errorSummary.openOccurrences > errorSummary.open.length ? ` (${errorSummary.openOccurrences} times in total)` : ''}
+              </strong>
+              <span>
+                {errorSummary.openSignIn > 0 ? `${errorSummary.openSignIn} sign-in · ` : ''}
+                {errorSummary.openCrashes > 0 ? `${errorSummary.openCrashes} crash${errorSummary.openCrashes === 1 ? '' : 'es'} · ` : ''}
+                latest: {errorSummary.latest ? `${describeScreen(errorSummary.latest.screen)} (${relativeTime(errorSummary.latest.createdAt)})` : '—'}
+              </span>
+            </span>
+            <span className="alert-go">Open →</span>
+          </Link>
+        ) : (
+          <div className="alert-card alert-ok" data-testid="error-alert-clear">
+            <span className="alert-icon" aria-hidden>✅</span>
+            <span className="alert-body"><strong>No open app problems</strong><span>New failures appear here the moment a phone reports them.</span></span>
+          </div>
+        )
+      )}
 
       <div className="dash-section">
         <h2 className="dash-section-title">Needs attention</h2>

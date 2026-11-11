@@ -158,6 +158,43 @@ await step('dashboard counts are real numbers (no failed tiles)', async () => {
   await snap(admin.page, 'admin-dashboard');
 });
 
+await step('app problems reported before anyone signs in appear on the dashboard, the sidebar and the Error reports page', async () => {
+  const report = async (data) => (await (await fetch('http://127.0.0.1:5001/demo-nirog-bhumi/asia-south1/reportClientError', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ data }),   // no sign-in header at all
+  })).json());
+  const base = { appVersion: '1.0.250', versionCode: 250, device: 'Samsung SM-A515F', androidSdk: 34 };
+  const first = await report({ ...base, screen: 'sign_in:phone_send', message: 'We could not confirm that this app installation is genuine, so the code was not sent.', code: 'ERROR_X', detail: 'FirebaseException ERROR_X for +919876543210', installId: 'phoneA' });
+  expect(first.result?.accepted === true, `a signed-out report should be accepted: ${JSON.stringify(first)}`);
+  await report({ ...base, screen: 'sign_in:phone_send', message: 'We could not confirm that this app installation is genuine, so the code was not sent.', code: 'ERROR_X', installId: 'phoneB' });
+  await report({ ...base, screen: 'crash', message: 'The app closed unexpectedly: IllegalStateException at Home.render(Home.kt:42)', installId: 'phoneA' });
+  const empty = await report({});
+  expect(empty.error?.status === 'INVALID_ARGUMENT', `an empty report should be refused as a bad request: ${JSON.stringify(empty)}`);
+
+  await go(admin.page, '/dashboard');
+  const alert = admin.page.getByTestId('error-alert');
+  await alert.waitFor();
+  await eventually(async () => /2 open app problems/.test(await alert.innerText()), 'the dashboard should say 2 open app problems (the repeated one counts once)');
+  expect(/3 times in total/.test(await alert.innerText()), 'it should also say how many times in total');
+  expect(/1 sign-in/.test(await alert.innerText()) && /1 crash/.test(await alert.innerText()), 'it should split sign-in problems from crashes');
+  await admin.page.locator('a.nav-item', { hasText: 'Error Reports' }).locator('.nav-badge', { hasText: '2' }).waitFor();
+
+  await go(admin.page, '/error-reports');
+  await admin.page.getByText('Sign-in: SMS code could not be sent').waitFor();
+  await admin.page.getByText('2×').first().waitFor();
+  await admin.page.getByText('Samsung SM-A515F').first().waitFor();
+  const stored = JSON.stringify(await emulatorDocs('errorReports'));
+  expect(!stored.includes('9876543210'), 'a phone number must never be stored in a report');
+  await admin.page.getByRole('button', { name: 'Sign-in problems' }).click();
+  expect((await admin.page.getByText('App crashed').count()) === 0, 'the sign-in filter should hide the crash');
+  await admin.page.getByRole('button', { name: 'Crashes' }).click();
+  await admin.page.getByText('App crashed').waitFor();
+  await admin.page.getByRole('button', { name: 'Mark resolved' }).first().click();
+  await admin.page.getByText('Nothing here').waitFor();
+  await go(admin.page, '/dashboard');
+  await eventually(async () => /1 open app problem\b/.test(await admin.page.getByTestId('error-alert').innerText()), 'resolving one should leave 1 open');
+  await noBanner(admin.page, 'Error reports');
+});
+
 await step('programs page lists both batches and the pending invite without errors', async () => {
   await go(admin.page, '/programs');
   await admin.page.getByText('July Batch').first().waitFor();
@@ -259,7 +296,7 @@ await step('batches: message a member -> lands in the coach inbox and a push rec
   await admin.page.getByPlaceholder('How are things going this week?').fill('Great consistency this week, Asha!');
   await admin.page.getByRole('button', { name: 'Send message' }).click();
   await admin.page.getByText(/Your message to Asha Member was sent/).waitFor();
-  const msg = (await adb.collection('coachInboxMessages').where('memberUid', '==', 'memA').get()).docs[0];
+  const msg = (await adb.collection('coachInboxMessages').where('memberUid', '==', 'memA').where('fromUid', '==', 'admin1').get()).docs[0];
   expect(msg && msg.get('fromUid') === 'admin1' && msg.get('programId') === 'progA' && msg.get('senderRole') === 'coach', 'inbox message missing or malformed');
   const note = await eventually(async () => (await adb.collection('notifications').where('userId', '==', 'memA').where('type', '==', 'coach_message').get()).docs[0], 'push trigger should record a notification');
   expect(note.get('failureReason') === 'missing_token', 'no device token in the emulator, so it must be recorded as missing_token');
@@ -357,6 +394,49 @@ await step('member detail and moderation load for admin', async () => {
   await eventually(async () => (await admin.page.getByText(/spammy text in A/).count()) > 0 && (await admin.page.getByText(/spammy text in B/).count()) > 0, 'admin should see reports from both batches');
 });
 
+// Reads documents straight from the Firestore emulator (admin bypass), to prove what a console action really stored.
+async function emulatorDocs(collection) {
+  const res = await fetch(`http://127.0.0.1:8080/v1/projects/demo-nirog-bhumi/databases/(default)/documents/${collection}?pageSize=100`, { headers: { authorization: 'Bearer owner' } });
+  const json = await res.json();
+  return (json.documents ?? []).map((d) => Object.fromEntries(Object.entries(d.fields ?? {}).map(([k, v]) => [k, v.stringValue ?? v.integerValue ?? v.booleanValue ?? v.timestampValue ?? null])));
+}
+
+await step('messages: the admin sees every member waiting for an answer, opens one and replies', async () => {
+  await go(admin.page, '/messages');
+  // Ravi's question is still unanswered; Asha already has the batch message from the step above as the newest line, so she shows under All.
+  await admin.page.getByRole('button', { name: /Needs a reply \(1\)/ }).waitFor();
+  await admin.page.getByText('My evening walk keeps getting skipped.').first().waitFor();
+  await admin.page.getByRole('button', { name: /^All \(2\)/ }).click();
+  await admin.page.getByRole('button', { name: /Asha Member/ }).click();
+  await admin.page.getByRole('log').getByText('Can I take my tablet before breakfast?').waitFor();
+  await admin.page.getByLabel('Your reply').fill('Yes - take it after breakfast, with food.');
+  await admin.page.getByRole('button', { name: 'Send' }).click();
+  await admin.page.getByRole('log').getByText('Yes - take it after breakfast, with food.').waitFor();
+  const stored = await eventually(async () => (await emulatorDocs('coachInboxMessages')).find((m) => m.text === 'Yes - take it after breakfast, with food.'), 'the reply should be stored for the member');
+  expect(stored.memberUid === 'memA' && stored.programId === 'progA' && stored.fromUid === 'admin1', `reply stored with the wrong thread: ${JSON.stringify(stored)}`);
+  expect(stored.senderRole === 'coach', 'staff replies carry the coach role the app understands');
+  await admin.page.getByRole('button', { name: /Needs a reply \(1\)/ }).waitFor();   // Ravi still waits
+  await noBanner(admin.page, 'Messages');
+});
+
+await step('the member page shows everything about the member: profile, records, messages, care and support', async () => {
+  await admin.page.goto(`${BASE}/members/memA`);
+  await admin.page.getByText('Asha Member').first().waitFor();
+  await admin.page.getByRole('button', { name: 'Profile' }).click();
+  await admin.page.getByText('Contact', { exact: true }).waitFor();
+  await admin.page.getByText('asha@test.dev').first().waitFor();
+  await admin.page.getByRole('main').getByText('Account', { exact: true }).waitFor();
+  await admin.page.getByRole('button', { name: 'Health records' }).click();
+  await admin.page.getByText('118 mg/dL').first().waitFor();
+  await admin.page.getByRole('button', { name: /^Messages/ }).click();
+  await admin.page.getByRole('log').getByText('Can I take my tablet before breakfast?').waitFor();
+  await admin.page.getByRole('log').getByText('Yes - take it after breakfast, with food.').waitFor();
+  await admin.page.getByRole('button', { name: 'Care & support' }).click();
+  await admin.page.getByText('Diet review').first().waitFor();
+  await admin.page.getByText('Cannot see my plan').first().waitFor();
+  await noBanner(admin.page, 'Member record');
+});
+
 await step('the hosting security policy blocks nothing the console needs (no CSP violations)', async () => {
   const bad = admin.problems.filter((p) => /Content Security Policy|\[Report Only\]/i.test(p));
   expect(bad.length === 0, `policy violations: ${bad.slice(0, 3).join(' || ')}`);
@@ -378,7 +458,16 @@ await step('coach navigation hides admin-only areas', async () => {
   for (const item of ['Members', 'Batches', 'Announcements', 'Programs', 'Moderation']) expect(labels.includes(item), `coach should see ${item}`);
 });
 
+await step('messages: a coach sees only their own batch\'s conversations', async () => {
+  await go(coach.page, '/messages');
+  await coach.page.getByRole('button', { name: /^All \(1\)/ }).click();   // Asha was already answered, so she is under All, and only she is there
+  await coach.page.getByText('Asha Member').first().waitFor();
+  expect((await coach.page.getByText('Ravi Member').count()) === 0, 'a coach must not see another batch\'s member in Messages');
+  await noBanner(coach.page, 'Coach messages');
+});
+
 await step('coach dashboard works and counts only their batch', async () => {
+  await go(coach.page, '/dashboard');
   await coach.page.waitForLoadState('networkidle').catch(() => {});
   expect((await tileValue(coach.page, 'Open reports')) === 1, 'coach should see only their batch\'s report');
   expect((await tileValue(coach.page, 'Active Care+ members')) === 4 || (await tileValue(coach.page, 'Active Care+ members')) === 3, 'coach roster count should be their batch only (3 after redeems)');

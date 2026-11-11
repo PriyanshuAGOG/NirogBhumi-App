@@ -199,7 +199,7 @@ fun DailyCheckInScreen(state: NirogState) {
                         }
                     }
                     val sugarVoice = com.nirogbhumi.app.ui.components.rememberVoiceInputLauncher(
-                        prompt = if (sugarType == "HbA1c") "Say your HbA1c, e.g. \"6.5\"" else "Say your sugar reading, e.g. \"110\"",
+                        prompt = if (sugarType == "HbA1c") "Say your HbA1c, e.g. \"6.5\"" else "Say your blood sugar reading, e.g. \"110\"",
                         onResult = { heard ->
                             val parsed = com.nirogbhumi.app.ui.components.parseSpokenNumber(heard)
                             if (parsed != null) sugarInput = if (sugarType == "HbA1c") parsed else parsed.substringBefore(".")

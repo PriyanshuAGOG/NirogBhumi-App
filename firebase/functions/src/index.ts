@@ -14,6 +14,7 @@ import { dayKeyIST, isMondayIST, sendWeeklyDigests, updateBatchPulse } from './s
 import { exportDownloadLink, processExportRequest, purgeExpiredExports } from './exportJob.js';
 import { notifySupportRequest } from './supportMail.js';
 import { OFFICIAL_CONTACT_EMAIL } from './email.js';
+import { networkKey, recordClientError } from './clientErrors.js';
 import { DELETION_GRACE_DAYS, cancelAccountDeletion as cancelDeletionRequest, processDueDeletions, scheduleAccountDeletion } from './accountDeletion.js';
 
 initializeApp();
@@ -27,15 +28,47 @@ const region = 'asia-south1';
 // admin/coach role back to 'user' if this trigger happened to run second.
 // The transaction makes it order-independent: whichever of the two writes
 // lands second sees the first one's role already there and preserves it.
-export const onUserCreate = functions.region(region).auth.user().onCreate(async user => {
-  const ref = db.doc(`users/${user.uid}`);
-  await db.runTransaction(async tx => {
+//
+// This is the "base" record every account needs (role, status, contact, timezone, notification defaults, created time).
+// It is written two ways: by the sign-up trigger below, and by ensureUserProfile, which the app calls after every sign-in.
+// The second route exists because the trigger is a first-generation function that runs as the project's App Engine default
+// account, and a new organization gives that account no database access - so on this project the trigger failed with
+// PERMISSION_DENIED for every new sign-up. The callable runs as the account that already has access, and it also repairs
+// the accounts the trigger missed. Both routes share this one function and it is safe to run any number of times: it never
+// overwrites a role, status, preference or created time that is already there.
+async function ensureBaseUserDoc(uid: string, user: { phoneNumber?: string | null; email?: string | null; metadata?: { creationTime?: string } }): Promise<boolean> {
+  const ref = db.doc(`users/${uid}`);
+  const wrote = await db.runTransaction(async tx => {
     const existing = await tx.get(ref);
-    const role = existing.exists ? (existing.data()?.role ?? 'user') : 'user';
-    const createdAt = existing.exists ? (existing.data()?.createdAt ?? FieldValue.serverTimestamp()) : FieldValue.serverTimestamp();
-    tx.set(ref, { userId: user.uid, phone: user.phoneNumber ?? null, email: user.email ?? null, role, status: 'active', timezone: 'Asia/Kolkata', notificationPreferences: { quietHoursStart: '21:00', quietHoursEnd: '07:00', maxHealthReminders: 3 }, createdAt, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    const data = existing.data() ?? {};
+    if (existing.exists && data.userId && data.role && data.status && data.createdAt && (data.phone != null || user.phoneNumber == null) && (data.email != null || user.email == null)) return false;
+    const created = user.metadata?.creationTime ? new Date(user.metadata.creationTime) : null;
+    const createdAt = data.createdAt ?? (created && !Number.isNaN(created.getTime()) ? Timestamp.fromDate(created) : FieldValue.serverTimestamp());
+    tx.set(ref, {
+      userId: uid, phone: user.phoneNumber ?? data.phone ?? null, email: user.email ?? data.email ?? null,
+      role: data.role ?? 'user', status: data.status ?? 'active', timezone: data.timezone ?? 'Asia/Kolkata',
+      notificationPreferences: data.notificationPreferences ?? { quietHoursStart: '21:00', quietHoursEnd: '07:00', maxHealthReminders: 3 },
+      createdAt, updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+    return true;
   });
-  await consumeMatchingInvite(user.uid, user.email ?? null, user.phoneNumber ?? null);
+  if (wrote) await consumeMatchingInvite(uid, user.email ?? null, user.phoneNumber ?? null);
+  return wrote;
+}
+
+// Runs as the same account as every other function (the project's Compute default account, which was given database access), instead of the
+// App Engine default account a first-generation function would otherwise use. The deploy account may act as it (roles/iam.serviceAccountUser).
+const RUNTIME_ACCOUNT = '126409331898-compute@developer.gserviceaccount.com';
+
+export const onUserCreate = functions.region(region).runWith({ serviceAccount: RUNTIME_ACCOUNT }).auth.user().onCreate(async user => {
+  await ensureBaseUserDoc(user.uid, user);
+});
+
+// Called by the app right after every sign-in (see FirebaseHealthRepository.ensureUserProfile). Acts only on the caller's own account.
+export const ensureUserProfile = onCall({ region }, async request => {
+  const auth = requireUser(request);
+  const record = await getAuth().getUser(auth.uid);
+  return { created: await ensureBaseUserDoc(auth.uid, record) };
 });
 
 // Auto-enrolls a brand-new account into whatever program staff pre-invited
@@ -1088,6 +1121,12 @@ export const getHealthFileShareLink = onCall({ region }, async request => {
     console.error('getHealthFileShareLink signing failed', error);
     throw new HttpsError('failed-precondition', 'Signed links are not set up yet - showing a standard link instead.');
   }
+});
+
+// Open to everyone on purpose: the problems it records (the SMS code not sending, a refused sign-in) happen before anyone is signed in.
+// See clientErrors.ts for what it keeps and how it is throttled.
+export const reportClientError = onCall({ region, maxInstances: 3 }, async request => {
+  return recordClientError(db, request.data, request.auth?.uid ?? null, networkKey(request.rawRequest?.ip));
 });
 
 export const createAuditLog = onCall({ region }, async request => {

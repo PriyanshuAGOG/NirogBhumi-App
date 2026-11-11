@@ -305,7 +305,7 @@ fun DataControlsScreen(state: NirogState) {
                         fontSize = 13.sp, color = Color(0xFF434842), lineHeight = 18.sp
                     )
                     Text(
-                        "Your health readings (sugar, blood pressure, sleep, walks, weight, medicines, check-ins) are deleted too, unless you switched on \"Anonymized research\" in Privacy & consent. In that case they stay with every link back to you removed and are only used in combined statistics.",
+                        "Your health readings (blood sugar, blood pressure, sleep, walks, weight, medicines, check-ins) are deleted too, unless you switched on \"Anonymized research\" in Privacy & consent. In that case they stay with every link back to you removed and are only used in combined statistics.",
                         fontSize = 13.sp, color = Color(0xFF434842), lineHeight = 18.sp
                     )
                     Text(

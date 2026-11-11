@@ -52,25 +52,13 @@ import com.nirogbhumi.app.ui.theme.NirogType
 @Composable
 fun ChatHubScreen(state: NirogState) {
   // One-shot unread check (not a live listener - a badge only needs to be
-  // current when this menu is opened): compare the newest message/
-  // announcement timestamp against the caller's own read markers.
+  // current when this menu is opened).
   var unreadGeneral by remember { mutableStateOf(false) }
   var unreadAnnouncements by remember { mutableStateOf(false) }
   LaunchedEffect(state.activeProgramId, state.isProgramActive) {
-    val programId = state.activeProgramId
-    if (!state.isProgramActive || programId.isBlank()) return@LaunchedEffect
-    state.repository.peekMembership(programId) { membershipResult ->
-      val membership = (membershipResult as? CloudResult.Success)?.value
-      val lastReadGeneral = (membership?.values?.get("lastReadGeneralAt") as? Timestamp)?.toDate()?.time
-      val lastReadAnnouncements = (membership?.values?.get("lastReadAnnouncementsAt") as? Timestamp)?.toDate()?.time
-      state.repository.peekLatestActivity(programId, "programChatMessages") { r ->
-        val latest = (r as? CloudResult.Success)?.value
-        unreadGeneral = latest != null && (lastReadGeneral == null || latest > lastReadGeneral)
-      }
-      state.repository.peekLatestActivity(programId, "announcements") { r ->
-        val latest = (r as? CloudResult.Success)?.value
-        unreadAnnouncements = latest != null && (lastReadAnnouncements == null || latest > lastReadAnnouncements)
-      }
+    refreshChatUnread(state) { general, announcements ->
+      unreadGeneral = general
+      unreadAnnouncements = announcements
     }
   }
 
@@ -211,3 +199,31 @@ private fun RoomRow(
     },
   )
 }
+
+/**
+ * Compares the newest batch message and announcement with the member's own read markers, and tells [onResult] whether each has
+ * something unread. Also updates [NirogState.chatUnread], which shows as a dot on the chat icon in the top bar.
+ */
+internal fun refreshChatUnread(state: NirogState, onResult: (general: Boolean, announcements: Boolean) -> Unit = { _, _ -> }) {
+  val programId = state.activeProgramId
+  if (!state.isProgramActive || programId.isBlank()) { state.chatUnread = false; return }
+  state.repository.peekMembership(programId) { membershipResult ->
+    val membership = (membershipResult as? CloudResult.Success)?.value
+    val lastReadGeneral = (membership?.values?.get("lastReadGeneralAt") as? Timestamp)?.toDate()?.time
+    val lastReadAnnouncements = (membership?.values?.get("lastReadAnnouncementsAt") as? Timestamp)?.toDate()?.time
+    var general = false
+    var announcements = false
+    fun publish() { onResult(general, announcements); state.chatUnread = general || announcements }
+    state.repository.peekLatestActivity(programId, "programChatMessages") { r ->
+      val latest = (r as? CloudResult.Success)?.value
+      general = latest != null && (lastReadGeneral == null || latest > lastReadGeneral)
+      publish()
+    }
+    state.repository.peekLatestActivity(programId, "announcements") { r ->
+      val latest = (r as? CloudResult.Success)?.value
+      announcements = latest != null && (lastReadAnnouncements == null || latest > lastReadAnnouncements)
+      publish()
+    }
+  }
+}
+

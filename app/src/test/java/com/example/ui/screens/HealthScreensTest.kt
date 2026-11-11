@@ -129,4 +129,28 @@ class HealthScreensTest {
         composeTestRule.setContent { MyApplicationTheme { WeightOverviewScreen(NirogState()) } }
         composeTestRule.onNodeWithText("Weight").assertExists()
     }
+
+    @Test
+    fun `the Health File has one summary with weekly and monthly views, and no second report card`() {
+        composeTestRule.setContent { MyApplicationTheme { HealthFileScreen(NirogState()) } }
+        assertTrue(composeTestRule.onAllNodesWithText("Health summary", ignoreCase = true).fetchSemanticsNodes().isNotEmpty())
+        composeTestRule.onNodeWithText("Weekly").assertExists()
+        composeTestRule.onNodeWithText("Monthly").assertExists()
+        assertEquals(0, composeTestRule.onAllNodesWithText("Doctor-visit report", ignoreCase = true).fetchSemanticsNodes().size)
+        assertEquals(0, composeTestRule.onAllNodesWithText("Vitals summary", substring = true, ignoreCase = true).fetchSemanticsNodes().size)
+        // Blood sugar is always the measurement's name; a bare "Sugar" is never a title.
+        assertTrue(composeTestRule.onAllNodesWithText("Blood sugar").fetchSemanticsNodes().isNotEmpty())
+        assertEquals(0, composeTestRule.onAllNodesWithText("Sugar").fetchSemanticsNodes().size)
+    }
+
+    @Test
+    fun `switching to monthly keeps the same summary`() {
+        composeTestRule.setContent { MyApplicationTheme { HealthFileScreen(NirogState()) } }
+        composeTestRule.onNodeWithText("Monthly").performClick()
+        assertTrue(composeTestRule.onAllNodesWithText("Health summary", ignoreCase = true).fetchSemanticsNodes().isNotEmpty())
+        // Signed out there are no readings to load, so the card says it is loading or that nothing is logged for the 30 days.
+        assertTrue(composeTestRule.onAllNodesWithText("30 days", substring = true).fetchSemanticsNodes().isNotEmpty() ||
+            composeTestRule.onAllNodesWithText("Loading your readings", substring = true).fetchSemanticsNodes().isNotEmpty())
+        composeTestRule.onNodeWithText("Weekly").assertExists()
+    }
 }
