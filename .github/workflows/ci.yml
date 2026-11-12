@@ -119,6 +119,11 @@ jobs:
           AAB="$(ls app/build/outputs/bundle/release/*.aab | head -n1)"
           jarsigner -verify "$AAB" | tee /tmp/jarsigner.txt
           grep -q "jar verified" /tmp/jarsigner.txt
+      # The upload workflow (release-android.yml) also runs the release-only lint checks. Running them here on every push means a lint
+      # failure is found now, not on the day the owner builds the file to upload. A separate Gradle run keeps R8 and lint out of one JVM
+      # (they ran out of memory together before).
+      - name: Release lint (the same checks the Play upload build runs)
+        run: ./gradlew --no-daemon --max-workers=2 lintRelease -PVERSION_CODE=${{ github.run_number }} -PVERSION_NAME=0.0.${{ github.run_number }}-ci
           # It must be signed by the throwaway key, not left unsigned or debug-signed.
           jarsigner -verify -verbose -certs "$AAB" | grep -q "CN=CI throwaway"
       # Guard the merged manifest that actually ships: no debuggable flag,
